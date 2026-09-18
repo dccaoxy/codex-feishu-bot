@@ -1,0 +1,19 @@
+{
+  "feishu": {
+    "appId": "",
+    "appSecret": "",
+    "ownerOpenId": ""
+  },
+  "codex": {
+    "binary": "codex",
+    "cwd": "./workspace",
+    "model": "",
+    "effort": "",
+    "sandbox": "workspace-write",
+    "approvalPolicy": "on-request",
+    "allowExternalThreadRead": false
+  },
+  "storageDir": "./data",
+  "streamIntervalMs": 1000,
+  "maxAttachmentMB": 20
+}
