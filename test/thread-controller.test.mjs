@@ -184,3 +184,36 @@ test('completion during dispatch cannot finalize the old turn before the new tur
     const r=bot.runs.get('external');assert.equal(r.turn,'new');assert.equal(r.dispatching,false);assert.equal(r.ending,false);
   }finally{await bot.close();}
 });
+test('a new turn from the other client is observed after an idle attachment',async t=>{
+  const {config,store,rpc,controller}=setup(t);rpc.shared=true;await controller.attach('chat','external');
+  let release;const gate=new Promise(r=>release=r);const finished=[];
+  const bot=new Bot(config,store,rpc,{stream:async()=>{await gate;return 'card';},text:async()=>{},update:async()=>{},finish:async()=>finished.push(true)},()=>{});
+  try{
+    bot.notification({method:'turn/started',params:{threadId:'external',turn:{id:'desktop-turn'}}});
+    const run=bot.runs.get('external');assert.equal(run.turn,'desktop-turn');
+    bot.notification({method:'turn/completed',params:{threadId:'external',turn:{id:'desktop-turn',status:'completed'}}});
+    assert.equal(run.ending,false);release();await new Promise(r=>setImmediate(r));await run.finishPromise;
+    assert.equal(run.ending,true);assert.equal(finished.length,1);assert.equal(bot.runs.size,0);
+  }finally{release();await bot.close();}
+});
+test('shared desktop tool requests are not rejected by the Feishu observer',async t=>{
+  const {config,store,rpc}=setup(t);rpc.shared=true;
+  const bot=new Bot(config,store,rpc,{},()=>{});bot.runs.set('external',{external:true,chat:'chat'});
+  try{await bot.serverRequest({id:123,method:'item/tool/call',params:{threadId:'external',tool:'desktop_owned_tool',arguments:{}}});assert.equal(rpc.responses.length,0);}finally{await bot.close();}
+});
+test('approval resolved by another client invalidates the Feishu action',async t=>{
+  const {config,store,rpc}=setup(t);rpc.shared=true;const messages=[];
+  const bot=new Bot(config,store,rpc,{text:async(c,s)=>messages.push(s),interactive:async()=>{}},()=>{});bot.runs.set('external',{external:true,chat:'chat'});
+  try{
+    await bot.serverRequest({id:17,method:'item/commandExecution/requestApproval',params:{threadId:'external',turnId:'turn',command:'printf test'}});
+    const token=[...bot.prompts.keys()][0];assert.ok(token);
+    bot.notification({method:'serverRequest/resolved',params:{requestId:17}});
+    await assert.rejects(bot.action('chat',{token,decision:'accept'}),/失效/);assert.equal(rpc.responses.length,0);assert.equal(messages.length,1);
+  }finally{await bot.close();}
+});
+test('detaching a shared observer does not deny the other client approval',async t=>{
+  const {config,store,rpc,controller}=setup(t);rpc.shared=true;await controller.attach('chat','external');
+  const bot=new Bot(config,store,rpc,{text:async()=>{},interactive:async()=>{}},()=>{});
+  bot.runs.set('external',{external:true,chat:'chat',thread:'external',turn:'t',sequence:0,text:'',flush:Promise.resolve()});
+  try{await bot.serverRequest({id:18,method:'item/commandExecution/requestApproval',params:{threadId:'external',turnId:'t',command:'printf test'}});await bot.command('chat','/detach');assert.equal(bot.prompts.size,0);assert.equal(rpc.responses.length,0);}finally{await bot.close();}
+});

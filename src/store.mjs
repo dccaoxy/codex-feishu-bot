@@ -33,6 +33,7 @@ export class Store {
     } catch { return []; }
   }
   binding(chat) { return this.db.prepare('SELECT * FROM thread_bindings WHERE chat=?').get(chat); }
+  bindingForThread(thread) { return this.db.prepare('SELECT * FROM thread_bindings WHERE thread=?').get(thread); }
   bindThread(chat, state, source = 'external') {
     const old = this.binding(chat), current = this.chat(chat);
     const conflict = this.db.prepare('SELECT chat FROM thread_bindings WHERE thread=? AND chat<>?').get(state.id, chat);

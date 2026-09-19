@@ -394,7 +394,9 @@ Repository 审批使用 aegpc_repository_approval。用户已授权本 Codex 审
     const r = this.runs.get(id);
     if (!r?.external) return;
     r.ending = true; clearInterval(r.timer);
-    for (const [token,p] of this.prompts) if (p.thread === id) this.denyPrompt(token);
+    for (const [token,p] of this.prompts) if (p.thread === id) {
+      if (this.rpc.shared) this.clearPrompt(token); else this.denyPrompt(token);
+    }
     await r.flush.catch(() => {});
     if (r.card) await this.feishu.finish(r.card, ++r.sequence, '已解除观察').catch(() => {});
     r.state = 'detached'; this.store.saveRun(r); this.runs.delete(id);
@@ -406,11 +408,14 @@ Repository 审批使用 aegpc_repository_approval。用户已授权本 Codex 审
       if (dispatching) existing.dispatching = true;
       return existing;
     }
-    const r = {dispatching,thread:state.id,chat,turn:state.turn,external:true,card:null,sequence:0,state:'running',status:'正在观察外部会话',
+    const r = {dispatching,opening:true,thread:state.id,chat,turn:state.turn,external:true,card:null,sequence:0,state:'running',status:'正在观察外部会话',
       messages:new Map(),lastText:'',text:'',created:Date.now(),ending:false,flush:Promise.resolve()};
     this.runs.set(r.thread,r); this.store.saveRun(r);
     try { r.card = await this.feishu.stream(chat,state.title); }
     catch { /* text result delivery remains available */ }
+    r.opening = false;
+    if (r.pendingCompletion) this.endRun(r,r.pendingCompletion.status,r.pendingCompletion.error?.message);
+    if (r.ending) return r;
     r.timer = setInterval(() => {
       void this.flushRun(r);
       if (!r.polling) {
@@ -421,7 +426,7 @@ Repository 审批使用 aegpc_repository_approval。用户已授权本 Codex 审
     return r;
   }
   async refreshExternalRun(r) {
-    if (!r.turn || r.ending || r.dispatching) return;
+    if (!r.turn || r.ending || r.dispatching || r.opening) return;
     const page = await this.controller.turns(r.thread);
     if (r.ending || r.dispatching) return;
     const turn = page.data.find(t => t.id === r.turn);
@@ -444,11 +449,27 @@ Repository 审批使用 aegpc_repository_approval。用户已授权本 Codex 审
       throw e;
     }
   }
+  observeExternal(threadId, turnId) {
+    if (this.closed || !this.rpc.shared || this.controller.permission() !== 'work') return;
+    const b = this.store.bindingForThread(threadId);
+    if (!b || this.store.chat(b.chat).thread !== threadId) return;
+    const old = this.runs.get(threadId);
+    if (old?.ending) {
+      void old.finishPromise?.then(() => { if (this.store.binding(b.chat)?.thread === threadId) this.observeExternal(threadId,turnId); });
+      return;
+    }
+    if (!old) void this.watchExternal(b.chat,{id:threadId,title:b.title,turn:turnId}).catch(e => this.log(this.redact(e)));
+  }
   notification(m) {
-    const p = m.params || {}, r = this.runs.get(p.threadId);
+    const p = m.params || {};
+    if (m.method === 'turn/started') this.observeExternal(p.threadId,p.turn?.id);
+    const r = this.runs.get(p.threadId);
     if ((m.method === 'item/completed' && p.item?.type === 'contextCompaction') || m.method === 'thread/compacted' || m.method === 'error') this.compacting.delete(p.threadId);
     if (m.method === 'serverRequest/resolved') {
-      for (const [token, prompt] of this.prompts) if (prompt.id === p.requestId) this.clearPrompt(token);
+      for (const [token, prompt] of this.prompts) if (prompt.id === p.requestId) {
+        this.clearPrompt(token);
+        void this.feishu.text(prompt.chat,'该审批已由一个客户端处理，旧卡片已失效。').catch(() => {});
+      }
     }
     if (!r || r.ending || r.dispatching) return;
     const eventTurn = p.turnId || p.turn?.id;
@@ -467,7 +488,10 @@ Repository 审批使用 aegpc_repository_approval。用户已授权本 Codex 审
       if (labels[item.type]) r.status = labels[item.type];
     }
     if (m.method === 'turn/plan/updated') r.status = '计划：' + (p.plan || []).map(s => `${s.status === 'completed' ? '✓' : '·'} ${s.step}`).join('；');
-    if (m.method === 'turn/completed') this.endRun(r, p.turn.status, p.turn.error?.message);
+    if (m.method === 'turn/completed') {
+      if (r.opening) r.pendingCompletion = p.turn;
+      else this.endRun(r, p.turn.status, p.turn.error?.message);
+    }
   }
   body(r, final = false) {
     const messages = [...r.messages.values()];
@@ -541,6 +565,8 @@ Repository 审批使用 aegpc_repository_approval。用户已授权本 Codex 审
     if ((!run || run.ending) && this.rpc.shared) return;
     if (!run || run.ending) { this.rpc.reject(m.id, '没有对应的飞书任务'); return; }
     if (m.method === 'item/tool/call') {
+      // Shared desktop tools must be answered by their owner, not raced with an error.
+      if (run.external && this.rpc.shared && !['feishu_threads_search','feishu_thread_read','feishu_send_file','aegpc_repository_approval'].includes(p.tool) && !p.tool?.startsWith('feishu_doc_')) return;
       let result, success = true;
       try {
         const a = p.arguments || {};
@@ -660,7 +686,9 @@ Repository 审批使用 aegpc_repository_approval。用户已授权本 Codex 审
   async close() {
     this.closed = true;
     clearInterval(this.ownerTimer);
-    for (const token of [...this.prompts.keys()]) { try { this.denyPrompt(token); } catch {} }
+    for (const [token,p] of [...this.prompts]) {
+      try { if (this.rpc.shared && this.runs.get(p.thread)?.external) this.clearPrompt(token); else this.denyPrompt(token); } catch {}
+    }
     for (const r of this.runs.values()) clearInterval(r.timer);
   }
 }

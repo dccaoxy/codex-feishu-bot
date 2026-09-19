@@ -131,7 +131,7 @@ Read 模式下，外部会话仅作**读取与引用**。显式开启 Work 后�
 1. `/threads 关键词` 找到目标，`/attach 编号` 进入。目标须在共享服务器中已加载且明确可接收输入；`notLoaded`、状态未知、不可读取/恢复或缺少活动回合 ID 都明确失败。可先在原入口打开目标。
 2. 空闲时普通消息发起该 Thread 的新回合；活动时使用带 `expectedTurnId` 的 steer。每次操作重新读取状态，并串行处理本机器人对同一目标的操作。共享服务器在竞争发生时将 turn/start 合并到活动回合，而不是创建第二个冲突回合；此行为已用双客户端验证。
 3. `/stop` 只停止该 Thread 当时确认的活动回合，不撤销文件修改。`/fork` 创建并绑定独立分支；活动时从进行中回合之前分支，保留已完成历史，原回合继续。分支仍属于 Work 来源，不会借分支获得管理权限。
-4. `/detach` 解除飞书侧绑定并返回之前的机器人会话，不发送 turn/interrupt。飞书侧尚未提交的审批会关闭；后续审批在原入口处理。绑定及最近已知状态保存在本机 SQLite，状态缓存不作为写操作依据。
+4. `/detach` 解除飞书侧绑定并返回之前的机器人会话，不发送 turn/interrupt。飞书侧尚未提交的审批入口会失效，但共享模式不替另一端拒绝审批；后续在原入口处理。绑定及最近已知状态保存在本机 SQLite，状态缓存不作为写操作依据。
 5. 服务重启后保留绑定，清空状态缓存，不自动 resume 或重放状态不确定及排队的外部消息。用户用 `/thread` 重新查看状态，再明确发送新要求。
 
 Attach 使用真实 `thread/resume`，不拼接历史创建替代 Thread，不覆盖原工作目录、模型、指令、沙盒或审批策略。外部会话继续使用原工具集合，不强行注入飞书动态工具；只有已有且本桥接能处理的工具会正常工作。审批仍取决于原会话策略及服务端路由，进入会话不会自动批准。
@@ -141,6 +141,34 @@ Attach 使用真实 `thread/resume`，不拼接历史创建替代 Thread，不�
 ### 验证
 
 `npm run work:check` 启动独立的本机共享服务器，以两个客户端和专门测试 Thread 验证 resume/start/steer/interrupt/fork、竞争和绑定恢复。它会调用模型，结束后仅归档自己创建的测试 Thread，不向飞书发消息。`npm run work:check -- --unix` 验证 Unix socket 连接。常规 `check`、`test`、`doctor`、`smoke` 仍需通过。
+
+## Desktop + 飞书联调（Phase 2，实验入口）
+
+本机 Desktop 26.915.31945 的代码包含 `CODEX_APP_SERVER_WS_URL` 入口，但它不是已确认的公开稳定配置。已有 stdio Desktop 不会热切换；需要先完成活动任务，退出后按指定环境重新启动。不要同时让两个独立服务器操作同一个活动 Thread。
+
+在已授权的 Mac 上运行 `node scripts/desktop-shared.mjs setup`：使用 Desktop bundled Codex 在 `ws://127.0.0.1:4517` 启动独立 launchd 服务，备份本地配置至被 Git 忽略的 `data/shared-lab/`，将既有机器人切到 Work 并重启。已有配置备份不会被覆盖；不复制 Codex 登录凭据或历史。该服务器使用现有 Codex home，因此可读取本机历史。此脚本安装服务、修改本地配置，只在明确授权部署联调时运行。
+
+- `node scripts/desktop-shared.mjs status`：检查共享连接、登录及机器人地址。
+- 完全退出 Desktop 后运行 `node scripts/desktop-shared.mjs launch-desktop`：仅给该次进程设置共享地址，不修改全局环境变量。Desktop 尚在运行时拒绝重复启动。
+- `node scripts/desktop-shared.mjs rollback`：恢复备份的机器人配置并重启；保留共享服务器，以免中断尚在使用它的 Desktop。
+- 退出共享 Desktop、完成 rollback 后，`node scripts/desktop-shared.mjs stop-server` 才停止共享服务。以后从普通应用图标启动 Desktop 恢复默认入口。
+
+### 验证范围
+
+`node scripts/shared-client-check.mjs` 使用真实共享 Codex 与真实 Bot 代码，另一端为协议客户端、飞书界面为模拟：验证同一 Thread 双向结果、活动回合 steer/interrupt、双端审批先到生效、旧批准失效及迟到拒绝不会重复执行。审批测试只批准明确指定的 `/usr/bin/printf SHARED_APPROVAL_PROBE`，不授予会话级权限。
+
+`node scripts/feishu-work-check.mjs --send` 会实际调用模型，并向已绑定用户最近的单聊发送两张测试结果卡片。输入来自本地脚本，未模拟用户飞书身份，不能替代入站消息或按钮回调测试；不会建立第二条飞书长连接。两种脚本仅归档自己创建的测试 Thread。
+
+已订阅客户端会同时收到审批；服务器接受先处理的决定并通知两端解决。机器人因此撤销已解决请求的本地 token，旧卡片点击显示失效；卡片视觉上可能仍保留按钮。解绑/关闭共享观察端只释放其待办，不主动拒绝另一端审批。保留绑定时的 10 分钟审批超时仍按原规则拒绝。机器人不抢答不认识的桌面动态工具。
+
+### 人工最小验收
+
+1. 完成活动任务后退出 Desktop（⌘Q），用共享启动脚本打开。新建一个测试任务，命名为“共享联调”，发“只回复 DESKTOP_READY”，等完成。
+2. 飞书发送 `/threads 共享联调`，核对标题后 `/attach 对应编号`，再发“只回复 FEISHU_READY”；确认 Desktop 原任务出现同一回答。再从 Desktop 发“只回复 DESKTOP_AGAIN”，确认飞书收到。
+3. 在 Desktop 要求逐行输出 1 到 100000、不使用工具；运行时在飞书追加“每行后增加点号”，随后 `/stop`。确认 Desktop 停止，`/thread` 仍指向同一 Thread；不是新开第二个任务。
+4. 审批测试在该测试任务内要求：“仅执行 /usr/bin/printf SHARED_APPROVAL_PROBE，使用 require_escalated 显式请求一次审批，不修改文件、不重试”。若原策略允许人工审批，应在两端出现同一请求。第一次在 Desktop 拒绝，再点飞书旧卡片应失效；第二次重新发起，在飞书批准，Desktop 应解除等待且只执行一次。若未出现人工审批或被自动审核拦截，记录原策略/错误，不能作为通过，也不要为了测试绕过原策略。
+
+上述步骤尚须用户实际完成。Desktop 专属工具、其审批 UI 和运行时覆盖配置均需在共享模式复核；共享连接握手本身不保证它们完整可用。
 
 ## 本地配置
 
