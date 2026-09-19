@@ -134,13 +134,17 @@ test('history read is read-only, scoped, paginated, excludes reasoning', async t
 
 test('external read opt-in searches and reads without allowing external control', async t => {
   const {bot,rpc,feishu,config} = setup(t);
+  bot.store.addThread('own', '机器人任务');
   config.codex.allowExternalThreadRead = true;
   bot.history = new History(rpc, bot.store, true);
   const request = rpc.request.bind(rpc);
   rpc.request = async (method, params) => {
     if (method === 'thread/list') {
       rpc.calls.push({method, params});
-      return {data:[{id:'external',name:'外部任务',cwd:'/other/project',status:{type:'idle'}}],nextCursor:null};
+      return {data:[
+        {id:'external',name:'外部任务',cwd:'/other/project',status:{type:'idle'}},
+        {id:'own',name:'机器人任务',cwd:config.codex.cwd,status:{type:'idle'}},
+      ],nextCursor:null};
     }
     return request(method, params);
   };
@@ -148,7 +152,9 @@ test('external read opt-in searches and reads without allowing external control'
   await bot.command('chat', '/threads 外部');
   assert.equal(rpc.calls.at(-1).method, 'thread/list');
   assert.equal(rpc.calls.at(-1).params.searchTerm, '外部');
-  assert.match(feishu.messages.at(-1).text, /external/);
+  assert.match(feishu.messages.at(-1).text, /外部任务（外部会话 · 只读）\nexternal/);
+  assert.match(feishu.messages.at(-1).text, /机器人任务（机器人会话）\nown/);
+  assert.match(feishu.messages.at(-1).text, /只有机器人会话可用 \/use/);
 
   await bot.command('chat', '/read 1');
   assert.match(feishu.messages.at(-1).text, /旧结论/);
