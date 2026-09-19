@@ -40,7 +40,7 @@ export class Bot {
     this.pairCode = randomBytes(6).toString('hex');
     this.pairExpires = Date.now() + 15 * 60 * 1000;
     this.runs = new Map(); this.prompts = new Map(); this.draining = new Set();
-    this.loaded = new Set(); this.selections = new Map(); this.compacting = new Set(); this.closed = false;
+    this.loaded = new Set(); this.compacting = new Set(); this.closed = false;
     rpc.on('notification', m => this.notification(m));
     rpc.on('request', m => this.serverRequest(m).catch(e => {
       this.log(`处理 Codex 请求失败：${this.redact(e)}`);
@@ -182,9 +182,9 @@ export class Bot {
     await this.run(chat, inputs, m.message_id);
   }
   resolve(chat, value) {
-    const selected = this.selections.get(chat);
-    if (/^\d+$/.test(value || '') && selected) {
-      const item = selected[Number(value)-1]; if (item) return item.id;
+    if (/^\d+$/.test(value || '')) {
+      const id = this.store.threadSelection(chat)[Number(value)-1];
+      if (id) return id;
       throw new Error('会话编号无效，请重新 /threads。');
     }
     return value || this.store.chat(chat).thread;
@@ -213,7 +213,7 @@ export class Bot {
     }
     if (command === '/threads') {
       const r = await this.history.search(arg);
-      this.selections.set(chat, r.threads);
+      this.store.saveThreadSelection(chat, r.threads);
       return this.feishu.text(chat, r.threads.length ? r.threads.map((t,i) => `${i+1}. ${t.title}（${this.store.ownThread(t.id) ? '机器人会话' : '外部会话 · 只读'}）\n${t.id}`).join('\n\n') + '\n\n/read 编号 查看；/reference 编号 问题 引用。只有机器人会话可用 /use 编号 切换；可加关键词筛选。' : '未找到会话。发送 /new 或直接开始聊天。');
     }
     if (command === '/read' || command === '/reference') {

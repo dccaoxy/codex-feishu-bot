@@ -132,6 +132,27 @@ test('history read is read-only, scoped, paginated, excludes reasoning', async t
   assert.ok(!rpc.calls.some(c=>c.method==='thread/resume'||c.method==='turn/start'));
 });
 
+test('numbered thread selection survives restart and never sends a bare number to Codex', async t => {
+  const {bot,store,rpc,config,dir} = setup(t);
+  await assert.rejects(bot.command('chat', '/read 1'), /请重新 \/threads/);
+  assert.equal(rpc.calls.length, 0);
+
+  store.addThread('t1', '设计方案');
+  await bot.command('chat', '/threads');
+  const reopened = new Store(dir);
+  const resumedRpc = new FakeRpc();
+  const resumed = new Bot(config, reopened, resumedRpc, new FakeFeishu(), () => {});
+  try {
+    assert.equal(resumed.resolve('chat', '1'), 't1');
+    await resumed.command('chat', '/read 1');
+    assert.equal(resumedRpc.calls.at(-1).params.threadId, 't1');
+    await assert.rejects(resumed.command('chat', '/read 2'), /请重新 \/threads/);
+    reopened.set('threadSelection:other-chat', '[1]');
+    await assert.rejects(resumed.command('other-chat', '/read 1'), /请重新 \/threads/);
+    assert.equal(resumed.resolve('chat', 't1'), 't1');
+  } finally { await resumed.close(); reopened.close(); }
+});
+
 test('external read opt-in searches and reads without allowing external control', async t => {
   const {bot,rpc,feishu,config} = setup(t);
   bot.store.addThread('own', '机器人任务');
