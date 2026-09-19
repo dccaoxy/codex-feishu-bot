@@ -163,7 +163,7 @@ test('external read opt-in searches and reads without allowing external control'
     if (method === 'thread/list') {
       rpc.calls.push({method, params});
       return {data:[
-        {id:'external',name:'外部任务',cwd:'/other/project',status:{type:'idle'}},
+        {id:'external',name:'外部任务',cwd:'/other/project',status:{type:'idle'},updatedAt:0},
         {id:'own',name:'机器人任务',cwd:config.codex.cwd,status:{type:'idle'}},
       ],nextCursor:null};
     }
@@ -173,6 +173,8 @@ test('external read opt-in searches and reads without allowing external control'
   await bot.command('chat', '/threads 外部');
   assert.equal(rpc.calls.at(-1).method, 'thread/list');
   assert.equal(rpc.calls.at(-1).params.searchTerm, '外部');
+  assert.equal(rpc.calls.at(-1).params.sortKey, 'updated_at');
+  assert.match(feishu.messages.at(-1).text, /1970-01-01 08:00:00（北京时间）/);
   assert.match(feishu.messages.at(-1).text, /外部任务（外部会话 · 只读）\nexternal/);
   assert.match(feishu.messages.at(-1).text, /机器人任务（机器人会话）\nown/);
   assert.match(feishu.messages.at(-1).text, /只有机器人会话可用 \/use/);
@@ -194,6 +196,9 @@ test('external read opt-in searches and reads without allowing external control'
   await bot.serverRequest({id:90,method:'item/tool/call',params:{threadId:'t1',tool:'feishu_threads_search',arguments:{query:'外部'}}});
   assert.equal(rpc.responses.at(-1).result.success, true);
   assert.match(rpc.responses.at(-1).result.contentItems[0].text, /external/);
+  const listed = JSON.parse(rpc.responses.at(-1).result.contentItems[0].text);
+  assert.equal(listed.threads[0].updatedAtIso, '1970-01-01T00:00:00.000Z');
+  assert.equal(listed.threads[1].updatedAtIso, null);
   await bot.serverRequest({id:91,method:'item/tool/call',params:{threadId:'t1',tool:'feishu_thread_read',arguments:{threadId:'external'}}});
   assert.equal(rpc.responses.at(-1).result.success, true);
   assert.match(rpc.responses.at(-1).result.contentItems[0].text, /旧结论/);

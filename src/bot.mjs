@@ -214,7 +214,7 @@ export class Bot {
     if (command === '/threads') {
       const r = await this.history.search(arg);
       this.store.saveThreadSelection(chat, r.threads);
-      return this.feishu.text(chat, r.threads.length ? r.threads.map((t,i) => `${i+1}. ${t.title}（${this.store.ownThread(t.id) ? '机器人会话' : '外部会话 · 只读'}）\n${t.id}`).join('\n\n') + '\n\n/read 编号 查看；/reference 编号 问题 引用。只有机器人会话可用 /use 编号 切换；可加关键词筛选。' : '未找到会话。发送 /new 或直接开始聊天。');
+      return this.feishu.text(chat, r.threads.length ? r.threads.map((t,i) => `${i+1}. ${t.title}（${this.store.ownThread(t.id) ? '机器人会话' : '外部会话 · 只读'}）\n${t.id}\n最后更新：${t.updatedAtLocal || '未提供'}`).join('\n\n') + '\n\n/read 编号 查看；/reference 编号 问题 引用。只有机器人会话可用 /use 编号 切换；可加关键词筛选。' : '未找到会话。发送 /new 或直接开始聊天。');
     }
     if (command === '/read' || command === '/reference') {
       const id = this.resolve(chat, args[0]);
