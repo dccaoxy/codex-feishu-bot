@@ -1,6 +1,6 @@
 # 飞书本地 Codex 机器人
 
-飞书负责消息与卡片交互，本地 Node.js 服务直接通过 stdio / JSON-RPC 调用 `codex app-server`。不依赖 Codex SDK，不需要公网服务器、域名或内网穿透。
+飞书负责消息与卡片交互，本地 Node.js 服务通过 JSON-RPC 调用 `codex app-server`：默认使用 stdio，Work / Attach 使用同机共享 App Server 的 WebSocket 或 Unix socket。不依赖 Codex SDK，不需要公网服务器、域名或内网穿透。
 
 ## 在另一台 Mac 上复刻
 
@@ -61,6 +61,9 @@ codex login
 | 新建会话 | `/new 网站改版` |
 | 列出会话 / 按标题查找 | `/threads` / `/threads 网站` |
 | 切换机器人会话 | `/use 1` 或 `/use 完整ID` |
+| 进入外部会话（Work） | `/attach 1` 或 `/attach 完整ID` |
+| 查看绑定及实时状态 | `/thread` |
+| 解除绑定并返回原会话 | `/detach` |
 | 查看最近历史 | `/read 1` |
 | 引用另一个会话并提问 | `/reference 1 按照这个方案写开发计划` |
 | 从机器人会话创建独立分支 | `/fork` 或 `/fork 1` |
@@ -100,9 +103,44 @@ codex login
 
 开启外部读取后，列表按 Codex 会话更新时间从新到旧返回，显示北京时间，并向模型提供 UTC 时间。这里的“最后更新”不保证等于最后一条聊天消息的时间；未开启外部读取时，本地登记列表不提供这一时间。
 
-外部会话仅作**读取与引用**，第一版不接管、续写或分支外部桌面任务。跨会话搜索按标题进行，并非全部正文的语义检索。默认不搜索归档。机器人会话可以正常切换、恢复和分支。
+Read 模式下，外部会话仅作**读取与引用**。显式开启 Work 后可按下节进入同一共享 App Server 上的外部会话。跨会话搜索按标题进行，并非全部正文的语义检索。默认不搜索归档。机器人会话可以正常切换、恢复和分支。
 
 无法保证访问另一设备、云端或所有新版会话存储格式；读取失败会明确报错，不会将“无法读取”解释成“没有历史”。历史会话不等于当前指令，工具结果只作为参考资料。
+
+## Phase 2：Work / Attach
+
+本阶段实现原 Thread 的继续工作，不提供 Full 管理。Work 允许 `/attach`、普通消息继续/追加、`/stop` 和 `/fork`；外部绑定期间 `/compact`、模型修改和管理操作不可用。`/detach` 后可继续使用原机器人会话。
+
+### 配置与共享运行时
+
+在本机 `config.local.json` 的 `codex` 中设置以下字段，保留其他配置：
+
+```json
+"externalThreadPermission": "work",
+"appServerUrl": "ws://127.0.0.1:4500"
+```
+
+也可以省略/清空 `appServerUrl`，改用 `"appServerSocket": "/实际路径/app-server.sock"`。这是**目标 Thread 所在的同一个运行中 App Server** 的地址，不是另起一个能读取相同历史文件的服务器。地址从该实例的实际启动配置取得；机器人不会扫描、猜测或自动更换桌面实例。仅修改权限而不配置共享地址会明确报错。
+
+可为集成环境启动 `codex app-server --listen ws://127.0.0.1:4500`，然后让工作客户端与机器人均连接它。桌面端是否能使用这个地址取决于桌面端的实际运行方式；本项目不自动迁移桌面正在执行的会话。Unix socket 连接的是 Codex 的 WebSocket 控制接口。
+
+默认示例继续保留 `allowExternalThreadRead: false`，不扩大新安装权限。旧 true/false 配置仍有效；新字段 read/work 优先。回到旧的完全关闭状态时，移除新字段并设置旧字段为 false。`full` 会被配置校验拒绝，Phase 3 未实现。
+
+### 操作行为
+
+1. `/threads 关键词` 找到目标，`/attach 编号` 进入。目标须在共享服务器中已加载且明确可接收输入；`notLoaded`、状态未知、不可读取/恢复或缺少活动回合 ID 都明确失败。可先在原入口打开目标。
+2. 空闲时普通消息发起该 Thread 的新回合；活动时使用带 `expectedTurnId` 的 steer。每次操作重新读取状态，并串行处理本机器人对同一目标的操作。共享服务器在竞争发生时将 turn/start 合并到活动回合，而不是创建第二个冲突回合；此行为已用双客户端验证。
+3. `/stop` 只停止该 Thread 当时确认的活动回合，不撤销文件修改。`/fork` 创建并绑定独立分支；活动时从进行中回合之前分支，保留已完成历史，原回合继续。分支仍属于 Work 来源，不会借分支获得管理权限。
+4. `/detach` 解除飞书侧绑定并返回之前的机器人会话，不发送 turn/interrupt。飞书侧尚未提交的审批会关闭；后续审批在原入口处理。绑定及最近已知状态保存在本机 SQLite，状态缓存不作为写操作依据。
+5. 服务重启后保留绑定，清空状态缓存，不自动 resume 或重放状态不确定及排队的外部消息。用户用 `/thread` 重新查看状态，再明确发送新要求。
+
+Attach 使用真实 `thread/resume`，不拼接历史创建替代 Thread，不覆盖原工作目录、模型、指令、沙盒或审批策略。外部会话继续使用原工具集合，不强行注入飞书动态工具；只有已有且本桥接能处理的工具会正常工作。审批仍取决于原会话策略及服务端路由，进入会话不会自动批准。
+
+飞书附件仍放在机器人配置的工作目录；`/send` 仍只允许该目录内文件。Work 不扩大文件发送边界。`/thread` 展示外部任务的实际工作目录，两者可能不同。
+
+### 验证
+
+`npm run work:check` 启动独立的本机共享服务器，以两个客户端和专门测试 Thread 验证 resume/start/steer/interrupt/fork、竞争和绑定恢复。它会调用模型，结束后仅归档自己创建的测试 Thread，不向飞书发消息。`npm run work:check -- --unix` 验证 Unix socket 连接。常规 `check`、`test`、`doctor`、`smoke` 仍需通过。
 
 ## 本地配置
 
@@ -114,7 +152,10 @@ codex login
 | `codex.effort` | 留空使用默认强度；填值需被所选模型支持 |
 | `codex.sandbox` | `workspace-write` 或 `read-only` |
 | `codex.approvalPolicy` | `on-request` 或 `untrusted`，审批交给用户 |
-| `codex.allowExternalThreadRead` | 默认 false，是否允许读取其他本地会话 |
+| `codex.allowExternalThreadRead` | 兼容旧配置：默认 false；true 相当于 read |
+| `codex.externalThreadPermission` | 可选 read / work；设置后优先于旧字段。full 在 Phase 2 中拒绝 |
+| `codex.appServerUrl` | 可选本机 `ws://127.0.0.1:端口`（也支持 `[::1]`），连接已运行的共享服务器 |
+| `codex.appServerSocket` | 可选已运行共享服务器的 Unix socket 绝对路径；与 appServerUrl 二选一 |
 | `storageDir` | 默认 `./data`，保存账号绑定、消息收件箱和会话映射 |
 | `streamIntervalMs` | 默认 1000，最小 500；飞书出站请求另外串行限速 |
 | `maxAttachmentMB` | 默认 20，范围 1–30 MB；限制收到的每个附件 |
@@ -137,7 +178,7 @@ npm run doctor
 npm start
 ```
 
-当前开发验证版本：Codex CLI `0.155.0-alpha.2.6`、飞书 SDK `1.74.0`、Node.js `24.21.0`。使用本机协议的连字符枚举值（如 `workspace-write`），不将网页示例中的其他版本写法直接套用。
+当前开发验证版本：Codex CLI `0.155.0-alpha.9.2`、飞书 SDK `1.74.0`、Node.js `24.21.0`。使用本机协议的连字符枚举值（如 `workspace-write`），不将网页示例中的其他版本写法直接套用。
 
 ```sh
 npm run check       # 语法检查
@@ -197,7 +238,7 @@ SQLite 保存在 `data/state.sqlite`。请保留 `data` 以保留绑定和会话
 
 应用需开通官方接口对应的文档创建/编辑/读取和协作者管理权限。可先用 `feishu_doc_permissions` 检查应用对目标文档的权限。参考 [创建文档](https://open.feishu.cn/document/server-docs/docs/docs/docx-v1/document/create) 和 [增加协作者权限](https://open.feishu.cn/document/server-docs/docs/permission/permission-member/create)。
 
-旧工具会被 Codex 持久化在旧会话中。当前版本首次继续旧会话时会创建带新工具的会话，带入近期历史并保留旧会话 ID，可继续分页查询更早历史；不会声称完整模型上下文已原样迁移。新会话及其分支正常延续。
+旧工具会被 Codex 持久化在旧会话中。当前版本首次继续机器人创建的旧会话时会创建带新工具的会话，带入近期历史并保留旧会话 ID，可继续分页查询更早历史；不会声称完整模型上下文已原样迁移。新会话及其分支正常延续。
 
 普通审批使用允许/拒绝卡片；标准及兼容 JSON Schema 的扩展表单支持命名选项、多选和对象。数组、对象使用 `/answer 请求码 字段名 JSON` 回答，所有必填项完成后点击提交，服务端校验通过才回复批准。默认值不自动提交。含密码/密钥、未知 schema 扩展或原生身份验证的请求会明确提示。网页授权有“打开授权页面”和“已完成网页授权”按钮，点击后仍由授权服务判断登录是否成功，不等于凭空取得权限。
 

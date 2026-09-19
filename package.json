@@ -12,6 +12,7 @@
     "test": "node --test test/*.test.mjs",
     "check": "node scripts/check.mjs",
     "smoke": "node scripts/smoke.mjs",
+    "work:check": "node scripts/work-check.mjs",
     "service:install": "node scripts/service.mjs install",
     "service:status": "node scripts/service.mjs status",
     "service:restart": "node scripts/service.mjs restart",
@@ -20,6 +21,7 @@
   "dependencies": {
     "@larksuiteoapi/node-sdk": "1.74.0",
     "ajv": "^8.20.0",
-    "ajv-formats": "^3.0.1"
+    "ajv-formats": "^3.0.1",
+    "ws": "8.21.3"
   }
 }

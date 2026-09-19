@@ -1,7 +1,7 @@
 # 飞书本地 Codex 机器人 — 项目状态
 
 ## 项目目标
-让用户在飞书中与本机 Codex 交互，由本地 Node.js 服务通过 stdio / JSON-RPC 调用 codex app-server，并通过飞书长连接收发消息、卡片和附件。
+让用户在飞书中与本机 Codex 交互，由本地 Node.js 服务通过 stdio / JSON-RPC（Work 可选本机共享 WebSocket / Unix socket）调用 codex app-server，并通过飞书长连接收发消息、卡片和附件。
 
 ## 当前状态
 根据 README：
@@ -14,7 +14,7 @@
 ## 已完成
 - README 已覆盖安装、飞书权限、运行、诊断、恢复和边界。
 - 已建立 AGENTS.md 与 PROJECT.md 作为长期 Agent 接续入口。
-- Issue #2 的外部 Thread 只读访问已在当前 Mac 的本地配置中启用；仓库示例配置仍默认为关闭。机器人已重启，代码仍禁止切换或分支外部 Thread。
+- Issue #2 的外部 Thread 只读访问已在当前 Mac 的本地配置中启用；仓库示例配置仍默认为关闭。该阶段已部署；当前生产配置仍为 Read。Phase 2 分支增加显式 Work，未部署启用。
 
 ## 关键决定
 - 飞书只是交互界面，Codex 仍在本机执行。
@@ -30,7 +30,7 @@
 
 ## 下一步
 1. 自然语言自主读取工具仍待单独实测；用户已确认更新时间展示成功，命令方式的搜索、读取、引用和自然语言列表已验证。
-2. 按 Issue #3 的阶段顺序，先设计 Work/Attach 的并发与控制边界，再考虑 Full 权限；不得把外部会话只读开关当作控制授权。
+2. 审阅 Issue #3 Phase 2 PR；共享运行时配置和真实飞书端验收待后续安排。Full 不在本次任务范围，不自动进入开发。
 3. 每次功能扩展同步更新 README 与本文件，记录真实环境的验证时间和边界。
 
 ## 最近交接：Issue #2（2026-09-19，当前 Mac）
@@ -48,4 +48,16 @@
 - 用户自然语言查询返回 15 项会话，但模型报告时间未提供。根因是桥接层遗漏了 Codex 原始 `updatedAt` 字段。
 - 已补充原始秒级时间戳、UTC ISO 时间和北京时间；外部列表按 `updated_at` 排序，命令列表显示“最后更新”。此字段不冒充精确的最后消息时间。
 - 真实 app-server 验证 15 项均有时间且按更新时间降序；check、30 项测试、doctor、smoke 通过。用户随后确认飞书端时间展示成功。
-- 本次修改已随 PR #4 提交和推送，本机服务已部署。PR #4 尚未合并，Issue #2 尚未关闭；实现与主要验收已完成，剩余单独实测项如上。
+- 本次修改已随 PR #4 提交和推送，本机服务已部署。PR #4 已合并至 main（2c372bd）；Issue #2 状态以 GitHub 为准；实现与主要验收已完成，剩余单独实测项如上。
+
+## 最近交接：Issue #3 Phase 2 — Work / Attach（2026-09-19）
+
+- **Task Source**：用户本轮指令及 [Issue #3](https://github.com/dccaoxy/codex-feishu-bot/issues/3) 完整需求；只执行 Phase 2，不进入 Full。从已合并 PR #4 的 main 创建 `codex/issue-3-work-attach`。
+- **已实现**：`externalThreadPermission: read/work` 与旧布尔开关兼容；Full 显式拒绝。ThreadController 统一实际 resume、状态复核、start/steer/interrupt/fork；新增 `/attach ID或编号`、`/detach`、`/thread`。绑定保存来源、原机器人会话、最近状态和活动回合，重启不自动重放外部输入。
+- **控制边界**：外部绑定不迁移/拼接历史，不覆盖原会话 cwd、模型、指令、审批或沙盒；Work 不提供 compact、模型修改及管理权限。外部分支仍为 Work 来源。附件发送仍受机器人原工作目录约束。
+- **共享运行时决定**：不同 stdio 实例不能可靠判断另一实例活动状态。Work 因此必须显式连接目标所在本机共享 WebSocket 或 Unix socket App Server；仅接受已加载、状态可靠且允许直接输入的目标。缺失能力、未知状态和不可恢复均拒绝写入；不假定桌面实例能自动接管。Unix 控制接口实际为 WebSocket，禁用扩展协商以兼容当前服务器。
+- **并发与恢复**：按 Thread 串行处理本桥接操作，每次写前重新读取服务器状态；活动回合精确 steer/interrupt。真实双客户端验证竞争 turn/start 返回同一活动回合。连接丢失清空状态缓存；恢复保留绑定但取消自动重放不确定/排队的外部消息。卡片建立期间延迟处理完成事件，避免旧回合完成导致新回合观察提前关闭。
+- **已测试**：check、47 项自动测试、doctor、smoke 通过（doctor 仅检查本地飞书配置填写，无飞书联网验证）。测试覆盖旧配置、Read/Work 隔离、状态未知、恢复失败、活动回合、并发、绑定持久化/恢复、分支和管理拒绝。
+- **真实 Codex 已验证**：当前 Mac、Node 24.21.0、Codex 0.155.0-alpha.9.2；独立共享服务器双客户端通过 `work:check` 和 `work:check -- --unix` 验证原 ID resume、空闲 start、活动 steer、竞争同回合、fork、interrupt 与绑定恢复。实际调用测试模型，仅归档本次测试创建的会话，不修改用户既有会话。
+- **未验证/未部署**：本轮未发送真实飞书消息，Work 的租户卡片交互和具体桌面运行时连接仍待实测；未安装/重启生产服务，未修改 config.local.json 或提升生产权限。原外部会话没有飞书动态工具时不会注入工具；审批仍依赖原策略及服务端路由。协议适配以上述实测版本为基准。
+- **提交/PR 交接**：本节与代码在 `codex/issue-3-work-attach` 一同提交，推送并创建关联 Issue #3 的 Phase 2 PR；具体提交和 PR 地址以 GitHub 关联记录与下方补充为准。Issue #3 保持开放，Phase 3 未执行；PR 不自动合并。

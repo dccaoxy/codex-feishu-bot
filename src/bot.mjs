@@ -1,3 +1,5 @@
+import { ThreadController } from './thread-controller.mjs';
+import { externalPermission } from './config.mjs';
 import { Documents } from './documents.mjs';
 import { RepositoryApproval, REPOSITORY_TOOLS } from './repository.mjs';
 import fs from 'node:fs';
@@ -13,6 +15,9 @@ export const HELP = `飞书 · 本地 Codex
 /new [标题] — 新建会话
 /threads [关键词] — 列出或查找会话
 /use <会话ID或编号> — 切换机器人会话
+/attach <会话ID或编号> — 进入外部会话（Work）
+/detach — 解除外部绑定，返回原机器人会话
+/thread — 查看绑定与实时状态
 /read <会话ID或编号> — 查看历史
 /reference <会话ID或编号> [问题] — 引用历史到当前会话
 /fork [会话ID或编号] — 从会话创建分支
@@ -33,7 +38,8 @@ export class Bot {
   constructor(config, store, rpc, feishu, log = console.log) {
     this.config = config; this.store = store; this.rpc = rpc; this.feishu = feishu; this.log = log;
     this.documents = new Documents(feishu, () => this.owner);
-    this.history = new History(rpc, store, config.codex.allowExternalThreadRead);
+    this.history = new History(rpc, store, externalPermission(config) !== 'off');
+    this.controller = new ThreadController(config, store, rpc);
     this.owner = config.feishu.ownerOpenId || store.get('owner') || '';
     this.repositoryApproval = new RepositoryApproval(config, () => this.owner);
     this.toolVersion = config.repositoryApproval ? 'repository-v1' : 'docs-v1';
@@ -48,7 +54,7 @@ export class Bot {
     }));
     rpc.on('disconnected', () => {
       if (this.closed) return;
-      this.available = false; this.compacting.clear();
+      this.available = false; this.compacting.clear(); this.controller.disconnected();
       for (const run of this.runs.values()) this.endRun(run, 'failed', 'Codex 连接断开，请重启机器人后继续。');
     });
     this.available = true;
@@ -59,6 +65,7 @@ export class Bot {
     return text;
   }
   async recover() {
+    this.controller.disconnected();
     for (const r of this.store.unfinished()) {
       if (r.card) {
         try { await this.feishu.finish(r.card, r.sequence + 1, '服务重启，任务中断'); } catch {}
@@ -70,7 +77,12 @@ export class Bot {
       this.store.mark(row.id, 'uncertain');
       await this.feishu.text(row.chat, '重启前有一条消息处于处理中，未自动重放以免重复操作。请检查会话后按需重发。').catch(() => {});
     }
-    for (const row of this.store.pending()) this.schedule(row.chat);
+    const skippedExternal = new Set();
+    for (const row of this.store.pending()) {
+      if (this.store.binding(row.chat)) { this.store.mark(row.id, 'uncertain'); skippedExternal.add(row.chat); }
+      else this.schedule(row.chat);
+    }
+    for (const chat of skippedExternal) await this.feishu.text(chat, '外部绑定已保留；重启前排队消息未自动执行。请先 /thread 查看状态，再按需重发。').catch(() => {});
   }
   onMessage(data) {
     if (this.closed) return;
@@ -200,11 +212,45 @@ export class Bot {
     const arg = args.join(' ');
     if (command === '/help' || command === '/start') return this.feishu.text(chat, HELP);
     if (command === '/pair') return this.feishu.text(chat, '此机器人已配对。');
+    if (command === '/detach') {
+      await this.unwatchExternal(chat); this.controller.detach(chat);
+      return this.feishu.text(chat, '已解除外部绑定，返回原机器人会话；未发送停止请求，后续审批请在原入口处理。');
+    }
+    if (command === '/thread' || (command === '/status' && this.store.binding(chat))) {
+      this.requireAvailable();
+      const b = this.store.binding(chat);
+      if (!b) return this.feishu.text(chat, `当前机器人会话：${this.store.chat(chat).thread || '尚未创建'}`);
+      const state = await this.controller.status(chat);
+      return this.feishu.text(chat, `已绑定：${state.title}\n${state.id}\n来源：${b.source}\n权限：${this.controller.permission()}\n状态：${state.status}\n执行回合：${state.turn || '无'}\n工作目录：${state.cwd}`);
+    }
     if (command === '/status') {
       const c = this.store.chat(chat), r = this.runs.get(c.thread);
       return this.feishu.text(chat, `会话：${c.thread || '尚未创建'}\n模型：${c.model || this.config.codex.model || 'Codex 默认'}\n思考强度：${c.effort || this.config.codex.effort || '默认'}\n状态：${r?.status || (this.compacting.has(c.thread) ? '压缩上下文中' : this.available ? '空闲' : 'Codex 断开')}\n工作目录：${this.config.codex.cwd}`);
     }
     this.requireAvailable();
+    if (command === '/attach') {
+      if (!arg) throw new Error('用法：/attach <会话ID或编号>');
+      const old = this.store.chat(chat).thread;
+      if (!this.store.binding(chat)) this.idle(chat);
+      const id = this.resolve(chat,arg);
+      const state = await this.controller.attach(chat,id);
+      if (old !== id) await this.unwatchExternal(chat,old);
+      if (state.status === 'active') await this.watchExternal(chat,state);
+      return this.feishu.text(chat, `已进入原会话：${state.title}\n${state.id}\n状态：${state.status}\n工作目录：${state.cwd}\n普通消息将继续此会话；/stop 停止，/fork 分支，/detach 退出。`);
+    }
+    if (this.store.binding(chat) && ['/new','/use','/compact'].includes(command)) throw new Error('外部绑定不支持此操作，请先 /detach；Work 不提供管理权限。');
+    if (this.store.binding(chat) && ['/model','/effort'].includes(command) && arg) throw new Error('外部会话保留原模型设置，请先 /detach。');
+    if (command === '/stop' && this.store.binding(chat)) {
+      const stopped = await this.controller.interrupt(chat);
+      return this.feishu.text(chat, stopped ? '已请求停止绑定会话的当前回合；文件修改不会撤销。' : '绑定会话当前空闲。');
+    }
+    if (command === '/fork' && this.store.binding(chat)) {
+      const old = this.store.binding(chat).thread;
+      if (arg && this.resolve(chat,arg) !== old) throw new Error('Work 只能从当前绑定会话分支，请先 /attach 目标。');
+      const state = await this.controller.fork(chat);
+      await this.unwatchExternal(chat,old);
+      return this.feishu.text(chat, `已进入独立分支：${state.id}\n原会话未修改；分支沿用 Work 权限。`);
+    }
     if (command === '/stop') {
       const r = this.runs.get(this.store.chat(chat).thread);
       if (!r?.turn) return this.feishu.text(chat, '当前没有可停止的任务。');
@@ -214,7 +260,7 @@ export class Bot {
     if (command === '/threads') {
       const r = await this.history.search(arg);
       this.store.saveThreadSelection(chat, r.threads);
-      return this.feishu.text(chat, r.threads.length ? r.threads.map((t,i) => `${i+1}. ${t.title}（${this.store.ownThread(t.id) ? '机器人会话' : '外部会话 · 只读'}）\n${t.id}\n最后更新：${t.updatedAtLocal || '未提供'}`).join('\n\n') + '\n\n/read 编号 查看；/reference 编号 问题 引用。只有机器人会话可用 /use 编号 切换；可加关键词筛选。' : '未找到会话。发送 /new 或直接开始聊天。');
+      return this.feishu.text(chat, r.threads.length ? r.threads.map((t,i) => `${i+1}. ${t.title}（${this.store.ownThread(t.id) ? '机器人会话' : (this.controller.permission() === 'work' ? '外部会话 · Work' : '外部会话 · 只读')}）\n${t.id}\n最后更新：${t.updatedAtLocal || '未提供'}`).join('\n\n') + '\n\n/read 编号 查看；/reference 编号 问题 引用。只有机器人会话可用 /use 编号 切换；可加关键词筛选。' + (this.controller.permission() === 'work' ? '\n/attach 编号 进入外部会话（需目标在同一共享 App Server 中已加载）。' : '') : '未找到会话。发送 /new 或直接开始聊天。');
     }
     if (command === '/read' || command === '/reference') {
       const id = this.resolve(chat, args[0]);
@@ -301,6 +347,7 @@ Repository 审批使用 aegpc_repository_approval。用户已授权本 Codex 审
   }
   async run(chat, input, clientUserMessageId) {
     this.requireAvailable();
+    if (this.store.binding(chat)) return this.runExternal(chat,input,clientUserMessageId);
     let id = this.store.chat(chat).thread;
     if (this.compacting.has(id)) throw new Error('上下文正在压缩，请完成后重发。');
     if (!id) id = await this.createThread(chat, (input.find(i => i.type === 'text')?.text || '图片会话').slice(0,40));
@@ -343,13 +390,69 @@ Repository 审批使用 aegpc_repository_approval。用户已授权本 Codex 审
       this.endRun(r, 'failed', this.redact(e));
     }
   }
+  async unwatchExternal(chat, id = this.store.binding(chat)?.thread) {
+    const r = this.runs.get(id);
+    if (!r?.external) return;
+    r.ending = true; clearInterval(r.timer);
+    for (const [token,p] of this.prompts) if (p.thread === id) this.denyPrompt(token);
+    await r.flush.catch(() => {});
+    if (r.card) await this.feishu.finish(r.card, ++r.sequence, '已解除观察').catch(() => {});
+    r.state = 'detached'; this.store.saveRun(r); this.runs.delete(id);
+  }
+  async watchExternal(chat, state, dispatching = false) {
+    const existing = this.runs.get(state.id);
+    if (existing) {
+      if (existing.chat !== chat || existing.ending) throw new Error('该会话仍在处理上一轮结果，请稍后重试。');
+      if (dispatching) existing.dispatching = true;
+      return existing;
+    }
+    const r = {dispatching,thread:state.id,chat,turn:state.turn,external:true,card:null,sequence:0,state:'running',status:'正在观察外部会话',
+      messages:new Map(),lastText:'',text:'',created:Date.now(),ending:false,flush:Promise.resolve()};
+    this.runs.set(r.thread,r); this.store.saveRun(r);
+    try { r.card = await this.feishu.stream(chat,state.title); }
+    catch { /* text result delivery remains available */ }
+    r.timer = setInterval(() => {
+      void this.flushRun(r);
+      if (!r.polling) {
+        r.polling = true;
+        void this.refreshExternalRun(r).catch(e => this.endRun(r,'failed',this.redact(e))).finally(() => {r.polling=false;});
+      }
+    }, Math.max(1000,this.config.streamIntervalMs));
+    return r;
+  }
+  async refreshExternalRun(r) {
+    if (!r.turn || r.ending || r.dispatching) return;
+    const page = await this.controller.turns(r.thread);
+    if (r.ending || r.dispatching) return;
+    const turn = page.data.find(t => t.id === r.turn);
+    if (!turn) throw new Error('无法确认正在观察的回合状态，请 /thread 查看；未重跑任务。');
+    if (turn.status !== 'inProgress') {
+      for (const i of turn.items || []) if (i.type === 'agentMessage') r.messages.set(i.id,{text:i.text,phase:i.phase});
+      this.endRun(r,turn.status,turn.error?.message);
+    }
+  }
+  async runExternal(chat,input,clientUserMessageId) {
+    let r;
+    try {
+      const result = await this.controller.send(chat,input,clientUserMessageId,async state => {r = await this.watchExternal(chat,state,true);});
+      if (r.turn !== result.turnId) r.messages.clear();
+      r.turn = result.turnId; r.dispatching = false;
+      if (!r.ending) this.store.saveRun(r);
+      if (result.kind === 'steer') await this.feishu.text(chat,'已向绑定会话的当前回合追加要求。');
+    } catch(e) {
+      if (r) this.endRun(r,'failed',this.redact(e));
+      throw e;
+    }
+  }
   notification(m) {
     const p = m.params || {}, r = this.runs.get(p.threadId);
     if ((m.method === 'item/completed' && p.item?.type === 'contextCompaction') || m.method === 'thread/compacted' || m.method === 'error') this.compacting.delete(p.threadId);
     if (m.method === 'serverRequest/resolved') {
       for (const [token, prompt] of this.prompts) if (prompt.id === p.requestId) this.clearPrompt(token);
     }
-    if (!r || r.ending) return;
+    if (!r || r.ending || r.dispatching) return;
+    const eventTurn = p.turnId || p.turn?.id;
+    if (r.external && eventTurn && r.turn && eventTurn !== r.turn) return;
     if (m.method === 'turn/started') { r.turn = p.turn.id; this.store.saveRun(r); }
     if (m.method === 'item/agentMessage/delta') {
       const old = r.messages.get(p.itemId) || { text: '', phase: null };
@@ -435,6 +538,7 @@ Repository 审批使用 aegpc_repository_approval。用户已授权本 Codex 审
   }
   async serverRequest(m) {
     const p = m.params || {}, run = this.runs.get(p.threadId);
+    if ((!run || run.ending) && this.rpc.shared) return;
     if (!run || run.ending) { this.rpc.reject(m.id, '没有对应的飞书任务'); return; }
     if (m.method === 'item/tool/call') {
       let result, success = true;
