@@ -40,7 +40,7 @@ export class Bot {
     this.pairCode = randomBytes(6).toString('hex');
     this.pairExpires = Date.now() + 15 * 60 * 1000;
     this.runs = new Map(); this.prompts = new Map(); this.draining = new Set();
-    this.loaded = new Set(); this.selections = new Map(); this.compacting = new Set(); this.closed = false;
+    this.loaded = new Set(); this.compacting = new Set(); this.closed = false;
     rpc.on('notification', m => this.notification(m));
     rpc.on('request', m => this.serverRequest(m).catch(e => {
       this.log(`处理 Codex 请求失败：${this.redact(e)}`);
@@ -182,9 +182,9 @@ export class Bot {
     await this.run(chat, inputs, m.message_id);
   }
   resolve(chat, value) {
-    const selected = this.selections.get(chat);
-    if (/^\d+$/.test(value || '') && selected) {
-      const item = selected[Number(value)-1]; if (item) return item.id;
+    if (/^\d+$/.test(value || '')) {
+      const id = this.store.threadSelection(chat)[Number(value)-1];
+      if (id) return id;
       throw new Error('会话编号无效，请重新 /threads。');
     }
     return value || this.store.chat(chat).thread;
@@ -213,8 +213,8 @@ export class Bot {
     }
     if (command === '/threads') {
       const r = await this.history.search(arg);
-      this.selections.set(chat, r.threads);
-      return this.feishu.text(chat, r.threads.length ? r.threads.map((t,i) => `${i+1}. ${t.title}\n${t.id}`).join('\n\n') + '\n\n/read 编号 查看；/use 编号 切换机器人会话。列表最多显示 30–50 条，可加关键词筛选。' : '未找到会话。发送 /new 或直接开始聊天。');
+      this.store.saveThreadSelection(chat, r.threads);
+      return this.feishu.text(chat, r.threads.length ? r.threads.map((t,i) => `${i+1}. ${t.title}（${this.store.ownThread(t.id) ? '机器人会话' : '外部会话 · 只读'}）\n${t.id}\n最后更新：${t.updatedAtLocal || '未提供'}`).join('\n\n') + '\n\n/read 编号 查看；/reference 编号 问题 引用。只有机器人会话可用 /use 编号 切换；可加关键词筛选。' : '未找到会话。发送 /new 或直接开始聊天。');
     }
     if (command === '/read' || command === '/reference') {
       const id = this.resolve(chat, args[0]);
@@ -232,7 +232,7 @@ export class Bot {
     }
     if (command === '/use') {
       this.idle(chat); const id = this.resolve(chat, arg);
-      if (!this.store.ownThread(id)) throw new Error('第一版仅切换机器人创建的会话；外部会话可 /read、/reference，或开启外部读取后 /fork。');
+      if (!this.store.ownThread(id)) throw new Error('只能切换机器人创建的会话；开启外部读取后可对外部会话 /read 或 /reference，但不能接管或分支。');
       await this.resume(id); this.store.updateChat(chat, { thread: id });
       return this.feishu.text(chat, `已切换到 ${this.store.ownThread(id).title}\n${id}`);
     }

@@ -22,6 +22,15 @@ export class Store {
   }
   get(key) { return this.db.prepare('SELECT value FROM settings WHERE key=?').get(key)?.value; }
   set(key, value) { this.db.prepare('INSERT OR REPLACE INTO settings VALUES (?,?)').run(key, value); }
+  saveThreadSelection(chat, threads) {
+    this.set(`threadSelection:${chat}`, JSON.stringify(threads.map(t => t.id)));
+  }
+  threadSelection(chat) {
+    try {
+      const ids = JSON.parse(this.get(`threadSelection:${chat}`) || '[]');
+      return Array.isArray(ids) && ids.every(id => typeof id === 'string' && id.length > 0) ? ids : [];
+    } catch { return []; }
+  }
   requestPair(user, chat, now = Date.now()) {
     if (this.get('owner')) return null;
     this.db.prepare('DELETE FROM pairing WHERE expires<=?').run(now);
