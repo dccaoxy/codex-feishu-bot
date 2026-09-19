@@ -232,7 +232,7 @@ export class Bot {
     }
     if (command === '/use') {
       this.idle(chat); const id = this.resolve(chat, arg);
-      if (!this.store.ownThread(id)) throw new Error('第一版仅切换机器人创建的会话；外部会话可 /read、/reference，或开启外部读取后 /fork。');
+      if (!this.store.ownThread(id)) throw new Error('只能切换机器人创建的会话；开启外部读取后可对外部会话 /read 或 /reference，但不能接管或分支。');
       await this.resume(id); this.store.updateChat(chat, { thread: id });
       return this.feishu.text(chat, `已切换到 ${this.store.ownThread(id).title}\n${id}`);
     }

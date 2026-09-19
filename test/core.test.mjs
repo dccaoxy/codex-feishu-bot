@@ -132,6 +132,46 @@ test('history read is read-only, scoped, paginated, excludes reasoning', async t
   assert.ok(!rpc.calls.some(c=>c.method==='thread/resume'||c.method==='turn/start'));
 });
 
+test('external read opt-in searches and reads without allowing external control', async t => {
+  const {bot,rpc,feishu,config} = setup(t);
+  config.codex.allowExternalThreadRead = true;
+  bot.history = new History(rpc, bot.store, true);
+  const request = rpc.request.bind(rpc);
+  rpc.request = async (method, params) => {
+    if (method === 'thread/list') {
+      rpc.calls.push({method, params});
+      return {data:[{id:'external',name:'外部任务',cwd:'/other/project',status:{type:'idle'}}],nextCursor:null};
+    }
+    return request(method, params);
+  };
+
+  await bot.command('chat', '/threads 外部');
+  assert.equal(rpc.calls.at(-1).method, 'thread/list');
+  assert.equal(rpc.calls.at(-1).params.searchTerm, '外部');
+  assert.match(feishu.messages.at(-1).text, /external/);
+
+  await bot.command('chat', '/read 1');
+  assert.match(feishu.messages.at(-1).text, /旧结论/);
+  assert.equal(rpc.calls.at(-1).method, 'thread/turns/list');
+  assert.equal(rpc.calls.at(-1).params.threadId, 'external');
+
+  await assert.rejects(bot.command('chat', '/use 1'), /不能接管或分支/);
+  await assert.rejects(bot.command('chat', '/fork 1'), /仅分支机器人会话/);
+  assert.ok(!rpc.calls.some(c => ['thread/resume','thread/fork','turn/start','turn/interrupt','thread/compact/start'].includes(c.method)));
+
+  await bot.command('chat', '/reference 1 总结');
+  assert.equal(bot.store.chat('chat').thread, 't1');
+  assert.equal(rpc.calls.find(c => c.method === 'turn/start').params.threadId, 't1');
+  assert.ok(!rpc.calls.some(c => c.method === 'turn/start' && c.params.threadId === 'external'));
+
+  await bot.serverRequest({id:90,method:'item/tool/call',params:{threadId:'t1',tool:'feishu_threads_search',arguments:{query:'外部'}}});
+  assert.equal(rpc.responses.at(-1).result.success, true);
+  assert.match(rpc.responses.at(-1).result.contentItems[0].text, /external/);
+  await bot.serverRequest({id:91,method:'item/tool/call',params:{threadId:'t1',tool:'feishu_thread_read',arguments:{threadId:'external'}}});
+  assert.equal(rpc.responses.at(-1).result.success, true);
+  assert.match(rpc.responses.at(-1).result.contentItems[0].text, /旧结论/);
+});
+
 test('natural-language history tool returns scoped data to current turn', async t => {
   const {bot,rpc,store} = setup(t); store.addThread('old','先前方案');
   await bot.run('chat',[{type:'text',text:'参考先前方案'}]);
