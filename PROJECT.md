@@ -69,7 +69,7 @@
 - 同包包含 `CODEX_APP_SERVER_USE_LOCAL_DAEMON=1` 分支，连接默认 app-server-control/app-server-control.sock；受本地 host、无额外 config overrides、CLI 覆盖/打包环境和 daemon 版本检查等条件限制。不能仅设置此变量就断言成功。
 - 官方 App Server 文档明确 WebSocket/Unix 传输及 CLI --remote；未据此推断 Desktop 已公开支持同样启动参数。来源：https://learn.chatgpt.com/docs/app-server 。
 - 建议后续单独验证 Desktop 通过显式 WebSocket 地址连接自建共享实例；使用同版本 bundled Codex，并核验桌面工具、审批路由与原 Thread 双端事件。当前运行中 stdio 实例没有已确认的热添加监听方式，切换涉及 Desktop 重启，未执行。
-- 本节仅保存本地调查记录，尚未提交/推送；Phase 2 PR 的已验证范围不扩大为 Desktop 实测通过。
+- 本节为当时的调查记录，随后已提交至 PR #5；后续实际验收以最新交接为准。
 
 ## 当前交接：PR #5 Desktop / Shared / Feishu 联调（2026-09-19）
 
@@ -83,3 +83,13 @@
 - **Remaining / 人工断点**：README“人工最小验收”给出 4 步：退出并共享启动 Desktop；新建“共享联调”并飞书 attach 验证双向；活动追加/停止；双端分别处理无副作用 printf 审批。若原策略自动拒绝/不产生人工审批，记录为未验证，不能绕过策略。Desktop 专属工具配置及 UI 仍未验证。
 - **Risks / 回退**：共享入口是本地安装包的实验实现，升级可能改变；没有 Desktop 端实测前不能声称全部功能兼容。回退脚本恢复机器人配置并保留共享服务器，避免中断 Desktop；退出共享 Desktop 后再 stop-server，普通应用图标恢复默认入口。服务重启不重放不确定操作；重启后原绑定须重新 attach 才恢复该连接的订阅。
 - **交付状态**：本轮实现已提交推送 `b444165`，同步最新主线规则的提交为 `e46210b`；本交接补充亦提交至 PR #5。Issue #3 与 PR 描述同步记录实际验证和人工断点。Draft → Ready 转换以 PR 时间线为准，自动审核结果待写回，不能将“Ready”写成“PASS”。
+
+
+## 最新交接：资源限制修复与自动审核返工（2026-09-20）
+
+- **Task Source**：用户“你来实现吧”，继续 PR #5 / Issue #3 Phase 2，修复共享环境障碍并按自动审核协议交付；不进入 Phase 3、不 Merge、不自动重新启用 Work。
+- **真实用户验收更新**：用户截图确认同一“共享联调”任务在 Desktop 与飞书双向输入/回复成功；飞书活动回合追加要求被接收，两个界面出现“追加要求成功”。数数仍到 1000，不能据此认定即时中断通过。真实 `/stop` 和双端审批按钮仍待人工验证。上述记录取代前节“Desktop 尚未实测”的当时状态。
+- **故障与当前部署**：用户遇到 EMFILE（Too many open files），当时默认限制 256；尚未证明具体泄漏来源。已回退普通 stdio / Read，用户确认恢复，保持该配置。本轮仅重启无客户端连接的共享实验服务，为其实际设置 soft nofile=4096、launchd hard=8192；未修改全局限制。首次从 Documents 执行包装脚本被系统拒绝，改为 Application Support 安装位置后启动成功。Desktop 入口也设置进程级限制，但本轮未重启 Desktop 验证；机器人新代码尚未重启部署。
+- **审核返工**：针对上一轮 NEEDS CHANGES 的 R1/R2/R3，修复共享审批显示失败自动拒绝、旧回合卡片延迟创建阻塞新回合、解绑后迟到卡片不结束。旧回合清理只影响自身回合及审批；共享请求无法处理时不抢答拒绝。新增回归覆盖这些失败路径。
+- **验证**：check、55 项测试、doctor、smoke 通过；doctor/smoke 使用普通 stdio 配置，真实 Codex 握手通过，不代表飞书联网或模型验证。本轮资源压力检查实际连接共享服务 240 次、读取元数据 2400 次，6 批峰值均 72 个句柄，回落均 32，增长 0、新增 EMFILE 0；结果仅存本地忽略目录。未调用模型或发送真实飞书消息。本结果不能证明长时间 Desktop/工具负载没有泄漏。
+- **交付与断点**：本节及实现提交至同一开发分支和 PR #5，提交号以 Git 历史为准；Issue #3 同步 Implementation / Validation / Remaining。完成 Draft → Ready 后等待自动审核，Ready 不等于 PASS。下一步为审核返工（若有）及经用户安排的共享 Desktop 长期观察、真实停止和审批验收；生产保持普通模式。

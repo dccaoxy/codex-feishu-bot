@@ -45,12 +45,12 @@ export class Bot {
     this.toolVersion = config.repositoryApproval ? 'repository-v1' : 'docs-v1';
     this.pairCode = randomBytes(6).toString('hex');
     this.pairExpires = Date.now() + 15 * 60 * 1000;
-    this.runs = new Map(); this.prompts = new Map(); this.draining = new Set();
+    this.retiredRuns = new Set(); this.runs = new Map(); this.prompts = new Map(); this.draining = new Set();
     this.loaded = new Set(); this.compacting = new Set(); this.closed = false;
     rpc.on('notification', m => this.notification(m));
     rpc.on('request', m => this.serverRequest(m).catch(e => {
       this.log(`处理 Codex 请求失败：${this.redact(e)}`);
-      try { rpc.reject(m.id, '客户端未能处理请求'); } catch {}
+      if (!rpc.shared) { try { rpc.reject(m.id, '客户端未能处理请求'); } catch {} }
     }));
     rpc.on('disconnected', () => {
       if (this.closed) return;
@@ -399,7 +399,8 @@ Repository 审批使用 aegpc_repository_approval。用户已授权本 Codex 审
     }
     await r.flush.catch(() => {});
     if (r.card) await this.feishu.finish(r.card, ++r.sequence, '已解除观察').catch(() => {});
-    r.state = 'detached'; this.store.saveRun(r); this.runs.delete(id);
+    r.state = 'detached';
+    if (this.runs.get(id) === r) { this.store.saveRun(r); this.runs.delete(id); }
   }
   async watchExternal(chat, state, dispatching = false) {
     const existing = this.runs.get(state.id);
@@ -414,6 +415,10 @@ Repository 审批使用 aegpc_repository_approval。用户已授权本 Codex 审
     try { r.card = await this.feishu.stream(chat,state.title); }
     catch { /* text result delivery remains available */ }
     r.opening = false;
+    if (r.ending || this.closed) {
+      if (r.card) await this.feishu.finish(r.card,++r.sequence,'已解除观察').catch(() => {});
+      return r;
+    }
     if (r.pendingCompletion) this.endRun(r,r.pendingCompletion.status,r.pendingCompletion.error?.message);
     if (r.ending) return r;
     r.timer = setInterval(() => {
@@ -453,7 +458,10 @@ Repository 审批使用 aegpc_repository_approval。用户已授权本 Codex 审
     if (this.closed || !this.rpc.shared || this.controller.permission() !== 'work') return;
     const b = this.store.bindingForThread(threadId);
     if (!b || this.store.chat(b.chat).thread !== threadId) return;
-    const old = this.runs.get(threadId);
+    let old = this.runs.get(threadId);
+    if (old && old.turn !== turnId && (old.pendingCompletion || old.ending)) {
+      this.retiredRuns.add(old); this.runs.delete(threadId); old = null;
+    }
     if (old?.ending) {
       void old.finishPromise?.then(() => { if (this.store.binding(b.chat)?.thread === threadId) this.observeExternal(threadId,turnId); });
       return;
@@ -524,17 +532,17 @@ Repository 审批使用 aegpc_repository_approval。用户已授权本 Codex 审
     r.finishPromise = this.finishRun(r, state, error).catch(e => {
       this.log(`结果发送失败：${this.redact(e)}；请用 /read 查看已保存的会话。`);
       this.feishu.text(r.chat, '结果发送失败，已保留本地会话。请发送 /read 查看。').catch(() => {});
-    }).finally(() => { this.runs.delete(r.thread); });
+    }).finally(() => { if (this.runs.get(r.thread) === r) this.runs.delete(r.thread); this.retiredRuns.delete(r); });
   }
   async finishRun(r, state, error) {
     await r.flush.catch(() => {});
-    for (const [token,prompt] of this.prompts) if (prompt.thread === r.thread) this.clearPrompt(token);
+    for (const [token,prompt] of this.prompts) if (prompt.thread === r.thread && (!prompt.turn || prompt.turn === r.turn)) this.clearPrompt(token);
     const label = state === 'completed' ? '已完成' : state === 'interrupted' ? '已停止' : '执行失败';
     let text = this.body(r, true) || (state === 'completed' ? '任务已完成。' : '任务未完成。');
     if (error) text += `\n\n${this.redact(new Error(error))}`;
     if (state !== 'completed') text += `\n\n状态：${label}`;
     r.text = text; r.state = state;
-    this.store.saveRun(r);
+    if (this.runs.get(r.thread) === r) this.store.saveRun(r);
     const parts = chunks(text,10000);
     let delivered = false;
     if (r.card) {
@@ -550,7 +558,7 @@ Repository 审批使用 aegpc_repository_approval。用户已授权本 Codex 审
       const file = path.join(dir, `answer-${randomUUID()}.md`); fs.writeFileSync(file, text, { mode: 0o600 });
       try { await this.feishu.upload(r.chat, file); } catch { await this.feishu.text(r.chat, text); }
     }
-    this.store.saveRun(r);
+    if (this.runs.get(r.thread) === r) this.store.saveRun(r);
   }
   async sendFile(chat, filename) {
     const root = fs.realpathSync(this.config.codex.cwd);
@@ -562,7 +570,7 @@ Repository 审批使用 aegpc_repository_approval。用户已授权本 Codex 审
   }
   async serverRequest(m) {
     const p = m.params || {}, run = this.runs.get(p.threadId);
-    if ((!run || run.ending) && this.rpc.shared) return;
+    if ((!run || run.ending || (run.external && p.turnId && run.turn !== p.turnId)) && this.rpc.shared) return;
     if (!run || run.ending) { this.rpc.reject(m.id, '没有对应的飞书任务'); return; }
     if (m.method === 'item/tool/call') {
       // Shared desktop tools must be answered by their owner, not raced with an error.
@@ -580,12 +588,15 @@ Repository 审批使用 aegpc_repository_approval。用户已授权本 Codex 审
       this.rpc.respond(m.id, { success, contentItems: [{ type: 'inputText', text: JSON.stringify(result) }] }); return;
     }
     if (!['item/commandExecution/requestApproval','item/fileChange/requestApproval','item/tool/requestUserInput','item/permissions/requestApproval','mcpServer/elicitation/request'].includes(m.method)) {
+      if (run.external && this.rpc.shared) {
+        await this.feishu.text(run.chat,'此交互无法在飞书展示，请在原客户端处理。').catch(() => {}); return;
+      }
       if (m.method === 'mcpServer/elicitation/request') this.rpc.respond(m.id, { action: 'decline', content: null });
       else this.rpc.reject(m.id, '此交互暂不支持通过飞书完成');
       await this.feishu.text(run.chat, `Codex 请求了暂不支持的交互：${m.method}。请在本机处理相关配置或授权后重试。`); return;
     }
     const token = randomBytes(5).toString('hex');
-    const prompt = { id: m.id, method: m.method, params: p, chat: run.chat, thread: run.thread,
+    const prompt = { id: m.id, method: m.method, params: p, chat: run.chat, thread: run.thread, turn: p.turnId || run.turn,
       expires: Date.now() + 10*60*1000, answers: {} };
     this.prompts.set(token, prompt);
     prompt.timer = setTimeout(() => {
@@ -616,7 +627,7 @@ Repository 审批使用 aegpc_repository_approval。用户已授权本 Codex 审
         } else throw new Error(`此交互需要在本机完成：${p.mode}；飞书暂不支持此类原生验证流程`);
       } else if (m.method === 'item/tool/requestUserInput') {
         if (p.questions.some(q => q.isSecret)) {
-          this.denyPrompt(token); await this.feishu.text(run.chat, '该请求涉及秘密信息，请在本机完成配置后重试。'); return;
+          this.unavailablePrompt(token,run); await this.feishu.text(run.chat, '该请求涉及秘密信息，请在本机完成配置后重试。'); return;
         }
         for (const q of p.questions) {
           await this.feishu.interactive(run.chat, q.header || '需要你的回答',
@@ -629,14 +640,17 @@ Repository 审批使用 aegpc_repository_approval。用户已授权本 Codex 审
           p.networkApprovalContext ? JSON.stringify(p.networkApprovalContext) : '',
           m.method === 'item/fileChange/requestApproval' && run.fileChanges ? JSON.stringify(run.fileChanges) : ''].filter(Boolean).join('\n');
         if (Buffer.byteLength(details) > 10000) {
-          this.denyPrompt(token);
-          await this.feishu.text(run.chat, '审批详情过长，已拒绝本次操作。请让 Codex 拆成更小的操作后重试，以便完整核对。'); return;
+          this.unavailablePrompt(token,run);
+          await this.feishu.text(run.chat, '审批详情过长，飞书入口已关闭。请让 Codex 拆成更小的操作后重试，以便完整核对。'); return;
         }
         await this.feishu.interactive(run.chat, 'Codex 需要批准',
           `${details || '当前操作需要你批准。'}\n\n/approve ${token} 或 /deny ${token}\n10 分钟内有效；批准仅针对本次请求。`,
           [{ label: '批准本次', primary: true, value: { token, decision: 'accept' } }, { label: '拒绝', value: { token, decision: 'decline' } }]);
       }
-    } catch (e) { this.denyPrompt(token); await this.feishu.text(run.chat, `交互已关闭：${this.redact(e)}`).catch(() => {}); }
+    } catch (e) { this.unavailablePrompt(token,run); await this.feishu.text(run.chat, `交互已关闭：${this.redact(e)}`).catch(() => {}); }
+  }
+  unavailablePrompt(token,run) {
+    if (this.rpc.shared && run.external) this.clearPrompt(token); else this.denyPrompt(token);
   }
   clearPrompt(token) { const p = this.prompts.get(token); if (p) clearTimeout(p.timer); this.prompts.delete(token); }
   denyPrompt(token) {
@@ -689,6 +703,9 @@ Repository 审批使用 aegpc_repository_approval。用户已授权本 Codex 审
     for (const [token,p] of [...this.prompts]) {
       try { if (this.rpc.shared && this.runs.get(p.thread)?.external) this.clearPrompt(token); else this.denyPrompt(token); } catch {}
     }
-    for (const r of this.runs.values()) clearInterval(r.timer);
+    for (const r of [...this.runs.values(),...this.retiredRuns]) {
+      clearInterval(r.timer);
+      if (r.external && !r.ending) { r.ending=true; if (r.card) await this.feishu.finish(r.card,++r.sequence,'已解除观察').catch(() => {}); }
+    }
   }
 }

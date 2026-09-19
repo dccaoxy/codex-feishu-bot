@@ -198,12 +198,12 @@ test('a new turn from the other client is observed after an idle attachment',asy
 });
 test('shared desktop tool requests are not rejected by the Feishu observer',async t=>{
   const {config,store,rpc}=setup(t);rpc.shared=true;
-  const bot=new Bot(config,store,rpc,{},()=>{});bot.runs.set('external',{external:true,chat:'chat'});
+  const bot=new Bot(config,store,rpc,{},()=>{});bot.runs.set('external',{external:true,chat:'chat',turn:'turn'});
   try{await bot.serverRequest({id:123,method:'item/tool/call',params:{threadId:'external',tool:'desktop_owned_tool',arguments:{}}});assert.equal(rpc.responses.length,0);}finally{await bot.close();}
 });
 test('approval resolved by another client invalidates the Feishu action',async t=>{
   const {config,store,rpc}=setup(t);rpc.shared=true;const messages=[];
-  const bot=new Bot(config,store,rpc,{text:async(c,s)=>messages.push(s),interactive:async()=>{}},()=>{});bot.runs.set('external',{external:true,chat:'chat'});
+  const bot=new Bot(config,store,rpc,{text:async(c,s)=>messages.push(s),interactive:async()=>{}},()=>{});bot.runs.set('external',{external:true,chat:'chat',turn:'turn'});
   try{
     await bot.serverRequest({id:17,method:'item/commandExecution/requestApproval',params:{threadId:'external',turnId:'turn',command:'printf test'}});
     const token=[...bot.prompts.keys()][0];assert.ok(token);
@@ -216,4 +216,41 @@ test('detaching a shared observer does not deny the other client approval',async
   const bot=new Bot(config,store,rpc,{text:async()=>{},interactive:async()=>{}},()=>{});
   bot.runs.set('external',{external:true,chat:'chat',thread:'external',turn:'t',sequence:0,text:'',flush:Promise.resolve()});
   try{await bot.serverRequest({id:18,method:'item/commandExecution/requestApproval',params:{threadId:'external',turnId:'t',command:'printf test'}});await bot.command('chat','/detach');assert.equal(bot.prompts.size,0);assert.equal(rpc.responses.length,0);}finally{await bot.close();}
+});
+test('shared observer presentation failures never decide the peer approval (R1)',async t=>{
+  const {config,store,rpc}=setup(t);rpc.shared=true;
+  const bot=new Bot(config,store,rpc,{interactive:async()=>{throw new Error('offline');},text:async()=>{}},()=>{});
+  bot.runs.set('external',{external:true,chat:'chat',turn:'turn'});
+  try{
+    for(const [method,params] of [
+      ['item/commandExecution/requestApproval',{command:'printf test'}],
+      ['mcpServer/elicitation/request',{mode:'form',requestedSchema:{type:'string'}}],
+      ['item/tool/requestUserInput',{questions:[{id:'secret',isSecret:true}]}],
+      ['unknown/interaction',{}],
+    ]){await bot.serverRequest({id:1,method,params:{threadId:'external',turnId:'turn',...params}});assert.equal(rpc.responses.length,0);assert.equal(bot.prompts.size,0);}
+  }finally{await bot.close();}
+});
+test('slow card A does not lose next turn B output or approval (R2)',async t=>{
+  const {config,store,rpc,controller}=setup(t);rpc.shared=true;await controller.attach('chat','external');
+  let release;const gate=new Promise(r=>release=r);let count=0;const updates=[];
+  const bot=new Bot(config,store,rpc,{stream:async()=>{const n=++count;if(n===1)await gate;return 'card'+n;},update:async(c,text)=>updates.push([c,text]),finish:async()=>{},text:async()=>{},interactive:async()=>{}},()=>{});
+  try{
+    bot.notification({method:'turn/started',params:{threadId:'external',turn:{id:'A'}}});
+    const a=bot.runs.get('external');
+    bot.notification({method:'turn/completed',params:{threadId:'external',turn:{id:'A',status:'completed'}}});
+    bot.notification({method:'turn/started',params:{threadId:'external',turn:{id:'B'}}});
+    bot.notification({method:'item/completed',params:{threadId:'external',turnId:'B',item:{id:'msg',type:'agentMessage',text:'B_RESULT'}}});
+    await bot.serverRequest({id:99,method:'item/commandExecution/requestApproval',params:{threadId:'external',turnId:'B',command:'printf test'}});
+    const token=[...bot.prompts.keys()][0];assert.equal(bot.prompts.get(token).turn,'B');
+    release();await new Promise(r=>setImmediate(r));await a.finishPromise;
+    assert.equal(bot.runs.get('external').turn,'B');assert.ok(bot.prompts.has(token));
+    const b=bot.runs.get('external');bot.notification({method:'turn/completed',params:{threadId:'external',turn:{id:'B',status:'completed'}}});await b.finishPromise;
+    assert.equal(updates.filter(([c,text])=>c==='card2'&&text.includes('B_RESULT')).length,1);assert.equal(bot.runs.size,0);
+  }finally{release();await bot.close();}
+});
+test('detach during card creation closes late card exactly once (R3)',async t=>{
+  const {config,store,rpc,controller}=setup(t);rpc.shared=true;await controller.attach('chat','external');
+  let release;const gate=new Promise(r=>release=r),closed=[];
+  const bot=new Bot(config,store,rpc,{stream:async()=>{await gate;return 'late';},finish:async c=>closed.push(c),text:async()=>{}},()=>{});
+  try{bot.notification({method:'turn/started',params:{threadId:'external',turn:{id:'A'}}});const a=bot.runs.get('external');await bot.command('chat','/detach');release();await new Promise(r=>setImmediate(r));assert.deepEqual(closed,['late']);assert.equal(bot.runs.size,0);assert.equal(a.timer,undefined);assert.equal(rpc.responses.length,0);assert.ok(!rpc.calls.some(c=>c.method==='turn/interrupt'));}finally{release();await bot.close();}
 });
