@@ -254,3 +254,31 @@ test('detach during card creation closes late card exactly once (R3)',async t=>{
   const bot=new Bot(config,store,rpc,{stream:async()=>{await gate;return 'late';},finish:async c=>closed.push(c),text:async()=>{}},()=>{});
   try{bot.notification({method:'turn/started',params:{threadId:'external',turn:{id:'A'}}});const a=bot.runs.get('external');await bot.command('chat','/detach');release();await new Promise(r=>setImmediate(r));assert.deepEqual(closed,['late']);assert.equal(bot.runs.size,0);assert.equal(a.timer,undefined);assert.equal(rpc.responses.length,0);assert.ok(!rpc.calls.some(c=>c.method==='turn/interrupt'));}finally{release();await bot.close();}
 });
+
+test('resolved approval cards close even when their initial send finishes late',async t=>{
+  const {config,store,rpc}=setup(t);rpc.shared=true;
+  let release;const edits=[];
+  const bot=new Bot(config,store,rpc,{interactive:()=>new Promise(r=>release=r),text:async()=>{},replaceInteractive:async(...a)=>edits.push(a)},()=>{});
+  bot.runs.set('external',{external:true,chat:'chat',thread:'external',turn:'t'});
+  try{
+    const send=bot.serverRequest({id:91,method:'item/permissions/requestApproval',params:{threadId:'external',turnId:'t',permissions:{}}});
+    const token=[...bot.prompts.keys()][0];
+    bot.notification({method:'serverRequest/resolved',params:{requestId:91}});
+    release({message_id:'late-card'});await send;
+    assert.equal(edits.length,1);assert.equal(edits[0][0],'late-card');assert.match(edits[0][1],/已由客户端处理/);
+    await assert.rejects(bot.action('chat',{token,decision:'accept'}),/失效/);
+    assert.equal(rpc.responses.length,0);
+  }finally{await bot.close();}
+});
+test('card update failure cannot replay a locally approved permission request',async t=>{
+  const {config,store,rpc}=setup(t);rpc.shared=true;let updates=0;
+  const bot=new Bot(config,store,rpc,{interactive:async()=>({message_id:'card'}),text:async()=>{},replaceInteractive:async()=>{updates++;throw Error('offline');}},()=>{});
+  bot.runs.set('external',{external:true,chat:'chat',thread:'external',turn:'t'});
+  try{
+    const permissions={fileSystem:{write:['/test-only']}};
+    await bot.serverRequest({id:92,method:'item/permissions/requestApproval',params:{threadId:'external',turnId:'t',permissions}});
+    const token=[...bot.prompts.keys()][0];await bot.action('chat',{token,decision:'accept'});
+    assert.equal(updates,1);assert.deepEqual(rpc.responses,[{id:92,result:{permissions,scope:'turn'}}]);
+    await assert.rejects(bot.action('chat',{token,decision:'accept'}),/失效/);assert.equal(rpc.responses.length,1);
+  }finally{await bot.close();}
+});

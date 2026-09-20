@@ -475,7 +475,7 @@ Repository 审批使用 aegpc_repository_approval。用户已授权本 Codex 审
     if ((m.method === 'item/completed' && p.item?.type === 'contextCompaction') || m.method === 'thread/compacted' || m.method === 'error') this.compacting.delete(p.threadId);
     if (m.method === 'serverRequest/resolved') {
       for (const [token, prompt] of this.prompts) if (prompt.id === p.requestId) {
-        this.clearPrompt(token);
+        this.clearPrompt(token, '已由客户端处理');
         void this.feishu.text(prompt.chat,'该审批已由一个客户端处理，旧卡片已失效。').catch(() => {});
       }
     }
@@ -609,18 +609,18 @@ Repository 审批使用 aegpc_repository_approval。用户已授权本 Codex 审
       if (m.method === 'mcpServer/elicitation/request') {
         if (p.mode === 'url') {
           prompt.authorizationUrl = authorizationUrl(p.url);
-          await this.feishu.interactive(run.chat, '需要网页授权',
+          await this.promptCard(prompt, run.chat, '需要网页授权',
             `${p.serverName}：${p.message}\n\n请打开授权地址，完成后再确认：\n${prompt.authorizationUrl}\n\n/approve ${token} 或 /deny ${token}\n10 分钟内有效。`,
             [{ label: '打开授权页面', url: prompt.authorizationUrl }, { label: '已完成网页授权', value: { token, decision: 'accept' } }, { label: '拒绝', value: { token, decision: 'decline' } }]);
         } else if (['form','openai/form','openaiForm'].includes(p.mode)) {
           if (Buffer.byteLength(JSON.stringify(p)) > 10000) throw new Error('授权详情过长，请在本机处理');
           prompt.fields = formFields(p.requestedSchema);
-          await this.feishu.interactive(run.chat, 'MCP 请求确认',
+          await this.promptCard(prompt, run.chat, 'MCP 请求确认',
             `${p.serverName}：${p.message}\n\n请先回答字段，再点击提交；默认值不会自动提交。\n/approve ${token} 或 /deny ${token}\n10 分钟内有效。`,
             [{ label: '提交并批准', value: { token, decision: 'accept' } }, { label: '拒绝', value: { token, decision: 'decline' } }]);
           for (const [key, field] of prompt.fields) {
             const options = fieldOptions(field);
-            await this.feishu.interactive(run.chat, field.title || key,
+            await this.promptCard(prompt, run.chat, field.title || key,
               `${field.description || key}\n类型：${field.type}；${(p.requestedSchema.required || []).includes(key) ? '必填' : '选填'}\n${JSON.stringify(field)}\n\n/answer ${token} ${key} 你的回答`,
               options.slice(0,8).map(o => ({ label: o.label, value: { token, question: key, answer: String(o.value) } })));
           }
@@ -630,7 +630,7 @@ Repository 审批使用 aegpc_repository_approval。用户已授权本 Codex 审
           this.unavailablePrompt(token,run); await this.feishu.text(run.chat, '该请求涉及秘密信息，请在本机完成配置后重试。'); return;
         }
         for (const q of p.questions) {
-          await this.feishu.interactive(run.chat, q.header || '需要你的回答',
+          await this.promptCard(prompt, run.chat, q.header || '需要你的回答',
             `${q.question}\n\n自定义回答：\n/answer ${token} ${q.id} 你的回答\n\n10 分钟内有效。`,
             (q.options || []).slice(0,8).map(o => ({ label: o.label, value: { token, question: q.id, answer: o.label } })));
         }
@@ -643,7 +643,7 @@ Repository 审批使用 aegpc_repository_approval。用户已授权本 Codex 审
           this.unavailablePrompt(token,run);
           await this.feishu.text(run.chat, '审批详情过长，飞书入口已关闭。请让 Codex 拆成更小的操作后重试，以便完整核对。'); return;
         }
-        await this.feishu.interactive(run.chat, 'Codex 需要批准',
+        await this.promptCard(prompt, run.chat, 'Codex 需要批准',
           `${details || '当前操作需要你批准。'}\n\n/approve ${token} 或 /deny ${token}\n10 分钟内有效；批准仅针对本次请求。`,
           [{ label: '批准本次', primary: true, value: { token, decision: 'accept' } }, { label: '拒绝', value: { token, decision: 'decline' } }]);
       }
@@ -652,7 +652,26 @@ Repository 审批使用 aegpc_repository_approval。用户已授权本 Codex 审
   unavailablePrompt(token,run) {
     if (this.rpc.shared && run.external) this.clearPrompt(token); else this.denyPrompt(token);
   }
-  clearPrompt(token) { const p = this.prompts.get(token); if (p) clearTimeout(p.timer); this.prompts.delete(token); }
+  async promptCard(prompt, chat, title, text, buttons) {
+    const result = await this.feishu.interactive(chat, title, text, buttons);
+    if (!result?.message_id) return;
+    const entry = { id: result.message_id, text };
+    (prompt.cards ??= []).push(entry);
+    // A peer may resolve or detach while the initial message is still being sent.
+    if (prompt.closedStatus) await this.finishPromptCard(entry, prompt.closedStatus);
+  }
+  async finishPromptCard(entry, status) {
+    try { await this.feishu.replaceInteractive(entry.id, status, `${status}。此卡片已失效。\n\n${entry.text.split('\n\n/')[0]}`); }
+    catch { this.log('审批卡片状态更新失败；旧操作已失效。'); }
+  }
+  clearPrompt(token, status = '交互已关闭') {
+    const p = this.prompts.get(token);
+    if (!p) return;
+    clearTimeout(p.timer);
+    p.closedStatus = status;
+    this.prompts.delete(token);
+    for (const entry of p.cards ?? []) void this.finishPromptCard(entry, status);
+  }
   denyPrompt(token) {
     const p = this.prompts.get(token); if (!p) return;
     try {
@@ -660,7 +679,7 @@ Repository 审批使用 aegpc_repository_approval。用户已授权本 Codex 审
       else if (p.method === 'item/tool/requestUserInput') this.rpc.respond(p.id, { answers: {} });
       else if (p.method === 'item/permissions/requestApproval') this.rpc.respond(p.id, { permissions: {}, scope: 'turn' });
       else this.rpc.respond(p.id, { decision: 'decline' });
-    } finally { this.clearPrompt(token); }
+    } finally { this.clearPrompt(token, '已拒绝或已超时'); }
   }
   async action(chat, value) {
     const p = this.prompts.get(value.token);
@@ -680,13 +699,13 @@ Repository 审批使用 aegpc_repository_approval。用户已授权本 Codex 审
       if (!p.fields && !p.authorizationUrl) throw new Error('此请求无法通过飞书批准');
       if (p.fields) validateForm(p.params.requestedSchema,p.answers);
       this.rpc.respond(p.id, { action: 'accept', content: p.fields ? p.answers : null });
-      this.clearPrompt(value.token); await this.feishu.text(chat, '已提交本次确认，任务继续。'); return;
+      this.clearPrompt(value.token, '已提交处理'); await this.feishu.text(chat, '已提交本次确认，任务继续。'); return;
     }
     if (p.method === 'item/tool/requestUserInput') {
       if (!p.params.questions.some(q => q.id === value.question) || !String(value.answer || '').trim()) throw new Error('问题 ID 或回答无效。');
       p.answers[value.question] = { answers: [String(value.answer).slice(0,12000)] };
       if (p.params.questions.every(q => p.answers[q.id])) {
-        this.rpc.respond(p.id, { answers: p.answers }); this.clearPrompt(value.token);
+        this.rpc.respond(p.id, { answers: p.answers }); this.clearPrompt(value.token, '已提交处理');
         await this.feishu.text(chat, '回答已提交，任务继续。');
       } else await this.feishu.text(chat, '已记录此答案，请继续回答其他问题。');
       return;
@@ -694,7 +713,7 @@ Repository 审批使用 aegpc_repository_approval。用户已授权本 Codex 审
     if (!['accept','decline'].includes(value.decision)) throw new Error('审批操作无效。');
     if (p.method === 'item/permissions/requestApproval') this.rpc.respond(p.id, { permissions: value.decision === 'accept' ? p.params.permissions : {}, scope: 'turn' });
     else this.rpc.respond(p.id, { decision: value.decision });
-    this.clearPrompt(value.token);
+    this.clearPrompt(value.token, '已提交处理');
     await this.feishu.text(chat, value.decision === 'accept' ? '已批准本次请求。' : '已拒绝本次请求。');
   }
   async close() {
