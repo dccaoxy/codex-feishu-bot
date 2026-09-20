@@ -63,6 +63,20 @@ if(command==='setup'){
   if(!ready)throw new Error('服务未就绪，机器人未修改；检查共享服务日志。');
   if(fs.readFileSync(path.join(runtime,'server.nofile'),'utf8').trim()!=='4096')throw new Error('实际资源限制未确认');
   console.log('共享服务已修复并重启：实际 soft nofile=4096；机器人配置未改动。');
+}else if(command==='telemetry-start'){
+  const env=JSON.parse(fs.readFileSync(stateFile));await health(env);
+  const agent='io.codex.feishu-shared-telemetry',file=path.join(os.homedir(),'Library','LaunchAgents',agent+'.plist');
+  fs.mkdirSync(runtime,{recursive:true,mode:0o700});
+  fs.copyFileSync(path.join(root,'scripts/fd-telemetry.mjs'),path.join(runtime,'fd-telemetry.mjs'));
+  save(path.join(runtime,'environment.json'),{url:env.url});
+  const out=path.join(dir,'telemetry');fs.mkdirSync(out,{recursive:true,mode:0o700});
+  const args=[process.execPath,path.join(runtime,'fd-telemetry.mjs'),path.join(runtime,'environment.json'),path.join(runtime,'server.nofile.json'),out];
+  const p=`<?xml version="1.0"?><plist version="1.0"><dict><key>Label</key><string>${agent}</string><key>ProgramArguments</key><array>${args.map(a=>`<string>${xml(a)}</string>`).join('')}</array><key>WorkingDirectory</key><string>${xml(runtime)}</string><key>StartInterval</key><integer>60</integer><key>RunAtLoad</key><true/><key>Umask</key><integer>63</integer><key>StandardErrorPath</key><string>${xml(path.join(out,'service.error.log'))}</string></dict></plist>`;
+  run('/bin/launchctl',['bootout',domain,file],true);fs.writeFileSync(file,p,{mode:0o600});
+  run('/bin/launchctl',['bootstrap',domain,file]);console.log('资源遥测已启用，每60秒只读采样；日志保存在 data/shared-lab/telemetry。');
+}else if(command==='telemetry-stop'){
+  const file=path.join(os.homedir(),'Library','LaunchAgents','io.codex.feishu-shared-telemetry.plist');
+  if(fs.existsSync(file)){run('/bin/launchctl',['bootout',domain,file],true);fs.unlinkSync(file);}console.log('资源遥测已关闭，历史记录保留。');
 }else if(command==='launch-desktop'){
   const env=JSON.parse(fs.readFileSync(stateFile));await health(env);
   if(desktopRunning(env))throw new Error('请先用 ⌘Q 完全退出 Desktop，再双击启动脚本。脚本不会强制终止正在运行的任务。');
@@ -84,4 +98,4 @@ if(command==='setup'){
 }else if(command==='status'){
   const env=JSON.parse(fs.readFileSync(stateFile));await health(env);console.log('共享服务握手和登录通过：'+env.url);
   const c=loadConfig();console.log('机器人连接该地址：'+(c.codex.appServerUrl===env.url));
-}else throw new Error('用法：desktop-shared.mjs setup|repair-limits|status|launch-desktop|rollback|stop-server');
+}else throw new Error('用法：desktop-shared.mjs setup|repair-limits|telemetry-start|telemetry-stop|status|launch-desktop|rollback|stop-server');

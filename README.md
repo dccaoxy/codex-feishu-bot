@@ -279,3 +279,13 @@ SQLite 保存在 `data/state.sqlite`。请保留 `data` 以保留绑定和会话
 已有联调环境可执行 `node scripts/desktop-shared.mjs repair-limits`。仅在没有共享客户端连接时重启共享服务；不会切换机器人权限或重启 Desktop。请先完成任务并退出共享客户端。然后可执行 `node scripts/resource-check.mjs`：只做连接与历史元数据读取，结果保存在被 Git 忽略的 `data/shared-lab/resource-check.json`，不调用模型、不发送飞书消息。它只能验证该负载的资源回收，不能替代长期 Desktop 使用测试。
 
 共享客户端无法显示审批卡片或支持表单时，只释放本地交互，让原客户端继续处理；不会自动向共享服务发送拒绝。用户明确拒绝和已显示审批的超时策略保持不变。解绑只结束飞书观察，不中断原任务，也不会撤销任务已经修改的文件。
+
+### FD 遥测与长期验收
+
+`node scripts/desktop-shared.mjs telemetry-start` 安装独立的、每 60 秒运行一次的本机只读采样任务；`telemetry-stop` 卸载采样任务并保留历史，不停止共享服务。它不改变机器人权限。旧安装先在共享客户端退出后执行 `repair-limits`，产生与 PID、进程启动时间绑定的限制记录；缺失或不匹配时显示 unknown，不用猜测的 4096 计算阈值。
+
+本地 `data/shared-lab/telemetry/latest.json` 是最新状态；`samples.jsonl` 保存时间、PID、FD 总数及 socket/pipe/regular/other 分类、启动时 soft/hard 限制、RSS KiB、直接子进程数、该监听端口已建立连接数和协议 loaded Thread 数。分类仅计数字 FD，不计 cwd、txt 等映射。进程变化或读取失败标记 unavailable/partial；连接数无法区分无匹配和诊断失败时为 null。loaded Thread 请求最多 3 秒，失败为 null；不 resume、不调用模型，也不响应共享审批。采样自身的短连接在 FD/连接统计之后创建。
+
+达到实际启动软上限 50% 时记录 warning；70% 保存详细 snapshot；80% critical 明确告警。告警写入 `alerts.jsonl` 和本机遥测错误日志，**不自动发飞书消息或桌面通知**。详细快照仅保留 FD 编号/类型，不保留文件名、地址、消息正文或命令参数；阈值变化时保存，持续高位最多每 10 分钟一次。JSONL 每份约 5 MiB 轮换并保留上一份。遥测可独立关闭，不会中断工作；采样不修改系统全局限制。
+
+`node scripts/shared-soak.mjs` 是约数分钟的真实模型短测：两个协议客户端、3 个专用任务、6 个回合、无副作用 printf 工具调用和3次连接重建；只清理测试创建的任务，结果写入独立本地 soak JSON。它不发送飞书消息、不修改生产配置，**不等于真实 Desktop + 飞书联调或隔夜稳定性通过**。开始长期验收后，应保持遥测至少覆盖隔夜正常工作，并另行验证 Desktop 工具、真实停止、双端审批与条件允许时的睡眠唤醒；不要对重要任务制造断线或睡眠故障。
