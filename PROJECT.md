@@ -33,6 +33,16 @@ main提供完整群历史、Persistent Group Thread、Owner Gateway、持久FIFO
 
 尚未完成8小时验收。休眠/停机/采样缺口、PID变化需单独记录，覆盖不足不能判连续稳定；结束后评估负载及空闲回收并写回PR。未改机器人/Shared Runtime权限，未重启它们，未Merge或进入Phase3。
 
+## 新群正式启用（2026-09-24 23:06）
+
+Task Source：用户明确要求将新群加入本地授权名单，启用@自动回复并允许Owner访问私人任务和数据库，正式使用机器人。本次是本机配置部署，源码仍8cd4418；授权群从1扩为2，保留原测试群。Owner Gateway仍限原先1个私人任务的1条授权片段、1个只读统计数据库资源；没有扩展字段、数据源、文档写权限或Shared Runtime Work权限。普通成员不能调用Owner Gateway，Owner须显式使用/owner命令；授权读取结果会在群中回复。
+
+已备份本地配置到忽略目录data/production-group-backup-20260924230636，并核对除groups.allowedChatIds新增一项外其余配置不变。确认无活动/排队请求后仅重启机器人，launchd running，启动后Codex与飞书长连接均ready；未重启Desktop或共享App Server。新群历史同步于23:06:43完成，initial_complete=1，收录250条可用消息，无历史请求生成、无停止标记。先前只读API检查259条含9条删除记录，与本地250条一致；complete仅指API可见历史范围，不代表附件内容或平台未提供的消息。
+
+实际候选check、doctor、无模型smoke通过；加载真实配置的本地策略检查通过（@响应、非@忽略、非Owner拒绝、非显式命令拒绝、保留资源范围）。未代用户发送群测试消息，新增群的真实@模型回复及Owner读取仍待首次实际使用确认。未修改源码，未Merge，未进入Phase3。
+
+原8小时资源观察继续，起点未重置；本次新增生产群和机器人重启作为负载/部署事件记入本地遥测deployment-events.jsonl。最新23:06:28样本同一共享PID，FD25、pipe3、子进程1、loaded0、RSS211712KiB、连接1、normal。点状正常不代表8小时已完成；长期稳定Gate仍在进行中。PR #5保持Draft等待收口，不将本次生产启用等同于最终验收完成。
+
 ## 已合并基线记录：Issue #10 Group Request Queue
 
 Task Source：[Issue #10](https://github.com/dccaoxy/codex-feishu-bot/issues/10)，用户要求读取AGENTS并执行。核实PR #7、#9均已合并，从最新main `51db514`创建独立分支 `codex/issue-10-group-queue`；PR #5仍open、未合并，head `53c8575`。用户已明确允许完成自动测试后更新原单群候选、仅重启机器人，不重启Desktop、不Merge。
