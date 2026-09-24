@@ -1,3 +1,4 @@
+import { GroupAssistant } from './group-assistant.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { loadConfig } from './config.mjs';
@@ -29,6 +30,7 @@ async function main() {
       console.log(`✓ 可用模型数：${models.data.length}`);
       console.log(`✓ 工作目录：${config.codex.cwd}`);
       console.log(config.feishu.appId && config.feishu.appSecret ? '✓ 飞书凭证已填写（未联网验证）' : '待填写：config.local.json 的 feishu.appId / appSecret');
+      console.log(`群助手：${config.groups.enabled ? '启用' : '关闭'}；授权群数量：${config.groups.allowedChatIds.length}；启用前运行 npm run group:check 验证受限工具。`);
       console.log('诊断不会发起模型任务，也不会给飞书发送消息。');
       if (!account.account) process.exitCode = 1;
     } finally { await rpc.close(); }
@@ -49,6 +51,7 @@ async function main() {
   }
   const store = new Store(config.storageDir), rpc = new CodexClient(config.codex.binary), feishu = new Feishu(config);
   const bot = new Bot(config, store, rpc, feishu);
+  let groups;
   let shuttingDown = false;
   // A live shell without its Codex child cannot serve requests. Exit so launchd can
   // replace the whole process; during an intentional shutdown this listener is inert.
@@ -61,6 +64,7 @@ async function main() {
   async function shutdown() {
     if (shuttingDown) return;
     shuttingDown = true;
+    await groups?.close();
     await bot.close(); feishu.close(); await rpc.close();
     // In-flight work retains a recovery marker. Exit only after the store has stopped being used.
     if (fs.existsSync(lock) && fs.readFileSync(lock, 'utf8') === String(process.pid)) fs.unlinkSync(lock);
@@ -75,10 +79,22 @@ async function main() {
     if (!account.account) throw new Error('请先运行 codex login 登录。');
     console.log('Codex 已连接。');
     if (!bot.owner) console.log(`首次配对：私聊机器人发送任意文字，它会返回配对码。把码告诉本机 Codex 助手确认。\n也可在 15 分钟内私聊发送 /pair ${bot.pairCode} 直接配对。`);
-    else console.log('已加载绑定账号，只接收该账号的单聊消息。');
+    else console.log('已加载单聊绑定账号；群聊使用独立授权策略。');
     await bot.recover();
     bot.ownerTimer = setInterval(() => bot.refreshOwner(),1000);
-    await feishu.start(data => bot.onMessage(data), data => bot.onAction(data));
+    if (config.groups.enabled) {
+      const info = await feishu.call(() => feishu.client.request({method:'GET',url:'/open-apis/bot/v3/info'}));
+      if (!info.bot?.open_id) throw new Error('无法确认机器人身份，群聊未启用');
+      groups = new GroupAssistant(config,feishu,() => bot.owner,info.bot.open_id);
+    }
+    await feishu.start(data => {
+      if ((data.event || data).message?.chat_type === 'group') return groups?.onMessage(data);
+      return bot.onMessage(data);
+    }, data => bot.onAction(data), groups ? {
+      'im.message.recalled_v1': data => groups.onRecall(data),
+      'im.chat.member.bot.deleted_v1': data => groups.onLeave(data),
+    } : {});
+    groups?.start();
     console.log('机器人启动中。请保持电脑联网且不休眠。按 Ctrl+C 停止。');
   } catch (e) { console.error(bot.redact(e)); process.exitCode = 1; await shutdown(); }
 }

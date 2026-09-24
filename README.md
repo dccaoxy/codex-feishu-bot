@@ -52,7 +52,7 @@ codex login
 
 **只填写凭证无法代替飞书后台的机器人能力、订阅和发布步骤。**
 
-首次配对后只接受绑定账号的单聊；群聊、其他用户和其他机器人消息均被忽略。也可以提前在 `ownerOpenId` 填自己的 `ou_...`，跳过配对。更换绑定账号时停止程序，再修改 `ownerOpenId`；它优先于数据库中的配对记录。
+首次配对后单聊只接受绑定账号；群聊默认忽略，显式配置后按本文群聊独立策略处理。也可以提前在 `ownerOpenId` 填自己的 `ou_...`，跳过配对。更换绑定账号时停止程序，再修改 `ownerOpenId`；它优先于数据库中的配对记录。
 
 ## 命令和体验
 
@@ -202,3 +202,70 @@ SQLite 保存在 `data/state.sqlite`。请保留 `data` 以保留绑定和会话
 普通审批使用允许/拒绝卡片；标准及兼容 JSON Schema 的扩展表单支持命名选项、多选和对象。数组、对象使用 `/answer 请求码 字段名 JSON` 回答，所有必填项完成后点击提交，服务端校验通过才回复批准。默认值不自动提交。含密码/密钥、未知 schema 扩展或原生身份验证的请求会明确提示。网页授权有“打开授权页面”和“已完成网页授权”按钮，点击后仍由授权服务判断登录是否成功，不等于凭空取得权限。
 
 验证命令：`npm test`、`npm run smoke`、`node scripts/live-check.mjs --docs`（使用一次模型调用、模拟文档工具返回）、`node scripts/docs-check.mjs`（真实创建一份测试文档并验证读写，会保留测试文档）。
+
+## 群聊观察助手（Issue #6，默认关闭）
+
+群功能独立于单聊和 PR #5 的共享 Thread。仅本机配置 `groups.enabled=true` 且在 `allowedChatIds` 中的群启用；不要把真实群 ID 或配置提交到 Git。未 @ 的消息只入库，不调用模型、不回复。只有事件 mentions 中精确匹配机器人 Open ID 的用户 @ 才响应；纯文本“@机器人”和机器人之间的 @ 不触发。
+
+### 飞书前置配置
+
+由群管理员在群设置的机器人入口添加本应用机器人，确保应用已发布且成员在可用范围内。订阅 `im.message.receive_v1`，并申请 **`im:message.group_msg`**（读取群内用户发送的全部消息，敏感权限，可能需要管理员批准）。只有 `im:message.group_at_msg` / `im:message.group_at_msg:readonly` 时只能收到 @，不能声称已经记录普通群聊。若还需要记录其他机器人消息，另申请 `im:message.group_msg.include_bot:read`；默认不要求。应用自己的消息不依赖事件回流记录。
+
+保留已有 `im:message:send_as_bot` 回复权限；群首版用文字回复，不依赖 CardKit。订阅 `im.message.recalled_v1` 和 `im.chat.member.bot.deleted_v1` 以清除撤回消息和处理退出群。应用更新权限/订阅后须发布生效。API 能读取群信息或历史，不代表长连接已获得未 @ 消息订阅，必须做真实验收。
+
+官方依据（2026-09-24 核对）：[接收消息事件与权限](https://open.feishu.cn/document/server-docs/im-v1/message/events/receive)、[增加文档协作者](https://open.feishu.cn/document/server-docs/docs/permission/permission-member/create)。群文档授权使用 `member_type=openchat`、`type=chat`、`perm=view`，应用必须已在该群且有添加协作者权限。沿用既有 docx 创建、编辑、内容转换权限。
+
+### 使用与权限
+
+- 普通成员：@ 后查询本群消息，按时间、发送者 Open ID、关键词检索，生成总结、行动项和 Markdown 表格。每次最多50条，前后上下文最多各10条；来源结果及模型上下文有长度上限。回复默认只显示答案，不自动附消息编号、时间清单或同步诊断。用户明确要求来源时再提供相关来源；资料不足影响结论时简短说明。首次启用自动分页同步完整可读历史；启动、每分钟和 @ 前自动补齐离线窗口。
+- Owner：上述能力，加明确的文档写入命令。首版不从模糊自然语言推断写入授权；先生成正文，再由 Owner @ 发送下述命令。普通成员不能写文档。
+- 所有人（包括 Owner）在群中均无私人 Thread、Attach、审批、本机文件、GitHub、跨群访问权限。个人单聊权限不传递到群内。
+
+Owner @ 后可使用：
+
+```text
+/group-doc create 群讨论整理
+这里粘贴确认后的 Markdown 正文或表格
+
+/group-doc append 文档ID
+追加 Markdown 正文
+
+/group-doc update 文档ID 块ID 读取时版本号
+替换文本
+```
+
+创建的新文档写入成功并分享给本群后，才登记为本群资源。更新仅限 `groups.documentIds` 明确授权的 docx ID 或本群成功创建的文档；飞书平台权限仍会校验。不能用群消息中的链接自动授予资源权限。部分创建失败可能留下空文档，超时不盲重试，Owner 应检查实际文档；撤回/停止不会回滚已完成的文件写入。模板配置保持空文档清单。
+
+### 模型隔离与运行限制
+
+每群使用独立、持久化的 Codex HOME 与 `ephemeral:false`、`environments: []` Group Thread。首次工作 @ 时创建任务并立即保存 ID；后续 @ 和进程重启都 resume 原 ID，恢复失败不偷偷新建替代任务。普通消息只写 GroupMessageStore，不为创建空 Thread 启动无意义模型 Turn。显式关闭 shell、apps、plugins、记忆、浏览器、委派及技能发现，不加载私人配置或历史。仅引用同机 `auth.json` 登录状态，不复制凭据。不能将 read-only 沙箱或提示词当作隔离边界。群模型不连接 Desktop 的共享 App Server。
+
+目前仅允许已验证的 `codex-cli 0.155.0-alpha.16.3`。升级后先重新验证再更新版本门槛。运行 `GROUP_CODEX_BINARY=/实际/codex npm run group:check`：本地假模型捕获真实工具清单，并主动请求技能枚举、伪造技能文件读取、命令和文件读取。该版本残留 `skills.list/read` 接口，但两类技能目录为空，伪造包不可读；问答请求被桥接拒绝。模型可用资料工具只有本群 `group_search/context/changes/message`。探针同时覆盖首次创建和进程重启后的 resume；两次共10个对抗调用。检查不使用凭据、不调用远端模型。
+
+每群最多一个请求，全局最多两个；忙时新的 @ 记录为 busy，不排队或重放（本版无忙碌提示）。单次180秒、最多12次动态工具调用；回复截断并说明检索范围。失败后不自动重新调用模型、写文档或重发未知结果。切换群功能不授予任何 Full 权限。
+
+### 本地数据、撤回和保留
+
+`storageDir/groups/groups.sqlite` 独立保存消息、最小身份信息和引用关系，0600文件/0700目录，必须保持在忽略的运行目录。默认 `retentionDays:null`，保留完整原始历史直到撤回/退群或管理员明确清理。现有配置中的数值不会隐式改写；若明确设置1–365天，则按该保留期清理，覆盖范围不能当作完整历史。附件仅存引用和有限元数据，不下载、OCR或转写。保存 API 返回的原始 content 与可解析文本；模型每次仅获得有界片段，长消息可用 group_message 按4000字符分页读取。卡片若只返回占位内容，原始记录也只能保存平台实际返回的内容，不声称获得隐藏正文。
+
+按 message_id 去重，不按 event_id。重启把未决任务标记 uncertain，不重复执行。撤回事件删除对应本地正文并取消该群正在进行的响应；退出群事件清空群消息及本地生成文档授权，持久化停止标记，重新入群不会自行恢复。恢复需管理员明确处理本地停止标记并重新授权。撤回ID和停止标记保留为最小去重元数据。长期 Thread 可能已含撤回/过期消息，因此撤回、过期清理或退出群时使群 Thread 失效、取消在途响应，并在活动工作结束（模型 RPC 关闭）后由所有任务共用的结束路径清除其本机隔离 HOME；无活动任务时立即清理，文档/非模型命令也不能跳过清理；下一次经授权工作会从剩余群库建立新一代任务。该隐私清理是固定 ID 的明确例外，普通重启不换 ID。已经发出的回复、已创建的云文档、用户备份及飞书服务端历史不由此撤销。
+
+首版没有可靠编辑事件同步，保存的是首次收到的消息快照，不承诺反映后续编辑；没有收到撤回事件时也无法自动感知撤回。停用 allowlist 后不再接收/使用该群，既有消息按保留期清理。清理不等于删除用户自行备份或云端文档。
+
+### 验收
+
+先运行 `npm run check`、`npm test`、`npm run doctor`、`npm run smoke`、`npm run group:check`。`npm run group:status` 只显示计数和状态，不打印群ID或消息正文。
+
+真实群验收至少：普通库存消息保持静默并入库；精确 @ 生成库存表和来源；按关键词/日期找回前文；普通成员请求私人任务/写文档被拒；重复事件不重复回复；重启后历史仍可查询。切勿给同一飞书应用同时启动两个独立长连接来做测试，事件可能分流。与未合并 PR #5 联调时应使用保留 PR #5 功能的隔离测试包，不直接用本分支覆盖共享运行服务。
+
+### 完整历史、断线补录与工作上下文（本轮更新）
+
+- `history_sync` 持久化 syncing/complete/partial/failed、分页 token、固定查询上界、已确认连续区间的消息 ID 锚点、最近完成时间和最近 live 事件接收时间。最后两项分别代表 API 扫描完成和进程收到事件，不能冒充飞书服务 SLA。
+- 首次按创建时间倒序分页至 API 末页，每页数据与 checkpoint 同一事务提交。失败保留 checkpoint；下次定时/启动/@ 前继续。页面 token 失效会 fail closed，需管理员核验后重置该扫描，不能报 complete。
+- 后续扫描从新的固定上界向前补录，直到与上次完整扫描锚点 message_id 重合；若锚点被删除，则一直扫描到末页。普通 live 入库记录不能充当连续区间证明。消息 ID 去重，实时与历史路径可并存。
+- 补录路径永不分发交互。启动前产生但延迟投递的 @ 也只记录；历史抢先入库的新 live @ 可以原子认领一次。失败/结果不明/已处理任务不自动重放。
+- 本机 `0.155.0-alpha.16.3` schema 有 `thread/injectItems`（原始 Responses items），但未取得稳定语义和幂等保证；本版不使用该实验接口。`thread/resume.history` 明确标记 UNSTABLE / DO NOT USE，也不使用。不靠普通消息创建 Turn 来伪造同步。
+- `group_threads` 持久化 Thread ID、resume/running/idle/failed 状态、成功提供的增量预览 cursor 与 pending_cursor。@ 时提供最多15条有界增量、数据库覆盖范围及是否还有余下资料；成功 Turn 后才推进 cursor。该游标只表示已提供预览的位置，**不是所有原文已经被模型吸收的证明**。剩余内容和早期资料始终可按时间/关键词/发送者、序号或消息 ID 回查。失败保留原 cursor，资料再次提供不会重放旧任务。
+- 大量原文不会一次塞入 Context Window。由 Codex 自身工作上下文管理处理长对话；不增加主动 Compaction Turn、不删除原始群库。未实测极限 Context Window 下的产品体验。
+- 每群独立持久化 HOME 位于 `storageDir/groups/threads/<群ID哈希>/`，不挂接个人 Shared App Server。同群连续工作自然延续，其他群与私人任务没有共享历史、工具或权限。
+- docx/docs/wiki/base/sheets 链接只记录类型、资源标识及链接；来源消息保留分享者和时间。不会自动下载、全文镜像或授予阅读/写入权限；当前资源内容与历史分享事实分开。本轮不新增资源读取 Gateway、Daily Digest、Topic Memory 或私人权限。

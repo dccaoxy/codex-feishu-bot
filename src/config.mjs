@@ -1,3 +1,4 @@
+import { groupConfig } from './group-policy.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -6,6 +7,7 @@ export const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 export function loadConfig(filename = path.join(ROOT, 'config.local.json'), requireCredentials = true) {
   if (!fs.existsSync(filename)) throw new Error('找不到 config.local.json，请复制 config.example.json 并填写配置。');
   const c = JSON.parse(fs.readFileSync(filename, 'utf8'));
+  c.groups = groupConfig(c.groups);
   const base = path.dirname(path.resolve(filename));
   if (!c.feishu || !c.codex) throw new Error('配置必须包含 feishu 和 codex。');
   for (const key of ['appId', 'appSecret', 'ownerOpenId']) {
