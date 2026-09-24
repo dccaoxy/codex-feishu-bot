@@ -12,8 +12,9 @@ Task Source：[Issue #6](https://github.com/dccaoxy/codex-feishu-bot/issues/6)�
 - **自动验证已通过**：本分支 check、44 项测试（含原单聊30项）、doctor、smoke；隔离探针5个对抗调用通过。真实 Codex 模型完成合成库存检索和 Markdown 表格；模型未稳定标注来源，因此桥接层另附提供给模型的来源清单和有限范围，不靠模型自述证明隔离。
 - **真实飞书已验证的部分**：机器人身份、指定测试群元数据、消息列表读取接口成功；这不证明未 @ 的长连接接收权限。用户已授权指定群及测试包启用。原飞书长连接已切换至保留 PR #5 的本地隔离候选包，77 项组合测试及共享连接 doctor、群隔离探针通过，重新启动后长连接 ready。Desktop/共享 App Server 未重启，原 checkout 和配置未覆盖。
 - **本机测试部署**：运行目录为原 checkout 的忽略目录 `data/issue6-candidate`；原 launchd plist、原配置和 SQLite 备份在 `data/issue6-backup`。候选包共用原单聊数据库以保留绑定，群库独立在 `data/groups`。只有一个飞书长连接。回滚时仅停止 `io.codex.feishu-bot`，恢复备份 plist 后重新 bootstrap；不要恢复旧数据库覆盖测试期间的新单聊历史，不动共享 App Server。原启动/安装脚本若重新安装服务可能切回原 checkout，须检查实际 ProgramArguments。
+- **后续实测观察**：收到一次单独 @，消息时间比候选包最后一次重启早约7秒，任务随服务停止中断且未自动重放；不能作为模型端到端成功。随后独立合成模型调用、指定群授权测试回复API均成功。已固定候选包，等待带完整问题的验收消息。租户scope接口列出群全量读取及发送权限；仍须实际普通消息来验证订阅交付。
 - **未完成/待人工验收**：等待用户在测试群发送未 @ 库存消息和真实 @ 表格请求，核对静默入库、回答、来源、历史检索；真实群文档创建/分享、普通成员权限、撤回/退出事件及编辑变化仍需分别验证。长时间稳定性未验证。本版编辑仅首次快照，附件不解析，忙时 @ 不排队/不回话，文档写入要求明确命令；见 README。
-- **提交/PR交付断点**：本次代码及以上状态提交至本任务分支，拟创建独立 Draft PR；真实群验收未完成前不声称 Issue 已完成。补齐验收证据后更新本段、Issue 和 PR，依 AGENTS.md 转 Ready 触发自动审核；不得自动 Merge 或进入 Full。
+- **提交/PR交付断点**：实现已提交并推送（`1c2ac58`），已创建独立 [Draft PR #7](https://github.com/dccaoxy/codex-feishu-bot/pull/7)，Issue #6 已留阶段报告；真实群验收未完成前不声称 Issue 已完成。补齐验收证据后更新本段、Issue 和 PR，依 AGENTS.md 转 Ready 触发自动审核；不得自动 Merge 或进入 Full。
 
 ## 既有主线状态（历史记录）
 根据 README：
