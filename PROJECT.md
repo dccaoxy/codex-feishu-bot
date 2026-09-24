@@ -25,6 +25,14 @@ main提供完整群历史、Persistent Group Thread、Owner Gateway、持久FIFO
 
 正式审批卡片真实验收尚待用户操作，不能以自动测试或连接ready替代。拟在已绑定共享任务用request_permissions申请一个专用测试文件的写权限，由用户在Desktop拒绝，检查飞书原审批卡片关闭/移除按钮且旧操作不再生效，不产生文件写入。通过后才设置正式观察起点并核验60秒采样任务；目前尚未开始本轮8小时验收计时，既有遥测不冒充本轮验收。需记录FD/pipe、子进程、loaded tasks、RSS与连接状态；观察不足、采样缺口或睡眠需如实记录。
 
+## Phase 2 正式资源观察已启动（2026-09-24 22:56）
+
+用户确认昨天审批测试已通过，明确不重复。本轮采用用户确认作为继续依据；没有重新执行部署后审批UI测试，不将历史截图冒充新版本视觉证据。
+
+已启用独立launchd只读采样，StartInterval=60秒，首条样本有效。正式窗口从2026-09-24 22:56:47至最早2026-09-25 06:56:47（北京时间），部署源码8cd4418。初始FD31（pipe3）、直接子进程1、loaded tasks0、RSS226064KiB、连接1、status ok。记录FD、分类、RSS、子进程、loaded任务、连接及进程身份；不得把上限提高当作根因修复。数据/起点位于忽略目录data/shared-lab/telemetry，后台每30分钟复核异常及采样覆盖，安静观察无变化状态。
+
+尚未完成8小时验收。休眠/停机/采样缺口、PID变化需单独记录，覆盖不足不能判连续稳定；结束后评估负载及空闲回收并写回PR。未改机器人/Shared Runtime权限，未重启它们，未Merge或进入Phase3。
+
 ## 已合并基线记录：Issue #10 Group Request Queue
 
 Task Source：[Issue #10](https://github.com/dccaoxy/codex-feishu-bot/issues/10)，用户要求读取AGENTS并执行。核实PR #7、#9均已合并，从最新main `51db514`创建独立分支 `codex/issue-10-group-queue`；PR #5仍open、未合并，head `53c8575`。用户已明确允许完成自动测试后更新原单群候选、仅重启机器人，不重启Desktop、不Merge。
