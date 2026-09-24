@@ -120,10 +120,11 @@ export class Feishu {
     if (!result?.file_key) throw new Error('上传文件失败，未收到 file_key。');
     return this.send(chat, 'file', { file_key: result.file_key });
   }
-  start(onMessage, onAction) {
+  start(onMessage, onAction, groupEvents = {}) {
     const dispatcher = new lark.EventDispatcher({ logger: quietLogger }).register({
       'im.message.receive_v1': onMessage,
       'card.action.trigger': onAction,
+      ...groupEvents,
     });
     this.ws = new lark.WSClient({ appId: this.config.feishu.appId, appSecret: this.config.feishu.appSecret,
       domain: lark.Domain.Feishu, logger: quietLogger, autoReconnect: true,
