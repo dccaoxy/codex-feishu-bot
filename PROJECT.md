@@ -21,11 +21,15 @@ Task Source：[Issue #8](https://github.com/dccaoxy/codex-feishu-bot/issues/8)�
 - 本分支 check、84项自动测试通过；含 Owner/伪造身份/群隔离、只读分页/工具输出剔除、无整历史回退、只读文件校验、未登记表列/SQL/路径拒绝、symlink、超量/超时/取消、聚合与派生计算核对。
 - 已运行真实 Codex doctor（已登录、7模型）、smoke（无模型调用），以及本机真实二进制隔离探针：初建/重启恢复10项对抗调用通过。未将这些检查当作真实模型或飞书验收。
 - 将现有 PR #5 + PR #7 候选源码复制至本分支忽略的 `data/issue8-combination`，仅叠加网关改动；117项组合测试及 check 通过。没有修改运行中的候选服务。
-- 已修改、已本地测试；真实私人内容读取、真实数据行查询、真实群 Owner 两轮引用 **未验证**。未部署、未安装服务、未重启 Desktop/共享 App Server、未 Merge。提交和 Draft PR 见本分支交付记录。
+- 已修改、已本地测试；真实私人内容读取、真实群 Owner 两轮引用 **未验证**。首轮未部署；本轮统计数据测试部署与核验详见下方。未安装新服务、未重启 Desktop/共享 App Server、未 Merge。提交和 Draft PR 见本分支交付记录。
 
 ### 未完成与交接断点
 
-等待用户指定可以在测试群披露的私人任务与首个真实数据资源（已发询问，尚无回复）。当前没有自动接入发现的数据库。资源范围明确后，核对必要表列并配置默认关闭的本地测试包；完成真实群 @ 搜索、分页读取/引用、第二轮延续、真实只读计算和模拟非 Owner 拒绝。确认部署范围后才加载测试包。
+用户已授权使用“新羽学员信息”中的数据库。核对该任务当前输出，选择最新分组名单快照（不是早期旧版数据库）；只登记 students.squad_no，允许 count/group 等统计，姓名、ITCODE、导师等字段未开放。真实只读网关计算与独立 SQL 结果一致：58人、14队，第7与11队各5人、其他队各4人；查询前后源文件 SHA-256 一致。资源路径/结果证据仅存本机忽略目录，不提交 Git。
+
+2026-09-24 已沿用既有单群测试部署授权，将网关加载到原 `data/issue6-candidate`，保留 PR #5 功能；privateThreads=false，只开放上述统计资源。替换前备份，检查与117项组合测试通过后仅重启机器人，日志确认 Codex 连接与飞书长连接恢复。未改 Desktop/Shared App Server、未改 launchd 配置、未写源数据库。回滚副本在 Issue #8 worktree 的 `data/issue8-live-backup-20260924185243`（含本地配置，勿提交）；核验记录 `data/issue8-xinyu-verification.json`。未主动发群消息。
+
+下一步由 Owner 在原群真实 @ 发送 `/owner query xinyu_students` 加结构化 count/group 查询，再次 @ 延续讨论。尚未完成真实群查询/连续对话验收。私人 Thread 读取仍关闭，用户本轮只明确指定数据库，未据此开放全部私人任务。数据库测试加载不代表私人读取验收或完整 Issue 完成。
 
 Issue #8 明确要求“完成测试和真实验收后 Ready for review”，因此真实验收前仅 Draft，不触发 Ready 审核，不关闭 Issue。下一步是完成上述验收，再按 AGENTS 转 Ready、等待审核并保留 Human Merge Gate。
 
