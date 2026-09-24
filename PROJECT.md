@@ -24,6 +24,16 @@ Task Source：[Issue #12](https://github.com/dccaoxy/codex-feishu-bot/issues/12)
 - 独立空凭据配置doctor登录/7模型、无模型smoke和只读knowledge:status通过。飞书未联网验证，Owner配置与群功能均关闭。
 - 在忽略的独立临时组合目录，以PR #5代码00ade11为基底叠加本Issue源码，check及175项组合测试通过，包含单聊/Work/审批和PR #7/#9/#11回归。未覆盖/部署PR #5源码。PR #5遥测23:27:34仍同PID、status ok、FD30、子进程1、loaded1、连接1；不以点状值宣称长期观察完成。
 
+### 359b024 真实历史隔离验收（2026-09-24）
+
+用户授权在不影响PR #5的隔离方式验证原授权测试群，且明确保持Draft。以359b024原源码运行独立Knowledge Worker及独立SQLite，生产群库仅read-only事务选取原测试群两日Raw与实际history_sync证明；未启动第二条飞书长连接，未连接Shared App Server、Owner Gateway或用户持久群任务。未替换生产候选、配置、遥测或launchd。
+
+- 最终选取2026-03-15（8条）及03-16（13条），实际同步状态complete、initial_complete=1，last_reconciled_at覆盖两个日末。输出2份正式Digest、3个Topic；其中2个既有Topic沿用相同ID更新为v2，另1个为第二日新主题。13个唯一source_message_ids全部匹配快照原文，用户群任务0条。原文及派生内容仅保存在独立worktree忽略目录，不上传GitHub。
+- 如实保留失败：最初02-27/28日期组首日worker_failed，未写正式产物；随后03-15首次knowledge_digest_lineage校验拒绝，按持久退避规则第二次成功。未修改359b024源码、未关闭校验、未手工修补模型JSON。成功不能掩盖首次失败，模型一次生成可靠性仍是风险。
+- check通过；最终核对PR #5候选47个部署文件哈希均未变化；Shared PID67006维持，23:54:41采样status ok、FD28、pipe3、子进程1、loaded1、RSS226672KiB、连接1。仅点状健康证据，不替代PR #5独立8小时观察。本次模型进程与生产服务隔离，但共享主机CPU/内存负载。
+- 本地人工核对页：data/knowledge-acceptance-359b024-march/人工核对.html，包含完整Daily Digest、Topic当前状态及逐日版本、可点击source_message_ids与两日21条原始消息；账号标识在展示中隐藏。snapshot.json/results.json/verification.json和执行日志为本机证据；最初失败保留在data/knowledge-acceptance-359b024。快照不接收后续撤回，正式使用前应重新核验来源有效性。
+- 待人工核对至少一项fact、文档归档行动项、两Topic更新及来源；特别核对机器人自述与实际完成的区别。未实测在线群@读取Topic、来源回复、实时@抢占或普通消息并行。此次仅完成真实历史生成与程序化来源核对，不能称Issue #12全部真实验收PASS。PR #14保持Draft，不Merge、不转Ready；生产knowledge仍关闭。
+
 ### Remaining / 交接
 
 已实现、已本机测试、已真实模型合成验证；尚未部署、尚未真实群验收，未Merge。核心实现提交c550954，已推送并创建[Draft PR #14](https://github.com/dccaoxy/codex-feishu-bot/pull/14)，Issue #12已回写阶段交付报告。后续修正以该PR最新head为准。本Issue要求“自动测试 + 真实群验收完成后 Ready”，因此保持Draft，不提前触发最终审核。后续须安排独立或PR #5观察结束后的授权测试环境，再核对真实两日期知识、人工内容/来源、群内Topic查询与实时@并行。当前生产仍运行原组合候选，knowledge未启用；不自行重启或替换它。
