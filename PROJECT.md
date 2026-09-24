@@ -17,6 +17,14 @@ main提供完整群历史、Persistent Group Thread、Owner Gateway、持久FIFO
 
 本轮尚未部署收敛分支，现有单群候选及真实配置不变；不重启机器人/Desktop/共享服务，不发真实飞书消息。真实正式审批卡片最终视觉、数小时/隔夜及sleep/wake验收仍是后续Gate；基线与协议短测不得冒充最终Phase 2收口。本轮按用户“先完成基线收敛和组合回归”范围交付，PR保持Draft，后续完整验收后再Draft→Ready，不Merge。
 
+## Phase 2 步骤3–4进行中：组合候选已部署，等待正式审批验收
+
+用户明确授权部署8cd4418并在正式双端审批卡片验收通过后开始至少8小时、每60秒资源观察。已部署精确源码8cd44185d94846e65839767b17555f1fb7854ad3到原data/issue6-candidate；部署前确认单聊无活动run、群无queued/running/sending。源文件从该提交提取；原配置字节未变，仍原单群、Owner Gateway资源与私人片段范围、FIFO及Shared Runtime Work权限。备份位于本机忽略目录 phase2-combined-backup-20260924224532（data下），保存旧源码/配置/群SQLite。
+
+实际候选check/148项组合测试、doctor（登录、7模型；群1、Owner网关启用）、无模型smoke通过。仅机器人重启，launchd running，新启动日志确认Codex与飞书长连接ready；未重启Desktop/共享服务。没有改权限、没有Merge或进入Phase 3。
+
+正式审批卡片真实验收尚待用户操作，不能以自动测试或连接ready替代。拟在已绑定共享任务用request_permissions申请一个专用测试文件的写权限，由用户在Desktop拒绝，检查飞书原审批卡片关闭/移除按钮且旧操作不再生效，不产生文件写入。通过后才设置正式观察起点并核验60秒采样任务；目前尚未开始本轮8小时验收计时，既有遥测不冒充本轮验收。需记录FD/pipe、子进程、loaded tasks、RSS与连接状态；观察不足、采样缺口或睡眠需如实记录。
+
 ## 已合并基线记录：Issue #10 Group Request Queue
 
 Task Source：[Issue #10](https://github.com/dccaoxy/codex-feishu-bot/issues/10)，用户要求读取AGENTS并执行。核实PR #7、#9均已合并，从最新main `51db514`创建独立分支 `codex/issue-10-group-queue`；PR #5仍open、未合并，head `53c8575`。用户已明确允许完成自动测试后更新原单群候选、仅重启机器人，不重启Desktop、不Merge。
