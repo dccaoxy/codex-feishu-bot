@@ -20,6 +20,7 @@ export class KnowledgeScheduler {
       while(processed<this.config.maxDaysPerCycle&&!this.closed&&!this.busy()){
         let job;try{job=this.store.prepare(chat,this.config.timezone,lastDueDay(this.clock(),this.config));}catch{this.log('知识时区发生变化，需要本机人工重建');break;}
         if(!job||job.status==='blocked'||job.next_attempt>this.clock())break;
+        if(job.attempts>=3){this.raw.db.prepare("UPDATE knowledge_jobs SET status='blocked',error='knowledge_retry_limit' WHERE chat=? AND date=?").run(chat,job.date);break;}
         const controller=new AbortController();this.active={chat,controller};let snapshot;
         try{
           snapshot=this.store.snapshot(chat,job.date,this.config);
