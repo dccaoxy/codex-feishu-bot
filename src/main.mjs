@@ -31,6 +31,7 @@ async function main() {
       console.log(`✓ 工作目录：${config.codex.cwd}`);
       console.log(config.feishu.appId && config.feishu.appSecret ? '✓ 飞书凭证已填写（未联网验证）' : '待填写：config.local.json 的 feishu.appId / appSecret');
       console.log(`群助手：${config.groups.enabled ? '启用' : '关闭'}；授权群数量：${config.groups.allowedChatIds.length}；启用前运行 npm run group:check 验证受限工具。`);
+      console.log(`Owner Gateway：${config.ownerGateway.enabled ? '启用' : '关闭'}；授权数据源：${config.ownerGateway.resources.length}；私人任务读取：${config.ownerGateway.privateThreads ? '启用' : '关闭'}。`);
       console.log('诊断不会发起模型任务，也不会给飞书发送消息。');
       if (!account.account) process.exitCode = 1;
     } finally { await rpc.close(); }
@@ -85,7 +86,7 @@ async function main() {
     if (config.groups.enabled) {
       const info = await feishu.call(() => feishu.client.request({method:'GET',url:'/open-apis/bot/v3/info'}));
       if (!info.bot?.open_id) throw new Error('无法确认机器人身份，群聊未启用');
-      groups = new GroupAssistant(config,feishu,() => bot.owner,info.bot.open_id);
+      groups = new GroupAssistant(config,feishu,() => bot.owner,info.bot.open_id,{rpc});
     }
     await feishu.start(data => {
       if ((data.event || data).message?.chat_type === 'group') return groups?.onMessage(data);

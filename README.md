@@ -127,7 +127,7 @@ codex login
 
 ## 运行与诊断
 
-要求 Node.js 24+，可用的 Codex CLI / App Server。换机器后：
+要求 Node.js 24.10+，可用的 Codex CLI / App Server。换机器后：
 
 ```sh
 npm ci
@@ -269,3 +269,36 @@ Owner @ 后可使用：
 - 大量原文不会一次塞入 Context Window。由 Codex 自身工作上下文管理处理长对话；不增加主动 Compaction Turn、不删除原始群库。未实测极限 Context Window 下的产品体验。
 - 每群独立持久化 HOME 位于 `storageDir/groups/threads/<群ID哈希>/`，不挂接个人 Shared App Server。同群连续工作自然延续，其他群与私人任务没有共享历史、工具或权限。
 - docx/docs/wiki/base/sheets 链接只记录类型、资源标识及链接；来源消息保留分享者和时间。不会自动下载、全文镜像或授予阅读/写入权限；当前资源内容与历史分享事实分开。本轮不新增资源读取 Gateway、Daily Digest、Topic Memory 或私人权限。
+
+## Owner Resource Gateway（Issue #8，候选功能）
+
+默认关闭。仅当前绑定 Owner 在已授权群内的**实时 @ 指令**可以读取私人资料；正文、昵称、转发和历史内容不授予权限。首版采用明确命令，不由模型自动选择私人资源。结果作为有限参考进入该群既有 Persistent Group Thread，群成员后续可讨论；不会绑定或修改被读取的私人 Thread。
+
+在本机 `config.local.json` 配置 `ownerGateway.enabled=true`，需要私人任务时另设 `privateThreads=true`。数据库必须逐项登记，例如（全部为占位值，不要提交真实配置）：
+
+```json
+{"ownerGateway":{"enabled":false,"privateThreads":false,"resources":[{
+  "id":"inventory","type":"sqlite","displayName":"授权库存",
+  "path":"/ABSOLUTE/LOCAL/PATH/inventory.sqlite3",
+  "permissions":["read","compute"],"tables":{"sales":["brand","amount","prior"]}
+}]}}
+```
+
+Owner 在授权群 @ 机器人后发送：
+
+- `/owner search 任务标题关键词`：返回最多30个标题与任务ID，不附内容预览。
+- `/owner read 任务ID` 或 `/owner read 任务ID 游标`：最多8回合，每条1500字符，总计12000字符，附分页游标和截断状态。下一行可写本次对比/总结要求。
+- `/owner resources`：显示可读资源、表列和权限，不显示路径。
+- `/owner query inventory`，下一行是结构化查询，例如：
+
+```json
+{"table":"sales","groupBy":["brand"],"metrics":[{"op":"sum","column":"amount"},{"op":"sum","column":"prior"}],"derive":[{"op":"growth","left":0,"right":1}],"limit":50}
+```
+
+也支持 `columns:["brand","amount"]` 投影与 `where:[{"column":"brand","op":"=","value":"Example"}]` 筛选。筛选只支持 =、!=、>、>=、<、<=。metrics 支持 count/sum/avg/min/max；结果字段 metric_0 等按输入顺序编号。derive 的 left/right 引用同一行指标序号，支持 difference（左减右）、ratio（左除右）、growth（左减右再除右）；分母0返回 null，不能据此编造增长率。分组最多3列、指标8个、派生计算4个。
+
+仅 SQLite 驱动；表与列双重允许列表、只读连接、SQLite authorizer 拒绝写入/附加数据库/未授权函数、符号链接路径拒绝。无任意 SQL、文件路径或 shell 接口。默认50行、最高100行、查询默认2秒取消期限、行结果16000字符、最终网关结果24000字符；超量或超时明确失败，不自动扩大查询。查询在固定独立子进程运行，不继承机器人环境变量；到期或取消发送 SIGKILL，并等待进程 close、连接释放后返回失败。两秒是触发取消的期限，不是严格墙钟上限，还包含事件循环调度与操作系统回收时间。Thread RPC 每步6秒，失败不回退整份历史读取。
+
+默认去除已知凭据、常见令牌/连接串/本机路径和秘密字段，原始错误不进入群。文本脱敏不是任意秘密的万能检测器；只应授权确有群内披露需要的资料，数据库只登记必要列。私人引用保存在当前群模型上下文中，直到既有清理/保留机制使其失效；撤回原私人任务内容不会自动撤回已授权的群引用。飞书文档/多维表格实时读取、其他数据库驱动和自然语言自动路由尚未实现。已有 `/group-doc` 明确写入流程保持独立。
+
+私人任务可进一步用本地 `ownerGateway.threadScopes` 限定为 `{ "任务ID": ["消息item ID"] }`。设置后搜索只返回列出的任务，读取只提供列出的用户/助手消息，其他任务在RPC前拒绝。空对象禁止所有私人读取；省略或 null 保持 Owner 明确请求的通用只读模式。仅批准一段总结时应使用该范围配置，不能用提示词替代范围校验。
