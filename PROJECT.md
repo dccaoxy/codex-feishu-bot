@@ -19,9 +19,9 @@ Task Source：[Issue #10](https://github.com/dccaoxy/codex-feishu-bot/issues/10)
 
 本分支check及113项自动测试通过；保留PR #5的隔离组合check与146项测试通过（含单聊原有行为）。真实Codex doctor登录/7模型、无模型smoke、首次/恢复10项工具隔离探针通过。新增队列测试覆盖FIFO/同任务、双worker/全局等待、queued/running撤回、退出/撤权、close及重启uncertain屏障、历史不执行、重复/满额提示、Owner共享队列及撤权，原PR #7/#9回归保留。
 
-真实群A/B已验证，C仍待通过；不得将模拟模型调用或连接就绪视为真实验收。2026-09-24 21:14已按本次授权部署源码 `925b695` 到原单群候选。部署前确认无活动请求，备份源码/本地配置与群SQLite快照（忽略目录data/issue10-queue-backup-20260924211427）；配置字节不变、未涉及的源码哈希不变，保留PR #5。实际候选check/146项测试/doctor/smoke通过，机器人重启后Codex和飞书长连接ready。Desktop/共享App Server与服务配置未改。
+真实群A/B及修复后C复测已验证；不得将模拟模型调用或连接就绪视为真实验收。2026-09-24 21:14已按本次授权部署源码 `925b695` 到原单群候选。部署前确认无活动请求，备份源码/本地配置与群SQLite快照（忽略目录data/issue10-queue-backup-20260924211427）；配置字节不变、未涉及的源码哈希不变，保留PR #5。实际候选check/146项测试/doctor/smoke通过，机器人重启后Codex和飞书长连接ready。Desktop/共享App Server与服务配置未改。
 
-已提交、推送并创建[Draft PR #11](https://github.com/dccaoxy/codex-feishu-bot/pull/11)。真实A（重叠2条）/B（连续3条）已经核验；C（撤回queued）需要复测。保持Draft，真实验收完成后才转Ready，不自动Merge。
+已提交、推送并创建[PR #11](https://github.com/dccaoxy/codex-feishu-bot/pull/11)。真实A（重叠2条）/B（连续3条）及修复后C（撤回queued）复测均已核验。本次交付转Ready触发自动审核，等待PASS/NEEDS CHANGES，不自动Merge。
 
 ### 真实验收进展（2026-09-24）
 
@@ -31,7 +31,13 @@ Task Source：[Issue #10](https://github.com/dccaoxy/codex-feishu-bot/issues/10)
 
 检查发现重复queued撤回存在确定缺陷：第一次取消排队请求，重复事件因状态已变cancelled误走任务失效清理。新增回归在修复前失败（当前任务被abort），改为已存在撤回墓碑即返回后通过；覆盖A运行中和完成后重复撤回、后续C保持同一任务。真实此次异常是否由重复事件或撤回过晚引起，现有记录不足以确认，不能据此宣称已查明真实根因。
 
-本分支check/114项测试、保留PR #5的组合check/147项测试通过。2026-09-24 21:38将修复源码c495924部署到原单群候选；实际候选check/147项测试、doctor/无模型smoke通过，服务启动后双连接ready。本地配置字节与未涉及源码哈希不变；备份位于忽略目录data/issue10-queue-backup-20260924213814。仅重启机器人，未重启Desktop/共享App Server。场景C须重新观察queued→cancelled过程和实际Turn，保留此前失败/不足证据，不转Ready、不Merge。
+本分支check/114项测试、保留PR #5的组合check/147项测试通过。2026-09-24 21:38将修复源码c495924部署到原单群候选；实际候选check/147项测试、doctor/无模型smoke通过，服务启动后双连接ready。本地配置字节与未涉及源码哈希不变；备份位于忽略目录data/issue10-queue-backup-20260924213814。仅重启机器人，未重启Desktop/共享App Server。此前场景C未判通过的记录保留，修复后复测结果见下。
+
+### 撤回复测与本轮交付（2026-09-24 21:45）
+
+用户再次在原群发送两条并撤回第二条。首次读取时第9条running、第10条cancelled，撤回墓碑存在、原文已删除，群任务仍running。随后第9条done、第10条保持cancelled；同一保留会话只有21:43:43.546–21:44:28.013（北京时间）一个task_started/task_complete，未出现第二条消息ID或“撤回测试成功”，没有额外Turn或中止；绑定idle，会话目录保留。确认撤回只取消等待请求、没有打断当前请求，C复测通过。此前已失效的旧群上下文按既有隐私清理机制重建，本次复测未再次失效；不宣称旧目录已恢复。
+
+实现、自动测试、真实Codex/飞书A/B/C、提交推送及原单群候选部署均已完成。最新实现部署c495924，后续提交仅更新验收文档。PR #11转Ready触发自动审核；未Merge，未扩大授权。真实跨进程崩溃/满队列/多群并发及长期稳定性未另行实测，由自动测试覆盖相关边界，不能据此承诺长期无故障。本轮没有关闭Issue；等待审核及Human后续决定。
 
 ## 已合并历史：Issue #8 Owner Resource Gateway（审核返工完成，提交复审）
 
