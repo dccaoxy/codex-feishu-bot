@@ -22,11 +22,12 @@ function setup(t,{messages=[],secret='KNOWN_SECRET_BOUNDARY',blocked=false}={}){
  const start=()=>{g.onMessage({sender:{sender_type:'user',sender_id:{open_id:'owner'}},message:{chat_type:'group',chat_id:'oc_test',message_id:'request',create_time:String(Date.now()),message_type:'text',content:JSON.stringify({text:'@bot /owner read ref'}),mentions:[{key:'@bot',id:{open_id:'bot'}}]}});return g.jobs.get('oc_test').done;};
  return {g,store,inputs,sent,start,release,changeOwner:()=>owner='other'};
 }
-for(const action of ['owner','allowlist','recall','leave','close'])test('queued transport rechecks '+action,async t=>{
+for(const action of ['owner','allowlist','recall','leave','close','resource-grant'])test('queued transport rechecks '+action,async t=>{
  const x=setup(t,{blocked:true,messages:[{type:'agentMessage',text:'private reference'}]});
  const done=x.start();await until(()=>x.store.get('oc_test','request')?.state==='sending');
  let closing;
  if(action==='owner')x.changeOwner();
+ if(action==='resource-grant')x.g.gateway.config.privateThreads=false;
  if(action==='allowlist')x.g.policy.config.allowedChatIds=[];
  if(action==='recall')x.g.onRecall({chat_id:'oc_test',message_id:'another-message'});
  if(action==='leave')x.g.onLeave({chat_id:'oc_test'});

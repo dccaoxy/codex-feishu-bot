@@ -3,7 +3,65 @@
 ## 项目目标
 让用户在飞书中与本机 Codex 交互，由本地 Node.js 服务通过 stdio / JSON-RPC 调用 codex app-server，并通过飞书长连接收发消息、卡片和附件。
 
-## 当前任务：Issue #8 Owner Resource Gateway（审核返工完成，提交复审）
+## 当前任务：Issue #10 Group Request Queue
+
+Task Source：[Issue #10](https://github.com/dccaoxy/codex-feishu-bot/issues/10)，用户要求读取AGENTS并执行。核实PR #7、#9均已合并，从最新main `51db514`创建独立分支 `codex/issue-10-group-queue`；PR #5仍open、未合并，head `53c8575`。用户已明确允许完成自动测试后更新原单群候选、仅重启机器人，不重启Desktop、不Merge。
+
+### 实现与关键决定
+
+- 群本地SQLite新增group_requests，保存可信live event认领与FIFO序号，message_id唯一；与消息状态事务入队。历史补录不生成请求，重复投递不重复入队。
+- 每群一个活动请求，全局两个；全局或同群忙时queued，不再静默busy丢弃。每条独立Turn沿用Persistent Group Thread，无语义合并/群steer，单聊不改。
+- 默认每群10条等待队列、配置硬上限20。满额记录queue_full并一次提示，正常排队不刷屏；提示不确定不重发。排队正文从模型增量/检索结果中排除，轮到请求再提供。
+- 重启仅恢复明确queued；running/sending变uncertain，同群后续全部暂停，需Owner本机核验结果并明确处置，不自动跳过。close保留queued且不消费，活动未决fail closed。
+- queued撤回删除正文/取消该请求，不影响当前A；已执行消息撤回、退群/授权撤销/retention失效取消本群活动与排队并保持隐私清理。Owner网关同FIFO、出队和发送前授权复核，额外检测读取期间资源范围变化。
+
+### 验证与交接
+
+本分支check及113项自动测试通过；保留PR #5的隔离组合check与146项测试通过（含单聊原有行为）。真实Codex doctor登录/7模型、无模型smoke、首次/恢复10项工具隔离探针通过。新增队列测试覆盖FIFO/同任务、双worker/全局等待、queued/running撤回、退出/撤权、close及重启uncertain屏障、历史不执行、重复/满额提示、Owner共享队列及撤权，原PR #7/#9回归保留。
+
+真实群A/B及修复后C复测已验证；不得将模拟模型调用或连接就绪视为真实验收。2026-09-24 21:14已按本次授权部署源码 `925b695` 到原单群候选。部署前确认无活动请求，备份源码/本地配置与群SQLite快照（忽略目录data/issue10-queue-backup-20260924211427）；配置字节不变、未涉及的源码哈希不变，保留PR #5。实际候选check/146项测试/doctor/smoke通过，机器人重启后Codex和飞书长连接ready。Desktop/共享App Server与服务配置未改。
+
+已提交、推送并创建[PR #11](https://github.com/dccaoxy/codex-feishu-bot/pull/11)。真实A（重叠2条）/B（连续3条）及修复后C（撤回queued）复测均已核验。本次交付转Ready触发自动审核，等待PASS/NEEDS CHANGES，不自动Merge。
+
+### 真实验收进展（2026-09-24）
+
+场景A的“前一条尚未完成又发一条@”已验证：用户反馈均收到回复；群库三条live请求均done；同一个持久群任务的后两次Turn分别21:16:05–21:16:24、21:16:25–21:16:34，后一请求于21:16:08到达，在前一任务完成后才启动。不是steer或并发Turn。第一条独立请求21:15:39–21:15:45已完成。场景B也已验证：三条请求21:20:49、21:20:53、21:20:57到达，同一任务Turn分别21:20:50–21:21:15、21:21:16–21:21:25、21:21:26–21:21:33，严格FIFO、三条done。场景B用户亦确认三条均收到回复。场景C用户反馈已撤回；后台第7条done、第8条cancelled，撤回墓碑存在且消息及原文已删除，但群任务为invalidated且会话目录已清理，无法核对该请求是否曾启动或回复，故C不判PASS，PR仍Draft。源消息ID、任务ID及观察时间线只存本机忽略目录。
+
+### 撤回验收后的回归修复
+
+检查发现重复queued撤回存在确定缺陷：第一次取消排队请求，重复事件因状态已变cancelled误走任务失效清理。新增回归在修复前失败（当前任务被abort），改为已存在撤回墓碑即返回后通过；覆盖A运行中和完成后重复撤回、后续C保持同一任务。真实此次异常是否由重复事件或撤回过晚引起，现有记录不足以确认，不能据此宣称已查明真实根因。
+
+本分支check/114项测试、保留PR #5的组合check/147项测试通过。2026-09-24 21:38将修复源码c495924部署到原单群候选；实际候选check/147项测试、doctor/无模型smoke通过，服务启动后双连接ready。本地配置字节与未涉及源码哈希不变；备份位于忽略目录data/issue10-queue-backup-20260924213814。仅重启机器人，未重启Desktop/共享App Server。此前场景C未判通过的记录保留，修复后复测结果见下。
+
+### 撤回复测与本轮交付（2026-09-24 21:45）
+
+用户再次在原群发送两条并撤回第二条。首次读取时第9条running、第10条cancelled，撤回墓碑存在、原文已删除，群任务仍running。随后第9条done、第10条保持cancelled；同一保留会话只有21:43:43.546–21:44:28.013（北京时间）一个task_started/task_complete，未出现第二条消息ID或“撤回测试成功”，没有额外Turn或中止；绑定idle，会话目录保留。确认撤回只取消等待请求、没有打断当前请求，C复测通过。此前已失效的旧群上下文按既有隐私清理机制重建，本次复测未再次失效；不宣称旧目录已恢复。
+
+实现、自动测试、真实Codex/飞书A/B/C、提交推送及原单群候选部署均已完成。最新实现部署c495924，后续提交仅更新验收文档。PR #11转Ready触发自动审核；未Merge，未扩大授权。真实跨进程崩溃/满队列/多群并发及长期稳定性未另行实测，由自动测试覆盖相关边界，不能据此承诺长期无故障。本轮没有关闭Issue；等待审核及Human后续决定。
+
+### PR #11 审核返工（2026-09-24）
+
+Task Source：用户要求读取审核结果并返工；[NEEDS CHANGES 评论](https://github.com/dccaoxy/codex-feishu-bot/pull/11#issuecomment-5815412380)，审核head `33ffd59`。已先转回Draft，同一分支修复。
+
+发现：queue_full从未执行且被模型读取过滤，但recall仅特判queued，导致撤回满额拒绝请求时中止当前A并取消等待B。新增正式回归（上限1、A运行/B等待/C满额）在修复前失败，A被abort；失败日志留本机忽略目录data/review-queue-full-before.log。
+
+修复：queued与queue_full均为明确未派发状态，首次撤回仅删正文、取消记录并写墓碑；重复撤回继续去重。其他可能已进入上下文的状态仍保守隐私清理。回归覆盖首次/重复撤回、正文删除、A不abort、B保持queued、同一Thread下A/B各完成一次且FIFO、C无模型调用/无延迟拒绝提示/重复投递不执行、完成后任务不失效。
+
+验证：check、115项分支测试和保留PR #5的隔离组合check/148项测试通过；真实Codex doctor握手/登录/7模型、无模型smoke通过。本分支诊断配置未填真实飞书凭据、群功能关闭，未将该结果宣称为真实飞书连通或模型验收。无远端CI结果，本次新增测试使用模拟模型和发送端。
+
+本轮已修改、已本地验证，随后提交推送并重新转Ready复审；未部署此修复、未重启机器人或Desktop/共享App Server、未发真实消息、未Merge。当前候选仍为c495924，先前A/B/C真实验收只覆盖旧候选；此次满额撤回未真实群实测。等待新head审核，不沿用旧验收或旧head为新修复背书。
+
+### 已审核版本部署（2026-09-24 22:06）
+
+用户明确要求部署PR #11已审核PASS的 `f9fa203b991c6072d654ede91953c43c3808dbe0` 到原单群候选，不Merge。[PASS评论](https://github.com/dccaoxy/codex-feishu-bot/pull/11#issuecomment-5815580876)对应此源码head；本次后续提交仅记录部署，不冒称审核覆盖后续文档head。
+
+部署前确认群无queued/running/sending；备份旧源码、配置和群SQLite到本机忽略目录 `data/issue10-queue-backup-20260924220546`。仅替换group-store及其queue测试为审核提交中的字节，其他运行源码哈希保持不变，保留PR #5。现有config.local.json字节不变：仍仅原授权单群，Owner Resource Gateway资源/私人任务片段范围保持原样，不写入真实标识到Git。
+
+实际候选check、148项组合回归、doctor（App Server握手、登录、7模型）、无模型smoke通过。仅重启io.codex.feishu-bot，launchd状态running；从本次启动日志确认Codex已连接、飞书长连接已建立。doctor本身不验证飞书网络；飞书恢复依据新启动日志。未重启Desktop/共享App Server、未改launchd配置、未Merge。本次未调用真实模型、未向群发送验收消息，因此不将部署检查当作新的满额撤回真实验收。
+
+源码部署版本f9fa203；运行验证与哈希清单见本地忽略的data/issue10-latest-deployment.json及备份目录validation.log。原先“未部署f9fa203”的段落为此前返工时点记录，现已由本次部署更新。下一步可在原群真实使用/验收；长期稳定性、多群/崩溃实测边界不变。
+
+## 已合并历史：Issue #8 Owner Resource Gateway（审核返工完成，提交复审）
 
 Task Source：[Issue #8](https://github.com/dccaoxy/codex-feishu-bot/issues/8)，用户要求执行。独立分支 `codex/issue-8-owner-gateway`，从 main `bf2e01d` 开始；已核实 PR #7 合并，PR #5 仍未合并、head `53c8575`。不将 PR #5 能力假定为主线能力。
 
