@@ -46,6 +46,27 @@ test('duplicate queued recall during and after A does not invalidate its persist
  x.send('C');await until(()=>x.calls.length===2);assert.equal(x.calls[1].thread,x.calls[0].thread);
  x.releases[1]();await until(()=>x.g.jobs.size===0);assert.deepEqual(x.replies,['A','C']);
 });
+test('queue_full first and duplicate recall preserve active A and queued B',async t=>{
+ const x=fixture(t,{limit:1});x.send('A');await until(()=>x.calls.length===1);x.send('B');x.send('C');
+ assert.equal(x.store.requestState('oc_A','C'),'queue_full');
+ assert.equal(x.store.read('oc_A','C'),null);
+ const recall={chat_id:'oc_A',message_id:'C'};
+ for(let i=0;i<2;i++){
+  x.g.onRecall(recall);
+  assert.equal(x.g.jobs.get('oc_A').controller.signal.aborted,false);
+  assert.equal(x.store.requestState('oc_A','B'),'queued');
+  assert.equal(x.store.thread('oc_A').state,'running');
+ }
+ assert.equal(x.store.get('oc_A','C'),undefined);
+ assert.equal(x.store.db.prepare('SELECT count(*) n FROM raw_messages WHERE id=?').get('C').n,0);
+ assert.equal(x.store.requestState('oc_A','C'),'cancelled');
+ x.releases[0]();await until(()=>x.calls.length===2);
+ assert.equal(x.calls[1].input.request,'B');assert.equal(x.calls[1].thread,x.calls[0].thread);
+ x.releases[1]();await until(()=>x.g.jobs.size===0&&x.g.notices.size===0);
+ x.g.onRecall(recall);x.send('C');await pause(10);
+ assert.deepEqual(x.replies,['A','B']);assert.equal(x.calls.length,2);
+ assert.equal(x.store.thread('oc_A').state,'idle');
+});
 for(const cause of ['recall-running','leave','allowlist'])test(cause+' cancels active and pending, no next model',async t=>{
  const x=fixture(t);x.send('A');await until(()=>x.calls.length===1);x.send('B');
  if(cause==='recall-running')x.g.onRecall({chat_id:'oc_A',message_id:'A'});

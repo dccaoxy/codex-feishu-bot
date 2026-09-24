@@ -39,6 +39,18 @@ Task Source：[Issue #10](https://github.com/dccaoxy/codex-feishu-bot/issues/10)
 
 实现、自动测试、真实Codex/飞书A/B/C、提交推送及原单群候选部署均已完成。最新实现部署c495924，后续提交仅更新验收文档。PR #11转Ready触发自动审核；未Merge，未扩大授权。真实跨进程崩溃/满队列/多群并发及长期稳定性未另行实测，由自动测试覆盖相关边界，不能据此承诺长期无故障。本轮没有关闭Issue；等待审核及Human后续决定。
 
+### PR #11 审核返工（2026-09-24）
+
+Task Source：用户要求读取审核结果并返工；[NEEDS CHANGES 评论](https://github.com/dccaoxy/codex-feishu-bot/pull/11#issuecomment-5815412380)，审核head `33ffd59`。已先转回Draft，同一分支修复。
+
+发现：queue_full从未执行且被模型读取过滤，但recall仅特判queued，导致撤回满额拒绝请求时中止当前A并取消等待B。新增正式回归（上限1、A运行/B等待/C满额）在修复前失败，A被abort；失败日志留本机忽略目录data/review-queue-full-before.log。
+
+修复：queued与queue_full均为明确未派发状态，首次撤回仅删正文、取消记录并写墓碑；重复撤回继续去重。其他可能已进入上下文的状态仍保守隐私清理。回归覆盖首次/重复撤回、正文删除、A不abort、B保持queued、同一Thread下A/B各完成一次且FIFO、C无模型调用/无延迟拒绝提示/重复投递不执行、完成后任务不失效。
+
+验证：check、115项分支测试和保留PR #5的隔离组合check/148项测试通过；真实Codex doctor握手/登录/7模型、无模型smoke通过。本分支诊断配置未填真实飞书凭据、群功能关闭，未将该结果宣称为真实飞书连通或模型验收。无远端CI结果，本次新增测试使用模拟模型和发送端。
+
+本轮已修改、已本地验证，随后提交推送并重新转Ready复审；未部署此修复、未重启机器人或Desktop/共享App Server、未发真实消息、未Merge。当前候选仍为c495924，先前A/B/C真实验收只覆盖旧候选；此次满额撤回未真实群实测。等待新head审核，不沿用旧验收或旧head为新修复背书。
+
 ## 已合并历史：Issue #8 Owner Resource Gateway（审核返工完成，提交复审）
 
 Task Source：[Issue #8](https://github.com/dccaoxy/codex-feishu-bot/issues/8)，用户要求执行。独立分支 `codex/issue-8-owner-gateway`，从 main `bf2e01d` 开始；已核实 PR #7 合并，PR #5 仍未合并、head `53c8575`。不将 PR #5 能力假定为主线能力。

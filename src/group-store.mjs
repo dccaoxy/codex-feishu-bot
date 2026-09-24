@@ -138,7 +138,17 @@ export class GroupMessageStore {
     const after=this.db.prepare('SELECT * FROM messages WHERE chat=? AND (time>? OR (time=? AND id>?)) ORDER BY time,id LIMIT ?').all(chat,r.time,r.time,id,radius);
     return this.result([...before,r,...after].filter(x=>x.time>=this.lowerBound()));
   }
-  recall(chat,id) { if(this.db.prepare('SELECT 1 FROM recalls WHERE chat=? AND id=?').get(chat,id))return; const queued=this.requestState(chat,id)==='queued';this.db.prepare("UPDATE group_requests SET state='cancelled',event='{}' WHERE chat=? AND id=?").run(chat,id); this.db.prepare('INSERT OR IGNORE INTO recalls VALUES(?,?)').run(chat,id); this.db.prepare('DELETE FROM messages WHERE chat=? AND id=?').run(chat,id); this.db.prepare('DELETE FROM raw_messages WHERE chat=? AND id=?').run(chat,id); if(!queued)this.invalidateThread(chat); }
+  recall(chat,id) {
+    if(this.db.prepare('SELECT 1 FROM recalls WHERE chat=? AND id=?').get(chat,id))return;
+    // These states have never dispatched and are excluded from model-facing reads.
+    // Other states may have entered context, so retain conservative privacy cleanup.
+    const neverDispatched=['queued','queue_full'].includes(this.requestState(chat,id));
+    this.db.prepare("UPDATE group_requests SET state='cancelled',event='{}' WHERE chat=? AND id=?").run(chat,id);
+    this.db.prepare('INSERT OR IGNORE INTO recalls VALUES(?,?)').run(chat,id);
+    this.db.prepare('DELETE FROM messages WHERE chat=? AND id=?').run(chat,id);
+    this.db.prepare('DELETE FROM raw_messages WHERE chat=? AND id=?').run(chat,id);
+    if(!neverDispatched)this.invalidateThread(chat);
+  }
   leave(chat) { this.cancelQueued(chat);this.db.prepare("UPDATE group_requests SET state='cancelled',event='{}' WHERE chat=?").run(chat); this.db.prepare('INSERT OR IGNORE INTO stopped VALUES(?)').run(chat); this.db.prepare('DELETE FROM messages WHERE chat=?').run(chat); this.db.prepare('DELETE FROM documents WHERE chat=?').run(chat); this.db.prepare('DELETE FROM raw_messages WHERE chat=?').run(chat);this.db.prepare('DELETE FROM history_sync WHERE chat=?').run(chat);this.invalidateThread(chat); }
   addDocument(chat,id) { this.db.prepare('INSERT OR IGNORE INTO documents VALUES(?,?)').run(chat,id); }
   hasDocument(chat,id) { return Boolean(this.db.prepare('SELECT 1 FROM documents WHERE chat=? AND id=?').get(chat,id)); }
