@@ -19,6 +19,7 @@ export function groupThreadParams(cwd,tools,model) {
 export class GroupModel {
   constructor(config,store) { this.config=config; this.store=store; this.active=new Set(); }
   async run(question,tools,execute,signal,chat) {
+    if(signal?.aborted)throw new Error('群请求已取消');
     if(!this.store||!chat||this.store.stopped(chat))throw new Error("Missing group binding");
     if(execFileSync(this.config.codex.binary,['--version'],{encoding:'utf8',timeout:10000}).trim()!==GROUP_CODEX_VERSION) throw new Error('群模型版本未经隔离验证');
     const root=path.resolve(this.store.dir,'threads',createHash('sha256').update(chat).digest('hex'));

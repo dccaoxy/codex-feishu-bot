@@ -17,7 +17,7 @@ export class GroupAssistant {
     this.config=config;this.feishu=feishu;this.policy=new GroupPolicy(config.groups,owner,botId);this.log=log;
     this.store=store||new GroupMessageStore(config.storageDir+'/groups',this.policy.config.retentionDays);
     this.model=model||new GroupModel(config,this.store);this.documents=new Documents(feishu,owner);this.jobs=new Map();this.closed=false;this.liveSince=Date.now();
-    this.store.onInvalidate=chat=>{const job=this.jobs.get(chat);if(job)job.controller.abort();else this.model.invalidate?.(chat);};
+    this.store.onInvalidate=chat=>{const job=this.jobs.get(chat);if(job){job.invalidated=true;job.controller.abort();}else this.model.invalidate?.(chat);};
     this.history=new GroupHistory(this.store,feishu,chat=>this.policy.allowedGroup(chat),log);
     this.timer=setInterval(()=>this.store.prune(),3600000);this.timer.unref();
   }
@@ -33,7 +33,12 @@ export class GroupAssistant {
     if(this.jobs.has(m.chat_id)||this.jobs.size>=2){this.store.mark(m.chat_id,m.message_id,'busy');return;}
     const controller=new AbortController();
     const job={controller,id:m.message_id};this.jobs.set(m.chat_id,job);
-    job.done=Promise.resolve().then(()=>this.respond(d,controller.signal)).catch(()=>this.log('群请求处理失败（未记录正文、未重试）')).finally(()=>this.jobs.delete(m.chat_id));
+    job.done=Promise.resolve().then(()=>this.respond(d,controller.signal)).catch(()=>this.log('群请求处理失败（未记录正文、未重试）')).finally(()=>{
+      // Every job type owns this finalizer, including commands that never enter
+      // GroupModel.run(). Awaiting respond also awaits the model's RPC close.
+      try {if(job.invalidated)this.model.invalidate?.(m.chat_id);}
+      finally {this.jobs.delete(m.chat_id);}
+    });
   }
   async execute(chat,sender,name,a,signal) {
     if(signal.aborted||this.closed||this.store.stopped(chat))throw new Error('请求已取消');
@@ -64,6 +69,7 @@ export class GroupAssistant {
       else if(text.startsWith('/')) answer='群聊仅支持本群消息检索、总结、分类、行动项和表格；私人任务、文件、审批与管理命令不可用。';
       else {
         if(this.feishu.client?.im?.v1?.message?.list)await this.history.reconcile(chat);
+        if(signal.aborted)throw new Error('群请求已取消');
         const binding=this.store.thread(chat), delta=this.store.changes(chat,binding.cursor);
         this.store.setThread(chat,{pending_cursor:delta.cursor});
         const recent=delta.messages;
