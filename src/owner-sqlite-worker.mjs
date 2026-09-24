@@ -1,5 +1,5 @@
-import fs from 'node:fs';import path from 'node:path';import {DatabaseSync,constants as C} from 'node:sqlite';import {parentPort,workerData} from 'node:worker_threads';
-const {resource:r,query:q}=workerData;let db;
+import fs from 'node:fs';import path from 'node:path';import {DatabaseSync,constants as C} from 'node:sqlite';
+process.once('message',({resource:r,query:q})=>{let db,result;
 try{
  if(!q||typeof q!=='object'||Array.isArray(q)||Object.keys(q).some(k=>!['table','columns','where','groupBy','metrics','limit','derive'].includes(k)))throw Error();
  const columns=Object.hasOwn(r.tables,q.table)&&r.tables[q.table];if(!columns)throw Error();
@@ -22,11 +22,14 @@ try{
   return C.SQLITE_DENY;
  });
  const sql=`SELECT ${projection.join(',')} FROM "${q.table}"${filters.length?' WHERE '+filters.join(' AND '):''}${group.length?' GROUP BY '+group.map(ident).join(','):''} LIMIT ${limit+1}`;
+ process.send({phase:'query-started'});
  const rows=[];let bytes=0;for(const row of db.prepare(sql).iterate(...values)){if(rows.length===limit)throw Error();if(Object.values(row).some(v=>v!==null&&(!['string','number'].includes(typeof v)||typeof v==='number'&&!Number.isFinite(v))))throw Error();for(const [i,d] of derive.entries()){
   const l=row['metric_'+d.left],v=row['metric_'+d.right];
   if(typeof l!=='number'||typeof v!=='number')throw Error();
   const result=d.op==='difference'?l-v:v===0?null:d.op==='growth'?(l-v)/v:l/v;
   if(result!==null&&!Number.isFinite(result))throw Error();row['derived_'+i]=result;
  }bytes+=JSON.stringify(row).length;if(bytes>16000)throw Error();rows.push(row);}
- parentPort.postMessage({ok:true,result:{rows,range:{table:q.table,where,groupBy:group,metrics,derive,limit},readAt:new Date().toISOString(),complete:true}});
-}catch{parentPort.postMessage({ok:false});}finally{db?.close();}
+ result={ok:true,result:{rows,range:{table:q.table,where,groupBy:group,metrics,derive,limit},readAt:new Date().toISOString(),complete:true}};
+}catch{result={ok:false};}finally{db?.close();}
+process.send(result,()=>process.disconnect());
+});

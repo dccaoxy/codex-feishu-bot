@@ -1,4 +1,4 @@
-import path from 'node:path';import {Worker} from 'node:worker_threads';
+import path from 'node:path';import {fork} from 'node:child_process';
 const id=/^[a-zA-Z0-9_-]{1,100}$/;
 export function gatewayConfig(v={}){
  const c={enabled:false,privateThreads:false,threadScopes:null,resources:[],...v};
@@ -8,7 +8,7 @@ export function gatewayConfig(v={}){
  return c;
 }
 export function redactPrivate(value,secrets=[]){
- const clean=s=>{for(const x of secrets)if(typeof x==='string'&&x.length>=4)s=s.split(x).join('[已隐藏]');return s.replace(/-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?-----END [^-]*PRIVATE KEY-----/g,'[已隐藏密钥]').replace(/\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?):\/\/[^\s"<>]+/gi,'[已隐藏连接串]').replace(/\bBearer\s+[^\s"<>]+/gi,'Bearer [已隐藏]').replace(/\b(?:sk-|ghp_|github_pat_)[A-Za-z0-9_-]{12,}/g,'[已隐藏令牌]').replace(/((?:password|passwd|secret|token|api[_ -]?key|authorization|密码|密钥)["']?\s*[:=]\s*)[^\n,;}]+/gi,'$1[已隐藏]').replace(/(?:\/(?:Users|home|etc|var|tmp|private|opt)\/[^\s"<>]+|[A-Z]:\\[^\s"<>]+)/g,'[已隐藏路径]');};
+ const clean=s=>{for(const x of secrets)if(typeof x==='string'&&x.length>=4)s=s.split(x).join('[已隐藏]');return s.replace(/-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?(?:-----END [^-]*PRIVATE KEY-----|$)/g,'[已隐藏密钥]').replace(/\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?):\/\/[^\s"<>]+/gi,'[已隐藏连接串]').replace(/\bBearer\s+[^\s"<>]+/gi,'Bearer [已隐藏]').replace(/\b(?:sk-|ghp_|github_pat_)[A-Za-z0-9_-]{12,}/g,'[已隐藏令牌]').replace(/((?:password|passwd|secret|token|api[_ -]?key|authorization|密码|密钥)["']?\s*[:=]\s*)[^\n,;}]+/gi,'$1[已隐藏]').replace(/(?:\/(?:Users|home|etc|var|tmp|private|opt)\/[^\s"<>]+|[A-Z]:\\[^\s"<>]+)/g,'[已隐藏路径]');};
  if(typeof value==='string')return clean(value);if(Array.isArray(value))return value.map(x=>redactPrivate(x,secrets));if(value&&typeof value==='object')return Object.fromEntries(Object.entries(value).map(([k,v])=>[k,/password|secret|token|api.?key|authorization|connection|path|config/i.test(k)&&k!=='nextCursor'?'[已隐藏]':redactPrivate(v,secrets)]));return value;
 }
 // Only a current, explicit /owner command mints authority. History and model
@@ -41,7 +41,8 @@ export class OwnerGateway{
   const turns=r.data.slice(0,8).map(t=>({messages:(t.items||[]).flatMap(m=>{
     if(!['agentMessage','userMessage'].includes(m.type)||scope!==null&&!scope[a.threadId].includes(m.id))return [];
     if(budget<=0){partial=true;return [];}
-    const text=m.type==='agentMessage'?(m.text||''):(m.content||[]).map(c=>c.type==='text'?c.text||'':'[非文本内容]').join('\n');
+    const raw=m.type==='agentMessage'?(m.text||''):(m.content||[]).map(c=>c.type==='text'?c.text||'':'[非文本内容]').join('\n');
+    const text=redactPrivate(raw,this.secrets);
     const n=Math.min(1500,budget);budget-=Math.min(n,text.length);if(text.length>n)partial=true;
     return [{role:m.type==='agentMessage'?'assistant':'user',text:text.slice(0,n)}];
   })}));
@@ -54,6 +55,23 @@ export class OwnerGateway{
  }catch{throw Error('授权资料读取未完成：请检查授权、查询范围或数据源。未扩大权限或自动重试。');}
  }
 }
-export function queryResource(resource,query,signal,timeoutMs=2000){
- return new Promise((resolve,reject)=>{if(signal?.aborted)return reject(Error('Cancelled'));const w=new Worker(new URL('./owner-sqlite-worker.mjs',import.meta.url),{workerData:{resource,query},resourceLimits:{maxOldGenerationSizeMb:32},execArgv:[]});let settled=false;const finish=async(e,v)=>{if(settled)return;settled=true;clearTimeout(timer);signal?.removeEventListener('abort',abort);await w.terminate();e?reject(Error('只读查询失败、超时或超量')):resolve(v);};const abort=()=>void finish(true);const timer=setTimeout(abort,timeoutMs);signal?.addEventListener('abort',abort,{once:true});w.once('message',m=>void finish(!m.ok,m.result));w.once('error',()=>void finish(true));w.once('exit',()=>{if(!settled)void finish(true);});});
+// The deadline kills the OS process, then waits for exit/stdio cleanup before settling.
+// diagnostics is an internal test hook, never supplied by model query arguments.
+export function queryResource(resource,query,signal,timeoutMs=2000,diagnostics={}){
+ return new Promise((resolve,reject)=>{
+  if(signal?.aborted)return reject(Error('Cancelled'));
+  const child=fork(new URL('./owner-sqlite-worker.mjs',import.meta.url),[],{execArgv:['--max-old-space-size=32'],env:{},stdio:['ignore','ignore','ignore','ipc']});
+  let result,failed=false;
+  const abort=()=>{failed=true;child.kill('SIGKILL');};
+  const timer=setTimeout(abort,timeoutMs);
+  signal?.addEventListener('abort',abort,{once:true});
+  child.on('message',m=>{if(m.phase==='query-started'){diagnostics.onStarted?.(child.pid);return;}if(!m.ok)failed=true;else result=m.result;});
+  child.once('error',abort);
+  child.once('close',(code)=>{
+   clearTimeout(timer);signal?.removeEventListener('abort',abort);
+   if(failed||code!==0||!result)reject(Error('只读查询失败、超时或超量'));else resolve(result);
+  });
+  child.send({resource,query},e=>{if(e)abort();});
+  if(signal?.aborted)abort();
+ });
 }
