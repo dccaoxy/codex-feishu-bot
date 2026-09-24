@@ -31,7 +31,7 @@ Task Source：[Issue #10](https://github.com/dccaoxy/codex-feishu-bot/issues/10)
 
 检查发现重复queued撤回存在确定缺陷：第一次取消排队请求，重复事件因状态已变cancelled误走任务失效清理。新增回归在修复前失败（当前任务被abort），改为已存在撤回墓碑即返回后通过；覆盖A运行中和完成后重复撤回、后续C保持同一任务。真实此次异常是否由重复事件或撤回过晚引起，现有记录不足以确认，不能据此宣称已查明真实根因。
 
-本分支check/114项测试通过，组合验证与候选更新结果随后补录。场景C须重新观察queued→cancelled过程和实际Turn，保留此前失败/不足证据，不转Ready、不Merge。
+本分支check/114项测试、保留PR #5的组合check/147项测试通过。2026-09-24 21:38将修复源码c495924部署到原单群候选；实际候选check/147项测试、doctor/无模型smoke通过，服务启动后双连接ready。本地配置字节与未涉及源码哈希不变；备份位于忽略目录data/issue10-queue-backup-20260924213814。仅重启机器人，未重启Desktop/共享App Server。场景C须重新观察queued→cancelled过程和实际Turn，保留此前失败/不足证据，不转Ready、不Merge。
 
 ## 已合并历史：Issue #8 Owner Resource Gateway（审核返工完成，提交复审）
 
