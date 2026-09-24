@@ -19,7 +19,9 @@ Task Source：[Issue #10](https://github.com/dccaoxy/codex-feishu-bot/issues/10)
 
 本分支check及113项自动测试通过；保留PR #5的隔离组合check与146项测试通过（含单聊原有行为）。真实Codex doctor登录/7模型、无模型smoke、首次/恢复10项工具隔离探针通过。新增队列测试覆盖FIFO/同任务、双worker/全局等待、queued/running撤回、退出/撤权、close及重启uncertain屏障、历史不执行、重复/满额提示、Owner共享队列及撤权，原PR #7/#9回归保留。
 
-真实群A/B/C三场景尚未验证，不得将模拟模型调用或连接就绪视为真实验收。将按本次授权更新原单群候选，保持PR #5功能及配置范围不变。按Issue要求创建Draft PR，完成真实飞书验收后才转Ready，不自动Merge。
+真实群A/B/C三场景尚未验证，不得将模拟模型调用或连接就绪视为真实验收。2026-09-24 21:14已按本次授权部署源码 `925b695` 到原单群候选。部署前确认无活动请求，备份源码/本地配置与群SQLite快照（忽略目录data/issue10-queue-backup-20260924211427）；配置字节不变、未涉及的源码哈希不变，保留PR #5。实际候选check/146项测试/doctor/smoke通过，机器人重启后Codex和飞书长连接ready。Desktop/共享App Server与服务配置未改。
+
+已提交、推送并创建[Draft PR #11](https://github.com/dccaoxy/codex-feishu-bot/pull/11)。真实A（重叠2条）/B（连续3条）/C（撤回queued）等待用户在原群发送测试消息；之后核对后台同一Thread顺序Turn与逐条回复。保持Draft，真实验收完成后才转Ready，不自动Merge。
 
 ## 已合并历史：Issue #8 Owner Resource Gateway（审核返工完成，提交复审）
 
