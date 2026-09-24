@@ -21,5 +21,10 @@
     "allowedChatIds": [],
     "retentionDays": null,
     "documentIds": {}
+  },
+  "ownerGateway": {
+    "enabled": false,
+    "privateThreads": false,
+    "resources": []
   }
 }
