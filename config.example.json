@@ -20,6 +20,7 @@
     "enabled": false,
     "allowedChatIds": [],
     "retentionDays": null,
+    "queueLimit": 10,
     "documentIds": {}
   },
   "ownerGateway": {
