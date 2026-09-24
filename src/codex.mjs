@@ -6,15 +6,15 @@ export class RpcError extends Error {
   constructor(method, error) { super(`${method}: ${error.message}`); this.code = error.code; }
 }
 export class CodexClient extends EventEmitter {
-  constructor(binary, { timeoutMs = 60000, args = ['app-server'] } = {}) {
-    super(); this.binary = binary; this.args = args; this.timeoutMs = timeoutMs; this.pending = new Map(); this.next = 1;
+  constructor(binary, { timeoutMs = 60000, args = ['app-server'], env: childEnv, cwd } = {}) {
+    super(); this.childEnv = childEnv; this.cwd = cwd; this.binary = binary; this.args = args; this.timeoutMs = timeoutMs; this.pending = new Map(); this.next = 1;
   }
   async start() {
     if (this.proc) return;
     // Do not inherit the bot's credentials if the caller supplied them in environment variables.
-    const env = { ...process.env };
+    const env = { ...(this.childEnv || process.env) };
     delete env.FEISHU_APP_SECRET; delete env.FEISHU_APP_ID;
-    this.proc = spawn(this.binary, this.args, { stdio: ['pipe', 'pipe', 'pipe'], env });
+    this.proc = spawn(this.binary, this.args, { stdio: ['pipe', 'pipe', 'pipe'], env, cwd: this.cwd });
     this.proc.on('error', e => this.fail(e));
     this.proc.on('exit', (code, signal) => this.fail(new Error(`Codex 进程退出 (${code ?? signal})`)));
     // Never log raw stderr: local configuration or tool output may contain credentials.

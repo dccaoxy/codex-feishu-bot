@@ -15,5 +15,11 @@
   },
   "storageDir": "./data",
   "streamIntervalMs": 1000,
-  "maxAttachmentMB": 20
+  "maxAttachmentMB": 20,
+  "groups": {
+    "enabled": false,
+    "allowedChatIds": [],
+    "retentionDays": 30,
+    "documentIds": {}
+  }
 }
