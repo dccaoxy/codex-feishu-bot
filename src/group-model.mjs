@@ -17,7 +17,7 @@ export function groupThreadParams(cwd,tools,model) {
     config:{skills:{bundled:{enabled:false},include_instructions:false},cloud:{skills:{enabled:false}},project_doc_max_bytes:0,web_search:'disabled',memories:{generate_memories:false,use_memories:false},features:{...Object.fromEntries(disabled.map(x=>[x,false])),skip_host_skill_discovery:true},mcp_servers:{},plugins:{}}};
 }
 export class GroupModel {
-  constructor(config,store) { this.config=config; this.store=store; this.active=new Set(); }
+  constructor(config,store,options={}) { this.options=options; this.config=config; this.store=store; this.active=new Set(); }
   async run(question,tools,execute,signal,chat) {
     if(signal?.aborted)throw new Error('群请求已取消');
     if(!this.store||!chat||this.store.stopped(chat))throw new Error("Missing group binding");
@@ -51,6 +51,7 @@ export class GroupModel {
       rpc.on('notification',m=>{
         if(m.params?.threadId!==threadId)return;
         if(m.method==='item/completed' && m.params.item?.type==='agentMessage') output += m.params.item.text+'\n';
+        if(this.options.maxOutputChars && output.length>this.options.maxOutputChars){fail();void rpc.close();return;}
         if(m.method==='turn/completed') m.params.turn?.status==='completed'?resolveDone(output.trim()):fail();
       });
       rpc.on('request',m=>{void (async()=>{
@@ -60,7 +61,7 @@ export class GroupModel {
       })().catch(fail);});
       await rpc.start();
       if(signal?.aborted)throw new Error('群请求已取消');
-      const params=groupThreadParams(cwd,tools,this.config.codex.model);
+      const params=this.options.threadParams?.(cwd)||groupThreadParams(cwd,tools,this.config.codex.model);
       if(binding.thread_id) {
         this.store.setThread(chat,{state:'resuming'});
         const r=await rpc.request('thread/resume',{threadId:binding.thread_id,cwd,baseInstructions:params.baseInstructions,config:params.config,approvalPolicy:'never',sandbox:'read-only',excludeTurns:true});
@@ -78,7 +79,7 @@ export class GroupModel {
       if(!answer)throw new Error('群模型未返回文本');
       if(signal?.aborted||this.store.thread(chat).state==='invalidated')throw new Error('群上下文已撤销');
       this.store.setThread(chat,{state:'idle',error:null});
-      return answer.slice(0,16000);
+      return answer.slice(0,this.options.maxOutputChars||16000);
     } catch(e) {if(this.store.thread(chat).state!=='invalidated')this.store.setThread(chat,{state:threadId||binding.thread_id?'failed':this.store.thread(chat).state==='starting'?'starting':'failed',error:'resume_or_turn_failed'});throw e;
     } finally {
       clearTimeout(timer);signal?.removeEventListener('abort',stop);await rpc.close();this.active.delete(rpc);

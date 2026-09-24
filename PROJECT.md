@@ -3,7 +3,34 @@
 ## 项目目标
 让用户在飞书中与本机 Codex 交互，由本地 Node.js 服务通过 stdio / JSON-RPC 调用 codex app-server，并通过飞书长连接收发消息、卡片和附件。
 
-## 当前任务：Issue #10 Group Request Queue
+## 当前任务：Issue #12 Group Knowledge（独立开发线）
+
+Task Source：[Issue #12](https://github.com/dccaoxy/codex-feishu-bot/issues/12)完整正文（读取时无评论），以及用户要求“PR #5继续独立长期观察，两条开发线不要互相覆盖”。从最新main fcd1ab7建立独立worktree和分支codex/issue-12-group-knowledge。未将PR #5未合并能力带入main分支；原PR #5分支仍00ade11，工作区无改动，运行候选仍8cd4418，部署源码哈希逐项核对未变。未更改生产配置/服务/数据库或PR #5采样安排。
+
+### Implementation
+
+- 在群SQLite新增每日摘要、摘要版本、主题当前状态、主题版本、调度状态及主题重建身份表。原始消息不被派生知识覆盖；正式摘要和主题版本事务提交，成功日期幂等，重启恢复未完成任务。
+- 显式groups.knowledge配置默认关闭；时区自然日及每日时间、顺序离线补算、全局一分钟最多一次后台模型调用、每周期日期上限、持久错误与三次失败停止重试。历史完整且同步已覆盖该日末尾才允许完整摘要；有限retention截断日标skipped，超量整日失败不伪装完整。
+- 独立临时Knowledge Worker复用GroupModel隔离启动底层，但没有动态工具、执行环境、私人线程、Owner Gateway或文件/shell/审批能力。每个job独立临时home与ephemeral thread，结束/中止清理；崩溃目录下次启用清理。不写用户Persistent Group Thread，不向飞书主动发送日报。
+- 严格schema、消息/主题/资源来源范围、输出上限、旧事实变化与未决冲突保留校验，提交前重新核对输入指纹。事实/观点/决定/行动/问题分别存储，责任人及截止未知用null。无实质日不生成Topic。
+- 撤回后保守隐藏并清除本群派生正文、标dirty/invalid，保留版本号/来源审计元数据并顺序重建；没有唯一来源匹配时不强行复用主题身份。退群/撤权清理派生库并终止Worker；有限保留期后主题明示来源原文不可用。迟到更早历史重新排入补算。
+- group_topics/topic_read/daily_digest只读当前群、按需获取；已有持久任务以group_search + group_message(topic:ID)兼容读取，不重建用户任务。实时@中止后台、照常进入FIFO；未@消息静默入库。
+
+### Validation
+
+- Node24.21.0、Codex0.155.0-alpha.16.3；check及142项全量测试通过，含新增27项知识测试。覆盖分类/无实质内容、DST、幂等、补算与限流、partial/failed/缺失覆盖、同主题版本与新主题、伪造来源/ID/JSON、冲突、撤回重算/迟到历史、退群、retention、超量、重启、失败封闭、实时抢占与只读范围。
+- 在本机真实二进制上，原群首次/恢复共10项隔离探针通过；Knowledge独立模式10项恶意工具探针通过（假provider、未调用真实模型）。shell、文件、Owner线程/数据库、权限申请、跨群检索、GitHub调用不可用；技能权限为空。
+- 真实模型合成数据两日期验证通过：同一Topic、2个revision、来源回查保留；首日1条fact/decision/action/open question；用户群任务表0条。没有真实群内容、没有飞书连接或消息发送。该结果不冒充真实群验收。
+- 独立空凭据配置doctor登录/7模型、无模型smoke和只读knowledge:status通过。飞书未联网验证，Owner配置与群功能均关闭。
+- 在忽略的独立临时组合目录，以PR #5代码00ade11为基底叠加本Issue源码，check及175项组合测试通过，包含单聊/Work/审批和PR #7/#9/#11回归。未覆盖/部署PR #5源码。PR #5遥测23:27:34仍同PID、status ok、FD30、子进程1、loaded1、连接1；不以点状值宣称长期观察完成。
+
+### Remaining / 交接
+
+已实现、已本机测试、已真实模型合成验证；尚未部署、尚未真实群验收，未Merge。提交和Draft PR以本分支Git/PR记录为准。本Issue要求“自动测试 + 真实群验收完成后 Ready”，因此保持Draft，不提前触发最终审核。后续须安排独立或PR #5观察结束后的授权测试环境，再核对真实两日期知识、人工内容/来源、群内Topic查询与实时@并行。当前生产仍运行原组合候选，knowledge未启用；不自行重启或替换它。
+
+已知限制：模型语义仍需人工核验；大量输入/超过50主题/单主题过大将停止该群补算，需要明确诊断处置；不做分块归并或向量检索。撤回采用整群派生重建以避免间接污染，成本较高，重建期间知识不可读但原始消息及正常群请求保留。所有运行日志/配置/数据库仅本机忽略目录，不提交凭据、群ID或消息正文。
+
+## 已合并基线：Issue #10 Group Request Queue
 
 Task Source：[Issue #10](https://github.com/dccaoxy/codex-feishu-bot/issues/10)，用户要求读取AGENTS并执行。核实PR #7、#9均已合并，从最新main `51db514`创建独立分支 `codex/issue-10-group-queue`；PR #5仍open、未合并，head `53c8575`。用户已明确允许完成自动测试后更新原单群候选、仅重启机器人，不重启Desktop、不Merge。
 

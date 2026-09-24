@@ -1,3 +1,4 @@
+import {KnowledgeStore} from './knowledge-store.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -60,7 +61,7 @@ export class GroupMessageStore {
     this.db.exec(`UPDATE history_sync SET oldest_message=(SELECT id FROM messages m WHERE m.chat=history_sync.chat ORDER BY time,id LIMIT 1),newest_message=anchor WHERE initial_complete=1 AND oldest_message IS NULL;`);
     // Only durable requests explicitly not started survive. Legacy queued rows
     // lack trusted live-event provenance and must never be recovered.
-    this.db.exec("UPDATE group_requests SET state='uncertain' WHERE state IN ('running','sending'); UPDATE messages SET state='uncertain' WHERE state IN ('running','sending') OR (state='queued' AND NOT EXISTS(SELECT 1 FROM group_requests q WHERE q.chat=messages.chat AND q.id=messages.id AND q.state='queued'));"); this.prune();
+    this.db.exec("UPDATE group_requests SET state='uncertain' WHERE state IN ('running','sending'); UPDATE messages SET state='uncertain' WHERE state IN ('running','sending') OR (state='queued' AND NOT EXISTS(SELECT 1 FROM group_requests q WHERE q.chat=messages.chat AND q.id=messages.id AND q.state='queued'));"); this.knowledge=new KnowledgeStore(this); this.prune();
   }
   stopped(chat) { return Boolean(this.db.prepare('SELECT 1 FROM stopped WHERE chat=?').get(chat)); }
   ingest(event, mentioned) {
@@ -71,6 +72,7 @@ export class GroupMessageStore {
     const inserted=this.db.prepare('INSERT OR IGNORE INTO messages VALUES(?,?,?,?,?,?,?,?,?,?,?,?)').run(m.chat_id,m.message_id,sender.sender_id?.open_id || sender.sender_id?.app_id || '',sender.sender_type,time,m.message_type,p.text,JSON.stringify(p),m.parent_id||null,m.root_id||null,m.thread_id||null,mentioned?'queued':'recorded').changes===1;
     this.db.prepare('INSERT OR IGNORE INTO raw_messages(chat,id,content) VALUES(?,?,?)').run(m.chat_id,m.message_id,m.content);
     this.db.prepare("UPDATE raw_messages SET content=? WHERE chat=? AND id=? AND content=''").run(m.content,m.chat_id,m.message_id);
+    if(inserted)this.knowledge.inserted(m.chat_id,time);
     return inserted;
   }
   read(chat,id,offset=0) {
@@ -142,6 +144,7 @@ export class GroupMessageStore {
     if(this.db.prepare('SELECT 1 FROM recalls WHERE chat=? AND id=?').get(chat,id))return;
     // These states have never dispatched and are excluded from model-facing reads.
     // Other states may have entered context, so retain conservative privacy cleanup.
+    this.knowledge.changed(chat,id);
     const neverDispatched=['queued','queue_full'].includes(this.requestState(chat,id));
     this.db.prepare("UPDATE group_requests SET state='cancelled',event='{}' WHERE chat=? AND id=?").run(chat,id);
     this.db.prepare('INSERT OR IGNORE INTO recalls VALUES(?,?)').run(chat,id);
@@ -149,7 +152,7 @@ export class GroupMessageStore {
     this.db.prepare('DELETE FROM raw_messages WHERE chat=? AND id=?').run(chat,id);
     if(!neverDispatched)this.invalidateThread(chat);
   }
-  leave(chat) { this.cancelQueued(chat);this.db.prepare("UPDATE group_requests SET state='cancelled',event='{}' WHERE chat=?").run(chat); this.db.prepare('INSERT OR IGNORE INTO stopped VALUES(?)').run(chat); this.db.prepare('DELETE FROM messages WHERE chat=?').run(chat); this.db.prepare('DELETE FROM documents WHERE chat=?').run(chat); this.db.prepare('DELETE FROM raw_messages WHERE chat=?').run(chat);this.db.prepare('DELETE FROM history_sync WHERE chat=?').run(chat);this.invalidateThread(chat); }
+  leave(chat) { this.knowledge.leave(chat);this.cancelQueued(chat);this.db.prepare("UPDATE group_requests SET state='cancelled',event='{}' WHERE chat=?").run(chat); this.db.prepare('INSERT OR IGNORE INTO stopped VALUES(?)').run(chat); this.db.prepare('DELETE FROM messages WHERE chat=?').run(chat); this.db.prepare('DELETE FROM documents WHERE chat=?').run(chat); this.db.prepare('DELETE FROM raw_messages WHERE chat=?').run(chat);this.db.prepare('DELETE FROM history_sync WHERE chat=?').run(chat);this.invalidateThread(chat); }
   addDocument(chat,id) { this.db.prepare('INSERT OR IGNORE INTO documents VALUES(?,?)').run(chat,id); }
   hasDocument(chat,id) { return Boolean(this.db.prepare('SELECT 1 FROM documents WHERE chat=? AND id=?').get(chat,id)); }
   lowerBound() { return this.retentionDays===null?0:Date.now()-this.retentionDays*86400000; }
