@@ -94,6 +94,7 @@ async function main() {
       'im.message.recalled_v1': data => groups.onRecall(data),
       'im.chat.member.bot.deleted_v1': data => groups.onLeave(data),
     } : {});
+    groups?.start();
     console.log('机器人启动中。请保持电脑联网且不休眠。按 Ctrl+C 停止。');
   } catch (e) { console.error(bot.redact(e)); process.exitCode = 1; await shutdown(); }
 }

@@ -8,7 +8,7 @@ import { GroupAssistant } from '../src/group-assistant.mjs';
 import { groupConfig,GroupPolicy } from '../src/group-policy.mjs';
 import { groupThreadParams } from '../src/group-model.mjs';
 const now=Date.now();
-const event=(id,chat='oc_A',text='库存10台',mention=false,sender='member',time=now)=>({sender:{sender_type:'user',sender_id:{open_id:sender}},message:{chat_type:'group',chat_id:chat,message_id:id,create_time:String(time),message_type:'text',content:JSON.stringify({text}),mentions:mention?[{key:'@bot',id:{open_id:'bot'}}]:[]}});
+const event=(id,chat='oc_A',text='库存10台',mention=false,sender='member',time=Date.now())=>({sender:{sender_type:'user',sender_id:{open_id:sender}},message:{chat_type:'group',chat_id:chat,message_id:id,create_time:String(time),message_type:'text',content:JSON.stringify({text}),mentions:mention?[{key:'@bot',id:{open_id:'bot'}}]:[]}});
 function fixture(t){const dir=fs.mkdtempSync(path.join(os.tmpdir(),'group-test-'));const store=new GroupMessageStore(dir);t.after(()=>{try{store.close();}catch{}fs.rmSync(dir,{recursive:true,force:true});});return {store,dir};}
 test('group configuration default off, validates allowlists and retention',()=>{
  assert.equal(groupConfig().enabled,false);assert.throws(()=>groupConfig({allowedChatIds:['*']}));assert.throws(()=>groupConfig({retentionDays:0}));assert.throws(()=>groupConfig({documentIds:{oc_B:['doc']}}));
@@ -28,7 +28,7 @@ test('recall tombstones prevent redelivery; leave erases messages and blocks fut
  const {store}=fixture(t);store.recall('oc_A','a');assert.equal(store.ingest(event('a'),true),false);store.ingest(event('b'),false);store.leave('oc_A');assert.equal(store.search('oc_A').length,0);assert.equal(store.ingest(event('c'),false),false);
 });
 test('retention rejects historical replays and results stay bounded',t=>{
- const {store}=fixture(t);assert.equal(store.ingest(event('old','oc_A','old',true,'owner',now-31*86400000),true),false);
+ const {store}=fixture(t);store.retentionDays=30;assert.equal(store.ingest(event('old','oc_A','old',true,'owner',now-31*86400000),true),false);
  for(let i=0;i<40;i++)store.ingest(event('a'+i,'oc_A','x'.repeat(12000)),false);
  assert.ok(JSON.stringify(store.search('oc_A',{limit:50})).length<32000);
 });
@@ -56,7 +56,7 @@ test('members and owner cannot route private or management tools; model cannot c
  assert.equal(g.policy.mayUseTool('feishu_doc_append','owner','oc_A','other'),false);
 });
 test('RPC params remove execution environments, plugins, MCP, memory and shell authority',()=>{
- const p=groupThreadParams('/tmp/example',[]);assert.deepEqual(p.environments,[]);assert.deepEqual(p.selectedCapabilityRoots,[]);assert.equal(p.ephemeral,true);assert.equal(p.approvalPolicy,'never');assert.equal(p.config.features.shell_tool,false);assert.equal(p.config.features.apps,false);assert.equal(p.config.features.plugins,false);assert.equal(p.config.features.multi_agent,false);assert.equal(p.config.features.skip_host_skill_discovery,true);assert.deepEqual(p.config.mcp_servers,{});
+ const p=groupThreadParams('/tmp/example',[]);assert.deepEqual(p.environments,[]);assert.deepEqual(p.selectedCapabilityRoots,[]);assert.equal(p.ephemeral,false);assert.equal(p.approvalPolicy,'never');assert.equal(p.config.features.shell_tool,false);assert.equal(p.config.features.apps,false);assert.equal(p.config.features.plugins,false);assert.equal(p.config.features.multi_agent,false);assert.equal(p.config.features.skip_host_skill_discovery,true);assert.deepEqual(p.config.mcp_servers,{});
 });
 test('bot-authored @ does not execute; /attach is never passed to model',async t=>{
  const {store}=fixture(t);let calls=0;const f={call:fn=>fn(),client:{im:{v1:{message:{reply:async()=>{}}}}}};

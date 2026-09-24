@@ -19,7 +19,7 @@
   "groups": {
     "enabled": false,
     "allowedChatIds": [],
-    "retentionDays": 30,
+    "retentionDays": null,
     "documentIds": {}
   }
 }
