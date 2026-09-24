@@ -37,6 +37,15 @@ test('queued recall does not abort A, never starts or replies B, hides pending f
  x.g.onRecall({chat_id:'oc_A',message_id:'B'});assert.equal(x.g.jobs.get('oc_A').controller.signal.aborted,false);x.releases[0]();await until(()=>x.g.jobs.size===0);
  assert.deepEqual(x.replies,['A']);assert.equal(x.calls.length,1);x.send('B');assert.equal(x.g.jobs.size,0);
 });
+test('duplicate queued recall during and after A does not invalidate its persistent task',async t=>{
+ const x=fixture(t);x.send('A');await until(()=>x.calls.length===1);x.send('B');
+ const recall={chat_id:'oc_A',message_id:'B'};x.g.onRecall(recall);x.g.onRecall(recall);
+ assert.equal(x.g.jobs.get('oc_A').controller.signal.aborted,false);
+ x.releases[0]();await until(()=>x.g.jobs.size===0);x.g.onRecall(recall);
+ assert.equal(x.store.thread('oc_A').state,'idle');assert.deepEqual(x.replies,['A']);
+ x.send('C');await until(()=>x.calls.length===2);assert.equal(x.calls[1].thread,x.calls[0].thread);
+ x.releases[1]();await until(()=>x.g.jobs.size===0);assert.deepEqual(x.replies,['A','C']);
+});
 for(const cause of ['recall-running','leave','allowlist'])test(cause+' cancels active and pending, no next model',async t=>{
  const x=fixture(t);x.send('A');await until(()=>x.calls.length===1);x.send('B');
  if(cause==='recall-running')x.g.onRecall({chat_id:'oc_A',message_id:'A'});
