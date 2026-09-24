@@ -3,7 +3,7 @@
 ## 项目目标
 让用户在飞书中与本机 Codex 交互，由本地 Node.js 服务通过 stdio / JSON-RPC 调用 codex app-server，并通过飞书长连接收发消息、卡片和附件。
 
-## 当前任务：Issue #8 Owner Resource Gateway（候选，尚未真实群验收）
+## 当前任务：Issue #8 Owner Resource Gateway（候选，数据库真实群验收通过）
 
 Task Source：[Issue #8](https://github.com/dccaoxy/codex-feishu-bot/issues/8)，用户要求执行。独立分支 `codex/issue-8-owner-gateway`，从 main `bf2e01d` 开始；已核实 PR #7 合并，PR #5 仍未合并、head `53c8575`。不将 PR #5 能力假定为主线能力。
 
@@ -21,7 +21,7 @@ Task Source：[Issue #8](https://github.com/dccaoxy/codex-feishu-bot/issues/8)�
 - 本分支 check、84项自动测试通过；含 Owner/伪造身份/群隔离、只读分页/工具输出剔除、无整历史回退、只读文件校验、未登记表列/SQL/路径拒绝、symlink、超量/超时/取消、聚合与派生计算核对。
 - 已运行真实 Codex doctor（已登录、7模型）、smoke（无模型调用），以及本机真实二进制隔离探针：初建/重启恢复10项对抗调用通过。未将这些检查当作真实模型或飞书验收。
 - 将现有 PR #5 + PR #7 候选源码复制至本分支忽略的 `data/issue8-combination`，仅叠加网关改动；117项组合测试及 check 通过。没有修改运行中的候选服务。
-- 已修改、已本地测试；真实私人内容读取、真实群 Owner 两轮引用 **未验证**。首轮未部署；本轮统计数据测试部署与核验详见下方。未安装新服务、未重启 Desktop/共享 App Server、未 Merge。提交和 Draft PR 见本分支交付记录。
+- 已修改、已本地测试；真实私人 Thread 内容读取 **未验证**；数据库真实群两轮验收见下方。首轮未部署；本轮统计数据测试部署与核验详见下方。未安装新服务、未重启 Desktop/共享 App Server、未 Merge。提交和 Draft PR 见本分支交付记录。
 
 ### 未完成与交接断点
 
@@ -29,7 +29,7 @@ Task Source：[Issue #8](https://github.com/dccaoxy/codex-feishu-bot/issues/8)�
 
 2026-09-24 已沿用既有单群测试部署授权，将网关加载到原 `data/issue6-candidate`，保留 PR #5 功能；privateThreads=false，只开放上述统计资源。替换前备份，检查与117项组合测试通过后仅重启机器人，日志确认 Codex 连接与飞书长连接恢复。未改 Desktop/Shared App Server、未改 launchd 配置、未写源数据库。回滚副本在 Issue #8 worktree 的 `data/issue8-live-backup-20260924185243`（含本地配置，勿提交）；核验记录 `data/issue8-xinyu-verification.json`。未主动发群消息。
 
-下一步由 Owner 在原群真实 @ 发送 `/owner query xinyu_students` 加结构化 count/group 查询，再次 @ 延续讨论。尚未完成真实群查询/连续对话验收。私人 Thread 读取仍关闭，用户本轮只明确指定数据库，未据此开放全部私人任务。数据库测试加载不代表私人读取验收或完整 Issue 完成。
+用户提供的 2026-09-24 19:17 飞书截图确认：Owner 在原测试群 @ 发起 `/owner query xinyu_students` 后，机器人正确返回58人、14队及分组人数；再次 @ 追问，正确回答第7、11队人数最多，各5人。数据库查询→群回复→下一轮延续讨论的真实界面验收通过，与独立只读核验一致。此证据为用户截图，不声称本轮额外核验了底层 thread ID。私人 Thread 读取仍关闭，用户本轮只明确指定数据库，未据此开放全部私人任务。数据库测试加载不代表私人读取验收或完整 Issue 完成。
 
 Issue #8 明确要求“完成测试和真实验收后 Ready for review”，因此真实验收前仅 Draft，不触发 Ready 审核，不关闭 Issue。下一步是完成上述验收，再按 AGENTS 转 Ready、等待审核并保留 Human Merge Gate。
 
