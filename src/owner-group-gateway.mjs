@@ -27,18 +27,36 @@ export const OWNER_GROUP_INSTRUCTIONS=`Owner私聊可通过owner_groups列出有
 export class OwnerGroupGateway {
   constructor(config,privateStore,groups,feishu,owner){
     this.config=config;this.privateStore=privateStore;this.groups=groups;this.feishu=feishu;this.owner=owner;
-    this.cache=new Map();this.contexts=new WeakSet();this.latest=new Map();
+    this.cache=new Map();this.contexts=new WeakSet();this.latest=new Map();this.previousSelection=new Map();
     privateStore.db.exec(`CREATE TABLE IF NOT EXISTS owner_group_sends(request_id TEXT PRIMARY KEY,uuid TEXT NOT NULL,target TEXT NOT NULL,body_hash TEXT NOT NULL,status TEXT NOT NULL,message_id TEXT);
-      CREATE TABLE IF NOT EXISTS owner_group_selection(owner TEXT,chat TEXT,thread TEXT,target TEXT,PRIMARY KEY(owner,chat,thread));`);
+      CREATE TABLE IF NOT EXISTS owner_group_selection(owner TEXT,chat TEXT,thread TEXT,target TEXT,PRIMARY KEY(owner,chat,thread)); DELETE FROM owner_group_selection;`);
   }
+  // Selection is deliberately not restored across process restarts.
   // Called only for a newly durably accepted trusted p2p event, before any await.
-  accept(chat,id){this.latest.set(chat,id);}
+  accept(chat,id){
+    if(this.latest.get(chat)===id)return;
+    const rows=this.privateStore.db.prepare('SELECT * FROM owner_group_selection WHERE chat=?').all(chat);
+    this.previousSelection.set(chat,{id,rows});
+    this.privateStore.db.prepare('DELETE FROM owner_group_selection WHERE chat=?').run(chat);
+    this.latest.set(chat,id);
+  }
   authorize(c){if(!c||!this.contexts.has(c)||c.type!=='p2p'||!c.user||c.user!==this.owner()||!this.config.groups?.enabled||this.groups.closed||!c.live()||this.latest.get(c.chat)!==c.id)fail();}
   allowed(chat){return this.config.groups?.enabled&&this.config.groups.allowedChatIds.includes(chat)&&!this.groups.closed&&!this.groups.store.stopped(chat)&&Boolean(this.groups.store.db.prepare('SELECT 1 FROM history_sync WHERE chat=? UNION SELECT 1 FROM messages WHERE chat=? LIMIT 1').get(chat,chat));}
   context(data,thread,live){
     const m=data.message;
     const c={type:m.chat_type,chat:m.chat_id,id:m.message_id,user:data.user,thread,text:m.message_type==='text'?String(data.content.text||'').trim():'',live};
-    this.contexts.add(c);return c;
+    this.contexts.add(c);
+    // Only the next narrowly parsed anaphoric send can retain a verified
+    // choice. Any intervening request clears it even if no tool is called.
+    const previous=this.previousSelection.get(c.chat);
+    if(c.type==='p2p'&&c.user===this.owner()&&previous?.id===c.id&&this.latest.get(c.chat)===c.id&&c.live()){
+      const intent=this.sendIntent(c.text);
+      if(intent&&['这个群','那个群','刚才的群'].includes(intent.target)){
+        const row=previous.rows.find(r=>r.owner===c.user&&r.thread===c.thread);
+        if(row)this.privateStore.db.prepare('INSERT OR REPLACE INTO owner_group_selection VALUES(?,?,?,?)').run(c.user,c.chat,c.thread,row.target);
+      }
+    }
+    return c;
   }
   coverage(chat){
     const store=this.groups.store,h=store.db.prepare('SELECT * FROM history_sync WHERE chat=?').get(chat)||{};
@@ -65,7 +83,7 @@ export class OwnerGroupGateway {
   selection(c,dir){
     // Host, not the model, determines explicit references in the current user
     // text. References inside a quoted body do not grant sending permission.
-    if(/发到|发送|转发|告诉大家|[：:\n]|[“"「]/.test(c.text))return null;
+    if(/发到|发送|转发|告诉大家|[：:\n]|[“”"'「」『』`>]/.test(c.text))return null;
     const matches=dir.filter(g=>c.text.includes(g.reference)||c.text.includes(g.displayName));
     if(matches.length===1){
       this.privateStore.db.prepare('INSERT OR REPLACE INTO owner_group_selection VALUES(?,?,?,?)').run(c.user,c.chat,c.thread,matches[0].chat);
@@ -78,18 +96,23 @@ export class OwnerGroupGateway {
     }
     return null;
   }
-  sendTarget(c,dir){
+  sendIntent(text){
     // Conservative grammar: unsupported phrasing asks Owner to restate. A
     // keyword anywhere in retrieved prose can never mint a send capability.
     let target,body=null;
-    const direct=/^(?:请)?(?:把|将)下面(?:这段)?原文(?:发送|转发|发)到([^：:\n]+)[：:]([\s\S]+)$/.exec(c.text);
-    const compose=/^(?:请)?(?:把|将)刚才(?:的|总结的)?(?:总结|三个行动项|行动项|内容)(?:整理一下[，,]?\s*)?[，,]?\s*(?:发送|转发|发)到([^。！!？?\n]+)[。！!]?$/u.exec(c.text);
-    const tell=/^(?:请)?(?:去)?([^：:\n，,]+?)群里告诉大家[，,:：]([\s\S]+)$/.exec(c.text);
+    const direct=/^(?:请)?(?:把|将)下面(?:这段)?原文(?:发送|转发|发)到([^：:\n]+)[：:]([\s\S]+)$/.exec(text);
+    const compose=/^(?:请)?(?:把|将)刚才(?:的|总结的)?(?:总结|三个行动项|行动项|内容)(?:整理一下[，,]?\s*)?[，,]?\s*(?:发送|转发|发)到([^。！!？?\n]+)[。！!]?$/u.exec(text);
+    const tell=/^(?:请)?(?:去)?([^：:\n，,]+?)群里告诉大家[，,:：]([\s\S]+)$/.exec(text);
     if(direct){target=direct[1];body=direct[2];}
     else if(compose)target=compose[1];
     else if(tell){target=tell[1];body=tell[2];}
     else return null;
     target=target.trim().replace(/里$/,'');
+    return {target,body};
+  }
+  sendTarget(c,dir){
+    const intent=this.sendIntent(c.text);if(!intent)return null;
+    const {target,body}=intent;
     let candidates=dir.filter(g=>target===g.reference||target===g.displayName||target===g.displayName+'群'||target+'群'===g.displayName);
     if(['这个群','那个群','刚才的群'].includes(target)){
       const selected=this.privateStore.db.prepare('SELECT target FROM owner_group_selection WHERE owner=? AND chat=? AND thread=?').get(c.user,c.chat,c.thread)?.target;

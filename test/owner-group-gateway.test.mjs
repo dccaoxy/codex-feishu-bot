@@ -201,3 +201,48 @@ test('gateway identity is never registered to Group or Knowledge tool sets',asyn
  const {GROUP_TOOLS,KNOWLEDGE_TOOLS}=await import('../src/group-assistant.mjs');
  assert.ok(![...GROUP_TOOLS,...KNOWLEDGE_TOOLS].some(x=>x.name.startsWith('owner_group')));
 });
+
+for(const query of ['总结学员群：今天的讨论','总结学员群\n今天的讨论','引用：“学员群”',"引用 '学员群'",'引用 `学员群`','比较机器人们和学员群'])test('ambiguous or quoted switch invalidates old send selection: '+JSON.stringify(query),async t=>{
+ const f=setup(t);const [a,b]=await directory(f,f.context('总结机器人们群'));
+ await f.gateway.execute('owner_group_search',{group:b.reference},f.context(query));
+ const c=f.context('把刚才的总结发到这个群里');
+ for(const g of [a,b])await assert.rejects(f.gateway.execute('owner_group_send',{group:g.reference,text:'学员群摘要'},c));
+ assert.equal(f.sent.length,0);
+});
+
+test('plain A to B switch uses B, but a new request without tools and restart invalidate previous selection',async t=>{
+ const f=setup(t);const [a,b]=await directory(f,f.context('总结机器人们群'));
+ await directory(f,f.context('总结学员群今天的讨论'));
+ const c=f.context('把刚才的总结发到这个群里');
+ await assert.rejects(f.gateway.execute('owner_group_send',{group:a.reference,text:'B summary'},c));
+ assert.equal((await f.gateway.execute('owner_group_send',{group:b.reference,text:'B summary'},c)).status,'sent');assert.equal(f.sent[0].data.receive_id,'b');
+ f.gateway.accept('private','no-tools');
+ await assert.rejects(f.gateway.execute('owner_group_send',{group:b.reference,text:'B'},f.context('把刚才的总结发到这个群里')));
+ await directory(f,f.context('总结机器人们群'));
+ const restarted=new OwnerGroupGateway(f.config,f.store,f.groups,f.feishu,()=> 'owner');restarted.accept('private','restart');
+ const rc=restarted.context(event('restart','把刚才的总结发到这个群里'),'private-thread',()=>true);
+ await assert.rejects(restarted.execute('owner_group_send',{group:a.reference,text:'A'},rc));assert.equal(f.sent.length,1);
+});
+
+for(const state of ['queue_full','cancelled'])test('changes advances hidden terminal pages and preserves pending queued: '+state,async t=>{
+ const f=setup(t);for(let i=0;i<4;i++){f.add('a','hidden'+i,'hidden');f.groupStore.db.prepare('INSERT INTO group_requests(chat,id,event,state) VALUES(?,?,?,?)').run('a','hidden'+i,'{}',state);}
+ f.add('a','pending','waiting');f.groupStore.db.prepare("INSERT INTO group_requests(chat,id,event,state) VALUES('a','pending','{}','queued')").run();f.add('a','last','later');
+ f.groupStore.setThread('a',{cursor:73,state:'idle'});
+ const snapshot=()=>['messages','raw_messages','group_requests','group_threads'].map(t=>JSON.stringify(f.groupStore.db.prepare('SELECT * FROM '+t).all()));const before=snapshot();
+ const c=f.context('读取机器人们群'),[g]=await directory(f,c);const read=after=>f.gateway.execute('owner_group_changes',{group:g.reference,after,limit:1},c).then(r=>r.result);
+ let r=await read(0);assert.deepEqual(r.messages.map(m=>m.messageId),['first-a']);
+ for(let i=0;i<4;i++){const old=r.cursor;r=await read(old);assert.ok(r.cursor>old);assert.deepEqual(r.messages,[]);assert.equal(r.hasMore,true);}
+ const boundary=r.cursor;r=await read(boundary);assert.equal(r.cursor,boundary);assert.equal(r.hasMore,true);assert.deepEqual(r.messages,[]);assert.deepEqual(snapshot(),before);
+ f.groupStore.db.prepare("UPDATE group_requests SET state='done' WHERE id='pending'").run();
+ r=await read(boundary);assert.deepEqual(r.messages.map(m=>m.messageId),['pending']);r=await read(r.cursor);assert.deepEqual(r.messages.map(m=>m.messageId),['last']);assert.equal(r.hasMore,false);
+ f.add('a','tail','hidden tail');f.groupStore.db.prepare('INSERT INTO group_requests(chat,id,event,state) VALUES(?,?,?,?)').run('a','tail','{}',state);
+ r=await read(r.cursor);assert.deepEqual(r.messages,[]);assert.equal(r.hasMore,false);assert.equal(f.sent.length,0);
+});
+
+test('changes output budget and retention never skip an undelivered visible message',async t=>{
+ const f=setup(t);for(let i=0;i<30;i++)f.add('a','long'+i,'字'.repeat(4000));
+ const c=f.context('读取机器人们群'),[g]=await directory(f,c);let cursor=0,ids=[];
+ for(let i=0;i<10;i++){const r=(await f.gateway.execute('owner_group_changes',{group:g.reference,after:cursor,limit:50},c)).result;assert.ok(JSON.stringify(r.messages).length<=24000);ids.push(...r.messages.map(m=>m.messageId));cursor=r.cursor;if(!r.hasMore)break;}
+ assert.equal(ids.length,31);assert.equal(new Set(ids).size,31);
+ f.groupStore.retentionDays=0;const r=(await f.gateway.execute('owner_group_changes',{group:g.reference,after:0,limit:1},c)).result;assert.deepEqual(r.messages,[]);assert.equal(r.hasMore,false);
+});

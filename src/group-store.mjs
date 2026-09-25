@@ -165,8 +165,19 @@ export class GroupMessageStore {
     if(!Number.isSafeInteger(after)||after<0||!Number.isInteger(limit)||limit<1||limit>50)throw new Error('Invalid cursor');
     if(this.stopped(chat))return {messages:[],cursor:after,hasMore:false};
     const rows=this.db.prepare('SELECT m.*,r.seq FROM raw_messages r JOIN messages m ON m.chat=r.chat AND m.id=r.id WHERE r.chat=? AND r.seq>? AND m.time>=? ORDER BY r.seq LIMIT ?').all(chat,after,this.lowerBound(),limit);
-    const messages=this.result(rows),cursor=messages.at(-1)?.sequence??after;
-    return {messages,cursor,hasMore:Boolean(this.db.prepare('SELECT 1 FROM raw_messages WHERE chat=? AND seq>? LIMIT 1').get(chat,cursor))};
+    const messages=[];let cursor=after;
+    for(const row of rows){
+      const state=this.requestState(chat,row.id);
+      // Queued is temporary: stop before it so a later read can see it once
+      // completed. Terminal hidden rows can be consumed without revealing them.
+      if(state==='queued')break;
+      if(['queue_full','cancelled'].includes(state)){cursor=row.seq;continue;}
+      const [item]=this.result([row]);
+      if(!item||JSON.stringify([...messages,item]).length>24000)break;
+      messages.push(item);cursor=row.seq;
+    }
+    const hasMore=Boolean(this.db.prepare('SELECT 1 FROM raw_messages r JOIN messages m ON m.chat=r.chat AND m.id=r.id WHERE r.chat=? AND r.seq>? AND m.time>=? LIMIT 1').get(chat,cursor,this.lowerBound()));
+    return {messages,cursor,hasMore};
   }
   coverage(chat) {const h=this.sync(chat);const b=this.db.prepare('SELECT COUNT(*) count,MIN(time) oldest,MAX(time) newest FROM messages WHERE chat=?').get(chat);return {...b,historicalSync:h.state,initialComplete:Boolean(h.initial_complete),lastReconciledAt:h.last_reconciled_at,oldestSyncedMessage:h.oldest_message,newestSyncedMessage:h.newest_message,retentionDays:this.retentionDays};}
   prune() { if(this.retentionDays!==null)for(const r of this.db.prepare('SELECT DISTINCT chat FROM messages WHERE time<?').all(this.lowerBound()))this.invalidateThread(r.chat); this.db.prepare("UPDATE group_requests SET state='cancelled',event='{}' WHERE EXISTS(SELECT 1 FROM messages m WHERE m.chat=group_requests.chat AND m.id=group_requests.id AND m.time<?)").run(this.lowerBound());this.db.prepare('DELETE FROM messages WHERE time<?').run(this.lowerBound()); this.db.exec('DELETE FROM raw_messages WHERE NOT EXISTS(SELECT 1 FROM messages m WHERE m.chat=raw_messages.chat AND m.id=raw_messages.id); PRAGMA wal_checkpoint(TRUNCATE)'); }
