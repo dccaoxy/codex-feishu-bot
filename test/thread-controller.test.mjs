@@ -355,3 +355,53 @@ test('dispatch approval cache is bounded and never replays resolved duplicate ID
     assert.ok([...bot.prompts.values()].every(p=>p.id!==0));assert.equal(rpc.responses.length,0);
   }finally{release();await sending;await bot.close();}
 });
+
+for (const scenario of ['during','after','missing','oversized','wrong-item','wrong-turn','resolved','detach','close','disconnect']) test(`file approval retains exact reviewable details: ${scenario}`,async t=>{
+  const {config,store,rpc,controller}=setup(t);rpc.shared=true;await controller.attach('chat','external');rpc.calls=[];
+  let release,opened;const gate=new Promise(r=>release=r),opening=new Promise(r=>opened=r);const cards=[];
+  const bot=new Bot(config,store,rpc,{stream:async()=>{opened();await gate;return null;},text:async()=>{},interactive:async(...a)=>cards.push(a)},()=>{});
+  const sending=bot.run('chat',[]).then(()=>null,e=>e);
+  try {
+    await opening;rpc.state='active';rpc.turn='peer-turn';
+    bot.notification({method:'turn/started',params:{threadId:'external',turn:{id:rpc.turn}}});
+    if(scenario==='after'){release();await sending;}
+    const event=(turnId,id,path,diff)=>bot.notification({method:'item/started',params:{threadId:'external',turnId,item:{id,type:'fileChange',changes:[{path,kind:{type:'update'},diff}]}}});
+    if(scenario!=='missing')event(scenario==='wrong-turn'?'old-turn':rpc.turn,scenario==='wrong-item'?'other':'patch-1','/review/target.txt',scenario==='oversized'?'x'.repeat(11000):'+ intended change');
+    // A later unrelated item must never substitute for the requested item.
+    event(rpc.turn,'patch-2','/review/unrelated.txt','+ unrelated');
+    await bot.serverRequest({id:501,method:'item/fileChange/requestApproval',params:{threadId:'external',turnId:rpc.turn,itemId:'patch-1',reason:'Review patch'}});
+    if(scenario==='resolved')bot.notification({method:'serverRequest/resolved',params:{requestId:501}});
+    if(scenario==='detach')await bot.command('chat','/detach');
+    if(scenario==='close')await bot.close();
+    if(scenario==='disconnect')rpc.emit('disconnected');
+    release();await sending;
+    const valid=['during','after'].includes(scenario);
+    assert.equal(cards.length,valid?1:0);assert.equal(bot.prompts.size,valid?1:0);
+    assert.equal(rpc.responses.length,0);
+    assert.equal(rpc.calls.filter(c=>c.method==='turn/start').length,0);
+    assert.equal(rpc.calls.filter(c=>c.method==='turn/steer').length,['detach','close','disconnect'].includes(scenario)?0:1);
+    if(valid){
+      assert.match(cards[0][2],/\/review\/target.txt/);assert.match(cards[0][2],/\+ intended change/);assert.doesNotMatch(cards[0][2],/unrelated/);
+      const token=[...bot.prompts.keys()][0];await bot.action('chat',{token,decision:'accept'});
+      assert.deepEqual(rpc.responses,[{id:501,result:{decision:'accept'}}]);
+    }
+  }finally{release();await sending;await bot.close();}
+});
+
+test('file detail bounds invalidate stale snapshots and isolate turn/item identities',async t=>{
+  const {config,store,rpc}=setup(t);rpc.shared=true;
+  const bot=new Bot(config,store,rpc,{text:async()=>{}},()=>{});
+  const run={external:true,thread:'external',chat:'chat',turn:'B',dispatching:true};bot.runs.set('external',run);
+  const event=(turn,id,diff)=>bot.notification({method:'item/started',params:{threadId:'external',turnId:turn,item:{id,type:'fileChange',changes:[{path:'/review/target',kind:{type:'update'},diff}]}}});
+  const key=(turn,id)=>JSON.stringify([turn,id]);
+  try {
+    event('A','same','+ A');event('B','same','+ B');
+    assert.match(run.fileDetails.get(key('A','same')),/\+ A/);assert.match(run.fileDetails.get(key('B','same')),/\+ B/);
+    event('B','same','x'.repeat(11000));assert.equal(run.fileDetails.get(key('B','same')),null);
+    for(let i=0;i<40;i++)event('B',String(i),'x'.repeat(8000));
+    assert.equal(run.fileDetails.size,32);assert.ok(run.fileDetailBytes<=64000);
+    assert.equal(run.fileDetails.has(key('B','39')),false);
+    assert.ok([...run.fileDetails.values()].some(v=>v===null));
+    await bot.close();assert.equal(run.fileDetails.size,0);assert.equal(rpc.responses.length,0);
+  }finally{await bot.close();}
+});

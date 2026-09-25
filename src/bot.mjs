@@ -410,7 +410,7 @@ ${this.ownerGroups?OWNER_GROUP_INSTRUCTIONS:''}` };
   async unwatchExternal(chat, id = this.store.binding(chat)?.thread) {
     const r = this.runs.get(id);
     if (!r?.external) return;
-    r.ending = true; r.dispatchRequests?.clear(); clearInterval(r.timer);
+    r.ending = true; r.dispatchRequests?.clear(); r.fileDetails?.clear(); clearInterval(r.timer);
     for (const [token,p] of this.prompts) if (p.thread === id) {
       if (this.rpc.shared) this.clearPrompt(token); else this.denyPrompt(token);
     }
@@ -501,13 +501,22 @@ ${this.ownerGroups?OWNER_GROUP_INSTRUCTIONS:''}` };
     const r = this.runs.get(p.threadId);
     if ((m.method === 'item/completed' && p.item?.type === 'contextCompaction') || m.method === 'thread/compacted' || m.method === 'error') this.compacting.delete(p.threadId);
     if (m.method === 'serverRequest/resolved') {
-      for (const run of this.runs.values()) run.dispatchRequests?.delete(p.requestId);
+      for (const run of this.runs.values()) {
+        const request = run.dispatchRequests?.get(p.requestId);
+        if (request) run.fileDetails?.delete(JSON.stringify([request.params.turnId,request.params.itemId]));
+        run.dispatchRequests?.delete(p.requestId);
+      }
       for (const [token, prompt] of this.prompts) if (prompt.id === p.requestId) {
+        this.runs.get(prompt.thread)?.fileDetails?.delete(JSON.stringify([prompt.turn,prompt.params.itemId]));
         this.clearPrompt(token, '已由客户端处理');
         void this.feishu.text(prompt.chat,'该审批已由一个客户端处理，旧卡片已失效。').catch(() => {});
       }
     }
-    if (!r || r.ending || r.dispatching) return;
+    if (!r || r.ending) return;
+    // File approvals reference a separate item event. Preserve that event even
+    // while the streaming card is opening, before the live turn is reconciled.
+    if (['item/started','item/completed'].includes(m.method) && p.item?.type === 'fileChange') this.rememberFileDetails(r,p);
+    if (r.dispatching) return;
     const eventTurn = p.turnId || p.turn?.id;
     if (r.external && eventTurn && r.turn && eventTurn !== r.turn) return;
     if (m.method === 'turn/started') { r.turn = p.turn.id; this.store.saveRun(r); }
@@ -517,7 +526,6 @@ ${this.ownerGroups?OWNER_GROUP_INSTRUCTIONS:''}` };
     }
     if (m.method === 'item/started' || m.method === 'item/completed') {
       const item = p.item;
-      if (item.type === 'fileChange') r.fileChanges = item.changes;
       if (item.type === 'agentMessage') r.messages.set(item.id, { text: item.text || '', phase: item.phase });
       const labels = { webSearch: '正在搜索资料', commandExecution: '正在运行命令', fileChange: '正在修改文件',
         mcpToolCall: '正在使用工具', dynamicToolCall: '正在调用工具', contextCompaction: '正在压缩上下文', plan: '正在规划' };
@@ -556,7 +564,7 @@ ${this.ownerGroups?OWNER_GROUP_INSTRUCTIONS:''}` };
   }
   endRun(r, state, error) {
     if (r.ending) return;
-    r.ending = true; r.dispatchRequests?.clear(); clearInterval(r.timer);
+    r.ending = true; r.dispatchRequests?.clear(); r.fileDetails?.clear(); clearInterval(r.timer);
     r.finishPromise = this.finishRun(r, state, error).catch(e => {
       this.log(`结果发送失败：${this.redact(e)}；请用 /read 查看已保存的会话。`);
       this.feishu.text(r.chat, '结果发送失败，已保留本地会话。请发送 /read 查看。').catch(() => {});
@@ -595,6 +603,24 @@ ${this.ownerGroups?OWNER_GROUP_INSTRUCTIONS:''}` };
     if (!rel || rel.startsWith('..' + path.sep) || rel === '..' || path.isAbsolute(rel) || !fs.statSync(file).isFile()) throw new Error('只能发送当前工作目录内的普通文件。');
     await this.feishu.upload(chat, file);
     return { sent: true, filename: path.basename(file) };
+  }
+  rememberFileDetails(run, p) {
+    if (typeof p.turnId !== 'string' || typeof p.item.id !== 'string' ||
+        p.turnId.length > 256 || p.item.id.length > 256) return;
+    if (run.external && !run.dispatching && p.turnId !== run.turn) return;
+    const key = JSON.stringify([p.turnId,p.item.id]);
+    const entries = run.fileDetails ??= new Map();
+    // No eviction: an over-limit event cannot resurrect an older reviewable
+    // snapshot. Byte accounting is cumulative for this run, including updates.
+    if (!entries.has(key) && entries.size >= 32) return;
+    entries.set(key,null);
+    const changes = p.item.changes;
+    if (!Array.isArray(changes) || !changes.length || !changes.every(c =>
+      c && typeof c.path === 'string' && c.path.length && c.kind && typeof c.diff === 'string')) return;
+    const details = JSON.stringify(changes), size = Buffer.byteLength(details);
+    if (size > 10000 || (run.fileDetailBytes || 0) + size > 64000) return;
+    run.fileDetailBytes = (run.fileDetailBytes || 0) + size;
+    entries.set(key,details);
   }
   dispatchOverflow(run) {
     if (run.dispatchOverflowNotified) return;
@@ -653,6 +679,13 @@ ${this.ownerGroups?OWNER_GROUP_INSTRUCTIONS:''}` };
       else this.rpc.reject(m.id, '此交互暂不支持通过飞书完成');
       await this.feishu.text(run.chat, `Codex 请求了暂不支持的交互：${m.method}。请在本机处理相关配置或授权后重试。`); return;
     }
+    const fileDetails = m.method === 'item/fileChange/requestApproval'
+      ? run.fileDetails?.get(JSON.stringify([p.turnId,p.itemId])) : null;
+    if (m.method === 'item/fileChange/requestApproval' && !fileDetails) {
+      if (!(run.external && this.rpc.shared)) this.rpc.respond(m.id,{decision:'decline'});
+      await this.feishu.text(run.chat,'无法完整核对该文件审批的路径及修改内容，飞书审批入口未开放，请在原客户端处理。').catch(() => {});
+      return;
+    }
     const token = randomBytes(5).toString('hex');
     const prompt = { id: m.id, method: m.method, params: p, chat: run.chat, thread: run.thread, turn: p.turnId || run.turn,
       expires: Date.now() + 10*60*1000, answers: {} };
@@ -696,7 +729,7 @@ ${this.ownerGroups?OWNER_GROUP_INSTRUCTIONS:''}` };
         const details = [p.reason, p.command, p.cwd ? `工作目录：${p.cwd}` : '', p.permissions ? JSON.stringify(p.permissions) : '',
           p.grantRoot ? `文件授权目录：${p.grantRoot}` : '', p.additionalPermissions ? JSON.stringify(p.additionalPermissions) : '',
           p.networkApprovalContext ? JSON.stringify(p.networkApprovalContext) : '',
-          m.method === 'item/fileChange/requestApproval' && run.fileChanges ? JSON.stringify(run.fileChanges) : ''].filter(Boolean).join('\n');
+          fileDetails || ''].filter(Boolean).join('\n');
         if (Buffer.byteLength(details) > 10000) {
           this.unavailablePrompt(token,run);
           await this.feishu.text(run.chat, '审批详情过长，飞书入口已关闭。请让 Codex 拆成更小的操作后重试，以便完整核对。'); return;
@@ -782,7 +815,7 @@ ${this.ownerGroups?OWNER_GROUP_INSTRUCTIONS:''}` };
     }
     for (const r of [...this.runs.values(),...this.retiredRuns]) {
       clearInterval(r.timer);
-      if (r.external && !r.ending) { r.ending=true; r.dispatchRequests?.clear(); if (r.card) await this.feishu.finish(r.card,++r.sequence,'已解除观察').catch(() => {}); }
+      if (r.external && !r.ending) { r.ending=true; r.dispatchRequests?.clear(); r.fileDetails?.clear(); if (r.card) await this.feishu.finish(r.card,++r.sequence,'已解除观察').catch(() => {}); }
     }
   }
 }
