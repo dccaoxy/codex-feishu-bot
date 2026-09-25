@@ -1,6 +1,6 @@
 import {knowledgeConfig,lastDueDay,nextDate} from './knowledge-schema.mjs';
 import {KnowledgeWorker} from './knowledge-worker.mjs';
-const empty=()=>JSON.stringify({digest:{status:'no_material_content',summary:'',facts:[],decisions:[],viewpoints:[],actions:[],open_questions:[],resources:[],topics:[],source_message_ids:[]},topics:[]});
+const empty=()=>JSON.stringify({digest:{status:'no_material_content',summary:'',reported_facts:[],verified_facts:[],plans:[],decisions:[],viewpoints:[],actions:[],open_questions:[],resources:[],topics:[],source_message_ids:[]},topics:[]});
 export class KnowledgeScheduler {
   constructor(config,raw,{allowed,busy,worker,clock=Date.now,log=()=>{}}){
     this.config=knowledgeConfig(config.groups?.knowledge);this.raw=raw;this.store=raw.knowledge;this.allowed=allowed;this.busy=busy;this.clock=clock;this.log=log;this.closed=false;

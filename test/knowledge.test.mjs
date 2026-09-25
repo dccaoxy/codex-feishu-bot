@@ -6,8 +6,8 @@ import {knowledgeConfig,dayStart,lastDueDay,validateKnowledge} from '../src/know
 import {knowledgeThreadParams} from '../src/knowledge-worker.mjs';
 const event=(id,text='库存300',day='2026-09-20',chat='oc_A')=>({sender:{sender_type:'user',sender_id:{open_id:'owner'}},message:{chat_id:chat,message_id:id,create_time:String(Date.parse(day+'T10:00:00+08:00')),message_type:'text',content:JSON.stringify({text})}});
 const item=(text,ids=['m1'])=>({text,source_message_ids:ids});
-const blank=()=>({decisions:[],viewpoints:[],actions:[],open_questions:[],resources:[]});
-const output=(ids=['m1'],old=null)=>({digest:{status:'complete',summary:'库存讨论',facts:[item('库存300',ids)],...blank(),topics:['库存'],source_message_ids:ids},topics:[{topic_id:old,title:'库存',current_summary:'库存300',confirmed_facts:[item('库存300',ids)],key_changes:[],...blank(),conflicts:[],source_message_ids:ids}]});
+const blank=()=>({verified_facts:[],plans:[],decisions:[],viewpoints:[],actions:[],open_questions:[],resources:[]});
+const output=(ids=['m1'],old=null)=>({digest:{status:'complete',summary:'库存讨论',reported_facts:[item('库存300',ids)],...blank(),topics:['库存'],source_message_ids:ids},topics:[{topic_id:old,title:'库存',current_summary:'库存300',reported_facts:[item('库存300',ids)],key_changes:[],...blank(),conflicts:[],source_message_ids:ids}]});
 function fixture(t,{worker,knowledge={},busy=()=>false}={}){
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'knowledge-'));let raw=new GroupMessageStore(dir),now=Date.parse('2026-09-22T03:00:00+08:00');
  const c={groups:{enabled:true,allowedChatIds:['oc_A'],knowledge:{enabled:true,...knowledge}}};
@@ -29,12 +29,12 @@ test('structured categories preserved, raw unchanged, daily commit/revisions ide
  await x.scheduler.tick();await x.scheduler.tick();assert.equal(x.raw.knowledge.daily('oc_A','2026-09-20').revision,1);assert.equal(x.raw.db.prepare('SELECT count(*) n FROM topic_revisions').get().n,1);
 });
 test('no material day produces no invented topic; empty days skip model with bounded catchup',async t=>{
- const x=fixture(t,{worker:{run:async()=>JSON.stringify({digest:{...output().digest,status:'no_material_content',summary:'只有问候',facts:[],topics:[],source_message_ids:['m1']},topics:[]})}});x.raw.ingest(event('m1','你好'),false);await x.scheduler.tick();assert.equal(x.raw.knowledge.list('oc_A').length,0);assert.equal(x.raw.knowledge.daily('oc_A','2026-09-20').status,'no_material_content');
+ const x=fixture(t,{worker:{run:async()=>JSON.stringify({digest:{...output().digest,status:'no_material_content',summary:'只有问候',reported_facts:[],topics:[],source_message_ids:['m1']},topics:[]})}});x.raw.ingest(event('m1','你好'),false);await x.scheduler.tick();assert.equal(x.raw.knowledge.list('oc_A').length,0);assert.equal(x.raw.knowledge.daily('oc_A','2026-09-20').status,'no_material_content');
 });
 test('multi-day catchup chronological and one model per cycle; persisted same topic identity/title/revisions',async t=>{
  const x=fixture(t);x.raw.ingest(event('m1'),false);x.raw.ingest(event('m2','库存250','2026-09-21'),false);
  await x.scheduler.tick();assert.equal(x.calls.length,1);const first=x.raw.knowledge.list('oc_A')[0].topic_id;
- x.scheduler.worker.run=async input=>{x.calls.push(input);const o=output(['m2'],first);o.topics[0]={...o.topics[0],title:'库存变化',current_summary:'最新250，此前300',confirmed_facts:[item('库存250',['m2'])],key_changes:[item('300更新为250',['m1','m2'])],source_message_ids:['m1','m2']};return JSON.stringify(o);};
+ x.scheduler.worker.run=async input=>{x.calls.push(input);const o=output(['m2'],first);o.topics[0]={...o.topics[0],title:'库存变化',current_summary:'最新250，此前300',reported_facts:[item('库存250',['m2'])],key_changes:[item('300更新为250',['m1','m2'])],source_message_ids:['m1','m2']};return JSON.stringify(o);};
  x.advance(61000);await x.scheduler.tick();assert.deepEqual(x.calls.map(x=>x.date),['2026-09-20','2026-09-21']);assert.equal(x.raw.knowledge.list('oc_A')[0].topic_id,first);assert.equal(x.raw.knowledge.read('oc_A',first).state.version,2);assert.equal(x.raw.knowledge.read('oc_A',first).revisions.length,2);
  assert.match(x.raw.db.prepare('SELECT payload FROM topic_revisions WHERE version=1').get().payload,/300/);
 });
@@ -43,12 +43,12 @@ test('partial/failed or stale history cannot generate complete digest',async t=>
  x.raw.setSync('oc_A',{state:'complete',last_reconciled_at:'2026-09-19T00:00:00Z'});x.advance(3600000);await x.scheduler.tick();assert.equal(x.calls.length,0);
 });
 test('conflicting claims retain both sources and old version; forged sources/IDs/schema fail closed',()=>{
- const input={messages:[{id:'m1'},{id:'m2'}],topics:[]};const o=output(['m1','m2']);o.topics[0].confirmed_facts=[];o.topics[0].conflicts=[{text:'库存250与300冲突',status:'unresolved',source_message_ids:['m1','m2']}];assert.equal(validateKnowledge(JSON.stringify(o),input).topics[0].conflicts[0].status,'unresolved');
- for(const mutate of [o=>o.digest.facts[0].source_message_ids=['other-chat'],o=>o.topics[0].topic_id='foreign-topic',o=>o.topics[0].conflicts[0].status='resolved',o=>o.digest.extra='shell',o=>o.digest.status='no_material_content',o=>o.topics[0].source_message_ids=['other-chat']]){const n=structuredClone(o);mutate(n);assert.throws(()=>validateKnowledge(JSON.stringify(n),input));}
+ const input={messages:[{id:'m1'},{id:'m2'}],topics:[]};const o=output(['m1','m2']);o.topics[0].reported_facts=[];o.topics[0].conflicts=[{text:'库存250与300冲突',status:'unresolved',source_message_ids:['m1','m2']}];assert.equal(validateKnowledge(JSON.stringify(o),input).topics[0].conflicts[0].status,'unresolved');
+ for(const mutate of [o=>o.digest.reported_facts[0].source_message_ids=['other-chat'],o=>o.topics[0].topic_id='foreign-topic',o=>o.topics[0].conflicts[0].status='resolved',o=>o.digest.extra='shell',o=>o.digest.status='no_material_content',o=>o.topics[0].source_message_ids=['other-chat']]){const n=structuredClone(o);mutate(n);assert.throws(()=>validateKnowledge(JSON.stringify(n),input));}
  assert.throws(()=>validateKnowledge('not JSON',input));assert.throws(()=>validateKnowledge('x'.repeat(128001),input));
 });
 test('new topic has new ID, previous facts cannot silently disappear',()=>{
- const old=output().topics[0];old.topic_id='existing';const input={messages:[{id:'m2'}],topics:[old]};const o=output(['m2'],'existing');assert.throws(()=>validateKnowledge(JSON.stringify(o),input),/lost_sources/);o.topics[0].source_message_ids=['m1','m2'];o.topics[0].confirmed_facts=[item('库存250',['m2'])];assert.throws(()=>validateKnowledge(JSON.stringify(o),input),/lost_fact/);
+ const old=output().topics[0];old.topic_id='existing';const input={messages:[{id:'m2'}],topics:[old]};const o=output(['m2'],'existing');assert.throws(()=>validateKnowledge(JSON.stringify(o),input),/lost_sources/);o.topics[0].source_message_ids=['m1','m2'];o.topics[0].reported_facts=[item('库存250',['m2'])];assert.throws(()=>validateKnowledge(JSON.stringify(o),input),/lost_fact/);
  o.topics[0].topic_id=null;assert.doesNotThrow(()=>validateKnowledge(JSON.stringify(o),input));
 });
 test('recall invalidates immediately, redacts derived copies, rebuild excludes withdrawn source',async t=>{
@@ -129,4 +129,29 @@ test('missing reconciliation timestamp fails closed despite complete flag',async
 });
 test('retention-truncated days are skipped with explicit error, never formal complete digest',async t=>{
  const x=fixture(t);x.raw.ingest(event('m1'),false);x.raw.lowerBound=()=>Date.parse('2026-09-20T09:00:00+08:00');await x.scheduler.tick();assert.equal(x.raw.knowledge.daily('oc_A','2026-09-20'),null);const job=x.raw.db.prepare('SELECT * FROM knowledge_jobs').get();assert.equal(job.status,'skipped');assert.equal(job.error,'knowledge_retention_incomplete');
+});
+
+test('chat claims cannot become verified evidence in either digest or topic',()=>{
+ const input={messages:[{id:'m1'}],topics:[]};
+ for(const target of ['digest','topic']){
+  const o=output();(target==='digest'?o.digest:o.topics[0]).verified_facts=[item('机器人报告已重启，不等于系统验证')];
+  assert.throws(()=>validateKnowledge(JSON.stringify(o),input),/knowledge_schema/);
+ }
+ const o=output();o.digest.plans=[item('剩余批次下次运行继续')];o.digest.actions=[{text:'重启后告诉我',owner:null,deadline:null,source_message_ids:['m1']}];
+ assert.deepEqual(validateKnowledge(JSON.stringify(o),input).digest.decisions,[]);
+ const legacy=output();legacy.digest.facts=legacy.digest.reported_facts;delete legacy.digest.reported_facts;
+ assert.throws(()=>validateKnowledge(JSON.stringify(legacy),input),/knowledge_schema/);
+});
+test('legacy fact compatibility preserves revision bytes, IDs, recall and idempotency',async t=>{
+ const x=fixture(t);x.raw.ingest(event('m1'),false);await x.scheduler.tick();const id=x.raw.knowledge.list('oc_A')[0].topic_id;
+ for(const [table,key] of [['daily_digests','facts'],['digest_revisions','facts'],['knowledge_topics','confirmed_facts'],['topic_revisions','confirmed_facts']]){
+  const row=x.raw.db.prepare(`SELECT payload FROM ${table}`).get();const old=JSON.parse(row.payload);old[key]=old.reported_facts;delete old.reported_facts;delete old.verified_facts;delete old.plans;
+  x.raw.db.prepare(`UPDATE ${table} SET payload=?`).run(JSON.stringify(old));
+ }
+ const before=x.raw.db.prepare('SELECT payload FROM topic_revisions').get().payload;
+ const read=x.raw.knowledge.read('oc_A',id);assert.equal(read.state.reported_facts.length,1);assert.deepEqual(read.state.verified_facts,[]);assert.equal(read.state.confirmed_facts,undefined);
+ assert.equal(x.raw.knowledge.daily('oc_A','2026-09-20').digest.facts,undefined);
+ assert.equal(x.raw.knowledge.snapshot('oc_A','2026-09-20',knowledgeConfig()).input.topics[0].reported_facts.length,1);
+ await x.scheduler.tick();assert.equal(x.raw.knowledge.daily('oc_A','2026-09-20').revision,1);assert.equal(x.raw.db.prepare('SELECT payload FROM topic_revisions').get().payload,before);
+ x.raw.recall('oc_A','m1');assert.equal(x.raw.knowledge.read('oc_A',id),null);assert.equal(x.raw.db.prepare('SELECT payload FROM topic_revisions').get().payload,null);
 });

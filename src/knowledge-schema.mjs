@@ -19,8 +19,8 @@ const item=object({text:string,source_message_ids:sources});
 const items={type:'array',items:item,maxItems:40};
 const action=object({text:string,owner:{type:['string','null'],maxLength:200},deadline:{type:['string','null'],maxLength:200},source_message_ids:sources});
 const resource=object({text:string,url:{type:'string',maxLength:2000,pattern:'^https://'},source_message_ids:sources});
-const common={decisions:items,viewpoints:items,actions:{type:'array',items:action,maxItems:40},open_questions:items,resources:{type:'array',items:resource,maxItems:40}};
-export const KNOWLEDGE_SCHEMA=object({digest:object({status:{enum:['complete','no_material_content']},summary:{type:'string',maxLength:4000},facts:items,...common,topics:{type:'array',items:{type:'string',minLength:1,maxLength:200},maxItems:20},source_message_ids:{...sources,minItems:0}}),topics:{type:'array',maxItems:20,items:object({topic_id:{type:['string','null'],maxLength:100},title:{type:'string',minLength:1,maxLength:200},current_summary:string,confirmed_facts:items,key_changes:items,...common,conflicts:{type:'array',maxItems:40,items:object({text:string,status:{const:'unresolved'},source_message_ids:{...sources,minItems:2}})},source_message_ids:sources})}});
+const common={plans:items,decisions:items,viewpoints:items,actions:{type:'array',items:action,maxItems:40},open_questions:items,resources:{type:'array',items:resource,maxItems:40}};
+export const KNOWLEDGE_SCHEMA=object({digest:object({status:{enum:['complete','no_material_content']},summary:{type:'string',maxLength:4000},reported_facts:items,verified_facts:{type:'array',maxItems:0},...common,topics:{type:'array',items:{type:'string',minLength:1,maxLength:200},maxItems:20},source_message_ids:{...sources,minItems:0}}),topics:{type:'array',maxItems:20,items:object({topic_id:{type:['string','null'],maxLength:100},title:{type:'string',minLength:1,maxLength:200},current_summary:string,reported_facts:items,verified_facts:{type:'array',maxItems:0},key_changes:items,...common,conflicts:{type:'array',maxItems:40,items:object({text:string,status:{const:'unresolved'},source_message_ids:{...sources,minItems:2}})},source_message_ids:sources})}});
 const validate=new Ajv({strict:false}).compile(KNOWLEDGE_SCHEMA);
 export function validateKnowledge(text,input){
   if(typeof text!=='string'||text.length>128000)throw Error('knowledge_output_limit');
@@ -32,7 +32,7 @@ export function validateKnowledge(text,input){
   if([...out.digest.resources,...out.topics.flatMap(t=>t.resources)].some(r=>!urls.has(r.url)))throw Error('knowledge_resource');
   if(out.digest.status==='complete'&&!out.digest.source_message_ids.length)throw Error('knowledge_missing_sources');
   const covered=new Set(out.digest.source_message_ids);walkCoverage(out.digest,covered);
-  if(out.digest.status==='no_material_content'&&(out.topics.length||out.digest.topics.length||['facts','decisions','viewpoints','actions','open_questions','resources'].some(k=>out.digest[k].length)))throw Error('knowledge_empty');
+  if(out.digest.status==='no_material_content'&&(out.topics.length||out.digest.topics.length||['reported_facts','verified_facts','plans','decisions','viewpoints','actions','open_questions','resources'].some(k=>out.digest[k].length)))throw Error('knowledge_empty');
   const seen=new Set();
   for(const t of out.topics){
     if(t.topic_id!==null){if(seen.has(t.topic_id)||!input.topics.some(x=>x.topic_id===t.topic_id))throw Error('knowledge_topic');seen.add(t.topic_id);}
@@ -45,8 +45,19 @@ export function validateKnowledge(text,input){
     const old=input.topics.find(x=>x.topic_id===t.topic_id);
     if(old&&old.conflicts.some(f=>!t.conflicts.some(n=>n.text===f.text&&f.source_message_ids.every(id=>n.source_message_ids.includes(id)))))throw Error('knowledge_lost_conflict');
     if(old&&old.source_message_ids.some(id=>!t.source_message_ids.includes(id)))throw Error('knowledge_lost_sources');
-    if(old&&old.confirmed_facts.some(f=>!t.confirmed_facts.some(n=>n.text===f.text)&&!t.key_changes.some(n=>f.source_message_ids.every(id=>n.source_message_ids.includes(id)))&&!t.conflicts.some(n=>f.source_message_ids.every(id=>n.source_message_ids.includes(id)))))throw Error('knowledge_lost_fact');
+    if(old&&old.reported_facts.some(f=>!t.reported_facts.some(n=>n.text===f.text)&&!t.key_changes.some(n=>f.source_message_ids.every(id=>n.source_message_ids.includes(id)))&&!t.conflicts.some(n=>f.source_message_ids.every(id=>n.source_message_ids.includes(id)))))throw Error('knowledge_lost_fact');
   }
   return out;
 }
 function walkCoverage(value,ids){if(!value||typeof value!=='object')return;if(Array.isArray(value))return value.forEach(v=>walkCoverage(v,ids));if(value.source_message_ids?.some(id=>!ids.has(id)))throw Error('knowledge_source_union');for(const [k,v]of Object.entries(value))if(k!=='source_message_ids')walkCoverage(v,ids);}
+
+// Read compatibility only: preserve stored revision bytes and identity. Legacy
+// chat-derived facts are reports, never independently verified evidence.
+export function readKnowledgePayload(payload){
+ const value=typeof payload==='string'?JSON.parse(payload):structuredClone(payload);
+ if(!value)return value;
+ value.reported_facts=[...(value.reported_facts||[]),...(value.facts||[]),...(value.confirmed_facts||[])];
+ delete value.facts;delete value.confirmed_facts;
+ value.verified_facts=[];value.plans??=[];
+ return value;
+}
