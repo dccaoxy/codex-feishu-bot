@@ -155,3 +155,10 @@ test('legacy fact compatibility preserves revision bytes, IDs, recall and idempo
  await x.scheduler.tick();assert.equal(x.raw.knowledge.daily('oc_A','2026-09-20').revision,1);assert.equal(x.raw.db.prepare('SELECT payload FROM topic_revisions').get().payload,before);
  x.raw.recall('oc_A','m1');assert.equal(x.raw.knowledge.read('oc_A',id),null);assert.equal(x.raw.db.prepare('SELECT payload FROM topic_revisions').get().payload,null);
 });
+
+test('assistant waits for history reconciliation before knowledge tick, including failed groups',async()=>{
+ let release;const gate=new Promise(r=>release=r);const calls=[];
+ const fake={policy:{config:{allowedChatIds:['A','B']}},store:{thread:()=>({state:'new'})},model:{},drain:()=>{},history:{reconcile:async chat=>{calls.push('sync:'+chat);await gate;if(chat==='B')throw Error('offline');calls.push('complete:A');}},knowledge:{tick:async()=>calls.push('knowledge')}};
+ try{GroupAssistant.prototype.start.call(fake);await new Promise(r=>setImmediate(r));assert.deepEqual(calls,['sync:A','sync:B']);release();await new Promise(r=>setImmediate(r));assert.deepEqual(calls,['sync:A','sync:B','complete:A','knowledge']);}
+ finally{clearInterval(fake.queueTimer);clearInterval(fake.historyTimer);release();}
+});

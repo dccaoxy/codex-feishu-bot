@@ -31,7 +31,7 @@ export class GroupAssistant {
     this.timer=setInterval(()=>this.store.prune(),3600000);this.timer.unref();
 
   }
-  start() {this.queueTimer??=setInterval(()=>this.drain(),500);this.queueTimer.unref();this.drain();for(const chat of this.policy.config.allowedChatIds)if(this.store.thread(chat).state==='invalidated')this.model.invalidate?.(chat);const sync=()=>{for(const chat of this.policy.config.allowedChatIds)void this.history.reconcile(chat).catch(()=>{});};sync();this.historyTimer=setInterval(sync,60000);this.historyTimer.unref();this.knowledge.start();}
+  start() {this.queueTimer??=setInterval(()=>this.drain(),500);this.queueTimer.unref();this.drain();for(const chat of this.policy.config.allowedChatIds)if(this.store.thread(chat).state==='invalidated')this.model.invalidate?.(chat);const sync=async()=>{await Promise.allSettled(this.policy.config.allowedChatIds.map(chat=>this.history.reconcile(chat)));await this.knowledge.tick();};void sync();this.historyTimer=setInterval(()=>{void sync();},60000);this.historyTimer.unref();}
   onMessage(data) {
     const d=data.event||data,m=d.message;
     if(this.closed||m?.chat_type!=='group'||!this.policy.allowedGroup(m.chat_id)||typeof m.message_id!=='string'||typeof m.message_type!=='string'||typeof m.content!=='string'||!['user','bot','app'].includes(d.sender?.sender_type))return;
