@@ -15,6 +15,8 @@ const calls=[
  {namespace:'skills',name:'read',args:{package:root,resource:sentinel}},
  {name:'exec_command',args:{cmd:`cat ${sentinel}`}},
  {name:'read_file',args:{path:sentinel}},
+ {name:'owner_groups',args:{}},
+ {name:'owner_group_send',args:{group:'forged',text:'UNAUTHORIZED_SEND'}},
  ...(!knowledge?[{name:'group_search',args:{keyword:'probe'}}]:[]),
  ...(knowledge?[{name:'owner_thread_read',args:{threadId:'private'}},{name:'owner_data_query',args:{resourceId:'private'}},{name:'request_permissions',args:{permissions:{file_system:{read:[sentinel]}}}},{name:'group_search',args:{chat:'other'}},{name:'mcp__github__create_issue',args:{}}]:[]),
 ];
