@@ -1,3 +1,13 @@
+# 当前交接：PR #5 审核返工（2026-09-25）
+
+- Task Source：[189e5a8审核NEEDS CHANGES](https://github.com/dccaoxy/codex-feishu-bot/pull/5#issuecomment-5827313464)。PR先转Draft，同一分支处理R1–R3；不扩展Phase 3、不部署。
+- 复现：真实Bot.run→ThreadController.send→慢stream期间对端启动回合并请求permissions审批。旧代码新增5个用例中4个失败：正常路径漏卡片，以及detach/close/disconnect后仍可能发送输入；resolved用例通过不能证明审批正常接续。旧218项不覆盖这些路径。失败日志保留data/pr5-rework/before.log。
+- 修复提交`71d6799`：共享外部观察在dispatching期间按请求ID暂存支持的交互，控制器返回确切turn后仅处理匹配请求一次；保留turn与当前绑定/观察身份检查。每次观察最多32个交互ID，单条10KB、累计64KB；不淘汰旧ID后重新接纳，超限仅一次提示回原客户端处理，无自动决定。正常外部工具路由不受此交互上限限制。resolved删除暂存且保留去重身份；detach/endRun/disconnect/close清空。UI返回后再核对活动观察、绑定、连接及关闭状态，取消后不继续发输入；不重发模型操作、不放松审批策略。
+- 回归：225项全量测试PASS，0失败/跳过；新增正常/对端resolved/解绑/关闭/断线/错误turn及暂存上限去重共7项，保留慢卡片A→B、展示失败、迟到卡片和组合恢复。正常路径只有一次steer、0次start、正确turn审批一张、一次决定后token失效；取消路径0次决定、无旧审批恢复。check通过。
+- 真实验证：WebSocket/Unix work:check均通过（临时任务的start/steer/竞争/fork/interrupt/detach/绑定恢复）；doctor握手/登录/7模型、无模型smoke通过；Group首次/恢复16次及Knowledge12次隔离探针通过（真实二进制、假provider）。真实Bot+共享App Server+模拟对端/UI双向/steer/interrupt、对端拒绝后旧批准失效、Bot批准后迟到拒绝不重放通过（一次无副作用printf）。本轮有真实模型调用，没有真实飞书出站或Desktop UI操作。首次协议脚本在完成通知到达前检查结果失败，保留shared-initial-failure.log；脚本增加明确等待对应turn/completed，重跑通过，不删断言、不放宽生产逻辑。回归证据仅本机忽略目录data/pr5-rework。
+- 边界：main的Group/Knowledge/Owner及既有测试未改，现有生产运行目录、配置、授权群、数据库、Shared服务和遥测均未修改/重启。新修复未部署、慢卡片竞态只做确定性模拟而非真实客户端故障注入；历史部署与观察不冒称新head真实验收。沿用Human接受既有稳定性证据及免重复UI/8小时soak指令；既有Knowledge blocked未处理。
+- 交付：代码/文档提交推送后，同一PR #5重新Draft→Ready请求新head审核；Ready不等于PASS，不Merge。Issue #3保持开放，Phase 3未实施。下方收口记录是此前189e5a8时点，已由本节返工状态更新。
+
 # 当前交接：PR #5 Phase 2 最终收口（2026-09-25）
 
 本节为最新事实源；下方各节保留各历史时点的部署、验收及限制，不将旧“待验收/保持Draft”误作本次Gate。
