@@ -1,3 +1,13 @@
+## 当前任务：Issue #13 Owner Group Gateway（2026-09-25）
+
+- Task Source：Human要求从最新main执行更新后的[Issue #13](https://github.com/dccaoxy/codex-feishu-bot/issues/13)；完整读取AGENTS、README、PROJECT及Issue（无评论）。基线main `d8b4f0d`已合并PR #14；PR #5实际仍open/Draft、head `d305eaf`，不将其视为main能力。独立worktree `codex-feishu-issue-13` / 分支 `codex/issue-13-owner-group-gateway`，不改现有运行目录、配置、数据库、服务、遥测。
+- Implementation：独立Private→Group Gateway；可信p2p sender、当前绑定Owner、当前allowlist、群本地状态、停止/退出与活动私聊Turn共同授权。有限可信名称目录/稳定引用、同名候选、Raw检索/长消息/上下文/增量/确定性count/coverage；Knowledge只读日报/主题/来源同时接入，不注册GroupAssistant工具对象、不写Group cursor/FIFO/Raw、不创建群Turn。群名/原文/链接/派生内容均为不可信资料。
+- Owner Explicit Send：宿主从当前可信私聊原文解析窄格式发送意图和唯一目标；近期选择按Owner+私聊+任务隔离且不能由模型选择建立。原文发送逐字核对，明确的总结发送允许当前上下文整理；模糊/重名/非文字来源不发。仅普通文字、禁止mention，4000字符/12000字节上限。私人库持久原子claim+稳定UUID、未知发送结果不重试；实际Feishu.call队列临界点复核撤权/换Owner/停止/任务结束/新消息。新私聊消息立即撤销旧未发发送权。未扩展其他Control权限。
+- Validation：check、170项完整自动测试PASS（新增20项网关与真实Bot/Feishu排队路径测试，外部transport/model模拟）；保留PR #5 d305eaf的隔离组合check/203项PASS。组合以共同基线fcd1ab7三方合成，只解决Bot imports与recover冲突，保留PR #5外部绑定恢复不重放语义；未改原PR #5分支。真实安装Codex `0.155.0-alpha.16.3` 的doctor握手/登录/7模型、无模型smoke（含10个网关工具schema）通过。真实二进制Group首次+恢复16次、Knowledge12次攻击探针PASS（假provider），新增owner_groups/send攻击不可用。
+- 真实环境：本轮诊断使用空飞书凭据的独立配置，无真实飞书/远端模型调用，未部署、未重启机器人或Shared/Desktop、未发送真实消息；原在线Knowledge补算失败问题保持原状，不借本Issue扩大修复范围。未Merge。
+- Remaining / Human Gate：按Issue要求先Draft。真实Owner私聊列群/计数/具体事实/来源回查、明确发送一次及只分析零发送尚未执行；需授权更新现有候选后由真实Owner私聊触发并核对。验收完成后才Ready触发审核。不为满足形式提前Ready或自动Merge。
+- 局限：首次目录依赖群信息API权限，失败则不列出该群；只查镜像而非同步阻塞，coverage明确陈旧/partial/retention。窄自然语言语法及文字入口，不识别任意复合指令；元数据缓存一分钟。已读取资料可保留在Owner私人上下文，撤权后阻止新读取，不抹除已披露上下文。PR #5外部Work不新增网关工具注册，原Work/审批能力以组合回归保障。当前共享环境承载真实任务，候选更新须先核对空闲与备份，不能把以前PR #14部署许可扩张为本轮服务替换许可。
+
 ## PR #14 e619bf1 已审核版本部署（2026-09-25）
 
 - 授权：Human明确要求部署e619bf1到当前候选；已读取该head自动复审PASS（https://github.com/dccaoxy/codex-feishu-bot/pull/14#issuecomment-5825090846）。未修改已审核运行代码，不做精细语义验收，不Merge。

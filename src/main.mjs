@@ -1,3 +1,4 @@
+import {OwnerGroupGateway} from './owner-group-gateway.mjs';
 import { GroupAssistant } from './group-assistant.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -82,13 +83,14 @@ async function main() {
     console.log('Codex 已连接。');
     if (!bot.owner) console.log(`首次配对：私聊机器人发送任意文字，它会返回配对码。把码告诉本机 Codex 助手确认。\n也可在 15 分钟内私聊发送 /pair ${bot.pairCode} 直接配对。`);
     else console.log('已加载单聊绑定账号；群聊使用独立授权策略。');
-    await bot.recover();
     bot.ownerTimer = setInterval(() => bot.refreshOwner(),1000);
     if (config.groups.enabled) {
       const info = await feishu.call(() => feishu.client.request({method:'GET',url:'/open-apis/bot/v3/info'}));
       if (!info.bot?.open_id) throw new Error('无法确认机器人身份，群聊未启用');
       groups = new GroupAssistant(config,feishu,() => bot.owner,info.bot.open_id,{rpc});
+      bot.setOwnerGroups(new OwnerGroupGateway(config,store,groups,feishu,()=>config.feishu.ownerOpenId||store.get('owner')||''));
     }
+    await bot.recover();
     await feishu.start(data => {
       if ((data.event || data).message?.chat_type === 'group') return groups?.onMessage(data);
       return bot.onMessage(data);
