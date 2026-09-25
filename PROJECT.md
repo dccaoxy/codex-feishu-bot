@@ -1,3 +1,13 @@
+# 当前交接：PR #5 文件审批详情返工（2026-09-25）
+
+- Task Source：[c8987ee 复审 NEEDS CHANGES](https://github.com/dccaoxy/codex-feishu-bot/pull/5#issuecomment-5829284696)，R1–R3；同一分支先转 Draft，不部署、不 Merge、不扩展 Phase 3。
+- 根因与复现：dispatching 期间仅保留 requestApproval，丢失先到达的 fileChange item。请求本身不含 changes，旧代码还使用最后一个无身份的 run.fileChanges，可能无路径/diff或显示另一修改项却允许批准。新增10项在修复前6失败、4通过；旧225项PASS不能覆盖这一缺口。失败日志保留本机忽略目录 data/pr5-file-approval-rework/before.log。
+- 修复提交 `ae7717b`：在dispatch短路之前保存fileChange详情，以run的thread及精确turnId/itemId匹配；删除最后一项替代逻辑。每run最多32项，单项10KB、累计64KB（更新也计入），不淘汰复用；更新缺失/超限会先使旧快照失效。无可靠详情时不创建审批token或按钮，共享外部请求只提示回原客户端，无自动批准/拒绝。resolved、解绑、结束、断线、close清理暂存，保留此前请求身份去重与回合检查。
+- 自动验证：Node24.21.0 / Codex0.155.0-alpha.16.3；check及236项全量测试PASS，0失败/跳过。新增11项覆盖真实Bot.run→ThreadController.send的等待期间与之后正常路径、缺失/超限、不同item/turn、resolved/detach/close/disconnect及有界缓存。正常卡片同时断言正确路径/diff、无其他item内容、零start/一次steer/一次批准；异常无token、无自动RPC决定。Group/Knowledge/Owner模块与集成main 9de0926一致，既有FIFO/隔离等测试保留。
+- 环境/协议：doctor握手、登录、7模型与无模型smoke通过；Group首次/恢复16次、Knowledge12次隔离探针通过（真实二进制、假provider）。真实Bot+共享App Server+模拟peer/UI双向、steer/interrupt、对端先拒绝及Bot批准后迟到决定不重放通过；一次无副作用printf。独立WS/Unix work:check最终复核通过。
+- 未隐藏的失败与限制：独立WS首次及一次复核报 thread/read: list_turns is not supported yet；Unix首次在活动状态断言时返回idle。后续独立复核均通过，未修改脚本、生产协议逻辑或放宽断言；初始波动根因未完全定位，不能将最终通过解释为没有波动。所有失败及成功日志保留 data/pr5-file-approval-rework。文件审批等待竞态为确定性模拟，未做真实飞书/UI文件审批故障注入；真实协议测试有模型调用，无飞书消息。
+- 交付与边界：README/PROJECT及PR/Issue同步，推送同一PR后重新Draft→Ready，等待新head独立审核，不宣称自动PASS。未部署/重启候选、修改真实配置、授权群、数据库、Shared服务或遥测；Human接受历史稳定性证据和免重复UI/8小时soak指令继续有效，本轮未重复。既有Knowledge blocked不在本次范围，Issue #3保持开放，停止不撤销已发生修改。以下各节为历史记录，以本节为最新交接。
+
 # 当前交接：PR #5 审核返工（2026-09-25）
 
 - Task Source：[189e5a8审核NEEDS CHANGES](https://github.com/dccaoxy/codex-feishu-bot/pull/5#issuecomment-5827313464)。PR先转Draft，同一分支处理R1–R3；不扩展Phase 3、不部署。
