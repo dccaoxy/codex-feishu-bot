@@ -1,3 +1,11 @@
+## PR #15 已审核 f3d9ec1 部署（2026-09-25）
+
+- Human明确授权部署已自动复审PASS的 `f3d9ec1fafd35c1975df09326f95d5dea70907e4`（评论5826626796）。使用保留PR #5 d305eaf的已测组合；仅替换group-store和owner-group-gateway两个运行文件，其他src逐文件哈希核对不变。
+- 部署前用户任务/知识任务空闲，备份配置、两个旧文件及两份SQLite。只重启机器人（PID36000→74706），Shared App Server PID67006不变；Desktop、Shared权限、PR #5遥测未改。配置SHA256不变，原授权群、Owner Gateway、FIFO、Knowledge开关不变。
+- 部署后check、doctor、smoke及含10个Owner工具schema的组合smoke通过；217项完整PR #5组合回归PASS（0失败/跳过），运行src与测试组合哈希完全一致。日志确认Codex已连接、飞书长连接已建立，无新增启动错误/EMFILE。Raw、messages、group_requests、group_threads对备份无丢失/改变行。重启按已审核逻辑清除旧发送目标选择，持久发送审计保留。
+- Knowledge仍为2个既有blocked、5个completed，本次不重试也不宣称补算问题解决。证据本机data/pr15-f3d9ec1-deployment.json及对应备份；组合日志开发worktree data/pr15-deploy-217.log。
+- 可以开始真实Owner私聊验收。本次未发送真实测试消息、未调用真实模型；部署/连接正常不等于发送正文、回执、一次效果或长期稳定性已验收。未Merge。本节是后续文档记录，实际部署代码仍为f3d9ec1审查版本与PR #5组合。
+
 ## PR #15 第二轮审核返工（2026-09-25）
 
 - Task Source：[b60023d复审NEEDS CHANGES](https://github.com/dccaoxy/codex-feishu-bot/pull/15#issuecomment-5826524555)。复审确认旧群指代及隐藏终态问题已解决；新增发现单条资源元数据过大时预览为空，增量读取永久停滞。上一轮输出预算测试仅覆盖多条正文累计，不能证明单条超限成立。
