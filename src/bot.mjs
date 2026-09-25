@@ -410,7 +410,7 @@ ${this.ownerGroups?OWNER_GROUP_INSTRUCTIONS:''}` };
   async unwatchExternal(chat, id = this.store.binding(chat)?.thread) {
     const r = this.runs.get(id);
     if (!r?.external) return;
-    r.ending = true; clearInterval(r.timer);
+    r.ending = true; r.dispatchRequests?.clear(); clearInterval(r.timer);
     for (const [token,p] of this.prompts) if (p.thread === id) {
       if (this.rpc.shared) this.clearPrompt(token); else this.denyPrompt(token);
     }
@@ -461,9 +461,19 @@ ${this.ownerGroups?OWNER_GROUP_INSTRUCTIONS:''}` };
   async runExternal(chat,input,clientUserMessageId) {
     let r;
     try {
-      const result = await this.controller.send(chat,input,clientUserMessageId,async state => {r = await this.watchExternal(chat,state,true);});
+      const result = await this.controller.send(chat,input,clientUserMessageId,async state => {
+        r = await this.watchExternal(chat,state,true);
+        if (this.closed || !this.available || r.ending || this.runs.get(state.id) !== r || this.store.binding(chat)?.thread !== state.id) throw new Error('外部观察已关闭；未发送输入。');
+      });
       if (r.turn !== result.turnId) r.messages.clear();
       r.turn = result.turnId; r.dispatching = false;
+      if (!r.ending && !this.closed && this.available && this.runs.get(r.thread) === r) {
+        for (const [id, request] of r.dispatchRequests || []) {
+          r.dispatchRequests.delete(id);
+          if (request.params.turnId === r.turn) await this.serverRequest(request, r);
+        }
+      }
+      r.dispatchRequests?.clear();
       if (!r.ending) this.store.saveRun(r);
       if (result.kind === 'steer') await this.feishu.text(chat,'已向绑定会话的当前回合追加要求。');
     } catch(e) {
@@ -491,6 +501,7 @@ ${this.ownerGroups?OWNER_GROUP_INSTRUCTIONS:''}` };
     const r = this.runs.get(p.threadId);
     if ((m.method === 'item/completed' && p.item?.type === 'contextCompaction') || m.method === 'thread/compacted' || m.method === 'error') this.compacting.delete(p.threadId);
     if (m.method === 'serverRequest/resolved') {
+      for (const run of this.runs.values()) run.dispatchRequests?.delete(p.requestId);
       for (const [token, prompt] of this.prompts) if (prompt.id === p.requestId) {
         this.clearPrompt(token, '已由客户端处理');
         void this.feishu.text(prompt.chat,'该审批已由一个客户端处理，旧卡片已失效。').catch(() => {});
@@ -545,7 +556,7 @@ ${this.ownerGroups?OWNER_GROUP_INSTRUCTIONS:''}` };
   }
   endRun(r, state, error) {
     if (r.ending) return;
-    r.ending = true; clearInterval(r.timer);
+    r.ending = true; r.dispatchRequests?.clear(); clearInterval(r.timer);
     r.finishPromise = this.finishRun(r, state, error).catch(e => {
       this.log(`结果发送失败：${this.redact(e)}；请用 /read 查看已保存的会话。`);
       this.feishu.text(r.chat, '结果发送失败，已保留本地会话。请发送 /read 查看。').catch(() => {});
@@ -585,8 +596,33 @@ ${this.ownerGroups?OWNER_GROUP_INSTRUCTIONS:''}` };
     await this.feishu.upload(chat, file);
     return { sent: true, filename: path.basename(file) };
   }
-  async serverRequest(m) {
+  dispatchOverflow(run) {
+    if (run.dispatchOverflowNotified) return;
+    run.dispatchOverflowNotified = true;
+    void this.feishu.text(run.chat,'共享交互暂存已达上限，请在原客户端处理待决请求；未自动批准、拒绝或重跑。').catch(() => {});
+  }
+  async serverRequest(m, dispatchOwner = null) {
     const p = m.params || {}, run = this.runs.get(p.threadId);
+    if (this.closed || !this.available) return;
+    if (dispatchOwner && (run !== dispatchOwner || run.ending || this.store.binding(run.chat)?.thread !== run.thread)) return;
+    if (run?.external && this.rpc.shared && !run.ending && ['item/commandExecution/requestApproval','item/fileChange/requestApproval','item/tool/requestUserInput','item/permissions/requestApproval','mcpServer/elicitation/request'].includes(m.method)) {
+      // Keep a bounded identity ledger for this observation, including resolved requests.
+      // Never evict IDs and later replay an old decision when the limit is reached.
+      if (!dispatchOwner) {
+        run.requestIds ??= new Set();
+        if (run.requestIds.has(m.id)) return;
+        if (run.requestIds.size >= 32) { this.dispatchOverflow(run); return; }
+        run.requestIds.add(m.id);
+      }
+      if (run.dispatching) {
+        if (this.controller.permission() !== 'work' || this.store.binding(run.chat)?.thread !== run.thread || !p.turnId) return;
+        const size = Buffer.byteLength(JSON.stringify(m));
+        if (size > 10000 || (run.dispatchBytes || 0) + size > 64000) { this.dispatchOverflow(run); return; }
+        run.dispatchBytes = (run.dispatchBytes || 0) + size;
+        (run.dispatchRequests ??= new Map()).set(m.id, structuredClone(m));
+        return;
+      }
+    }
     if ((!run || run.ending || (run.external && p.turnId && run.turn !== p.turnId)) && this.rpc.shared) return;
     if (!run || run.ending) { this.rpc.reject(m.id, '没有对应的飞书任务'); return; }
     if (m.method === 'item/tool/call') {
@@ -746,7 +782,7 @@ ${this.ownerGroups?OWNER_GROUP_INSTRUCTIONS:''}` };
     }
     for (const r of [...this.runs.values(),...this.retiredRuns]) {
       clearInterval(r.timer);
-      if (r.external && !r.ending) { r.ending=true; if (r.card) await this.feishu.finish(r.card,++r.sequence,'已解除观察').catch(() => {}); }
+      if (r.external && !r.ending) { r.ending=true; r.dispatchRequests?.clear(); if (r.card) await this.feishu.finish(r.card,++r.sequence,'已解除观察').catch(() => {}); }
     }
   }
 }

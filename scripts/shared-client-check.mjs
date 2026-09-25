@@ -16,7 +16,7 @@ const ui={text:async(chat,text)=>output.push(text),stream:async()=>null,interact
 const bot=new Bot({...c,storageDir:dir,streamIntervalMs:1000},store,b,ui,()=>{});
 a.on('request',m=>requests.push(m));a.on('notification',m=>{events.push(m);if(m.method==='serverRequest/resolved')resolved.push(m.params.requestId);});
 async function until(f,label,ms=60000){const end=Date.now()+ms;while(Date.now()<end){if(await f())return;await delay(100);}throw new Error('Timed out: '+label);}
-async function complete(turn){await until(async()=>{const r=await bot.controller.turns(id);return r.data.some(t=>t.id===turn&&t.status!=='inProgress');},'turn completed');await until(()=>!bot.runs.has(id),'bot result delivered');}
+async function complete(turn){await until(()=>events.some(e=>e.method==='turn/completed'&&e.params.turn.id===turn),'peer completion notification');await until(async()=>{const r=await bot.controller.turns(id);return r.data.some(t=>t.id===turn&&t.status!=='inProgress');},'turn completed');await until(()=>!bot.runs.has(id),'bot result delivered');}
 const text=s=>[{type:'text',text:s}];
 try{
   await a.start();await b.start();

@@ -170,7 +170,8 @@ test('reattach and fork preserve an empty previous binding for detach',async t=>
   assert.equal(store.chat('chat').thread,null);
 });
 test('completion during dispatch cannot finalize the old turn before the new turn ID arrives',async t=>{
-  const {config,store,rpc}=setup(t);
+  const {config,store,rpc,controller}=setup(t);
+  await controller.attach('chat','external');
   const bot=new Bot(config,store,rpc,{text:async()=>{},stream:async()=>null},()=>{});
   bot.controller.send=async(chat,input,key,before)=>{
     await before({id:'external',turn:'old',title:'test'});
@@ -303,4 +304,54 @@ test('combined recovery restores owner gateway acceptance only for bot-owned pen
     assert.equal(store.binding('external-chat').status,'unknown');
     assert.equal(rpc.calls.length,0);
   } finally { bot.ownerGroups=null; await bot.close(); }
+});
+
+for (const cancellation of ['none','resolved','detach','close','disconnect','wrong-turn']) test(`dispatch approval race through real run/send: ${cancellation}`,async t=>{
+  const {config,store,rpc,controller}=setup(t);rpc.shared=true;
+  await controller.attach('chat','external');rpc.calls=[];
+  let release,opened;const gate=new Promise(r=>release=r),opening=new Promise(r=>opened=r);
+  const cards=[];
+  const bot=new Bot(config,store,rpc,{stream:async()=>{opened();await gate;return null;},text:async()=>{},interactive:async(...a)=>{cards.push(a);}},()=>{});
+  const sending=bot.run('chat',[{type:'text',text:'continue'}]).then(()=>null,e=>e);
+  try{
+    await opening;rpc.state='active';rpc.turn='peer-turn';
+    bot.notification({method:'turn/started',params:{threadId:'external',turn:{id:rpc.turn}}});
+    const request={id:401,method:'item/permissions/requestApproval',params:{threadId:'external',turnId:cancellation==='wrong-turn'?'other-turn':rpc.turn,permissions:{fileSystem:{write:['/test-only']}}}};
+    await bot.serverRequest(request);
+    if(cancellation==='resolved')bot.notification({method:'serverRequest/resolved',params:{requestId:401}});
+    if(cancellation==='detach')await bot.command('chat','/detach');
+    if(cancellation==='close')await bot.close();
+    if(cancellation==='disconnect')rpc.emit('disconnected');
+    release();await sending;
+    const run=bot.runs.get('external');if(run)await bot.refreshExternalRun(run);
+    assert.equal(rpc.calls.filter(c=>c.method==='turn/start').length,0);
+    assert.equal(rpc.calls.filter(c=>c.method==='turn/steer').length,['none','resolved','wrong-turn'].includes(cancellation)?1:0);
+    assert.equal(cards.length,cancellation==='none'?1:0);
+    assert.equal(bot.prompts.size,cancellation==='none'?1:0);
+    if(cancellation==='none'){
+      const [token,prompt]=[...bot.prompts][0];assert.equal(prompt.turn,'peer-turn');
+      await bot.serverRequest(request);assert.equal(cards.length,1);
+      await bot.action('chat',{token,decision:'accept'});
+      await assert.rejects(bot.action('chat',{token,decision:'accept'}),/失效/);
+      assert.equal(rpc.responses.length,1);
+    }else assert.equal(rpc.responses.length,0);
+  }finally{release();await sending;await bot.close();}
+});
+
+test('dispatch approval cache is bounded and never replays resolved duplicate IDs',async t=>{
+  const {config,store,rpc,controller}=setup(t);rpc.shared=true;await controller.attach('chat','external');
+  let release,opened;const gate=new Promise(r=>release=r),opening=new Promise(r=>opened=r);const cards=[],messages=[];
+  const bot=new Bot(config,store,rpc,{stream:async()=>{opened();await gate;return null;},text:async(c,s)=>messages.push(s),interactive:async(...a)=>cards.push(a)},()=>{});
+  const sending=bot.run('chat',[]);
+  try{
+    await opening;rpc.state='active';rpc.turn='peer-turn';
+    const req=id=>({id,method:'item/permissions/requestApproval',params:{threadId:'external',turnId:'peer-turn',permissions:{}}});
+    await bot.serverRequest(req(0));bot.notification({method:'serverRequest/resolved',params:{requestId:0}});await bot.serverRequest(req(0));
+    for(let id=1;id<40;id++)await bot.serverRequest(req(id));
+    const run=bot.runs.get('external');assert.equal(run.requestIds.size,32);assert.equal(run.dispatchRequests.size,31);
+    assert.equal(messages.filter(s=>s.includes('暂存已达上限')).length,1);
+    release();await sending;
+    assert.equal(cards.length,31);assert.equal(bot.prompts.size,31);assert.equal(run.dispatchRequests.size,0);
+    assert.ok([...bot.prompts.values()].every(p=>p.id!==0));assert.equal(rpc.responses.length,0);
+  }finally{release();await sending;await bot.close();}
 });
