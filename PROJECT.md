@@ -1,3 +1,11 @@
+## PR #15 第二轮审核返工（2026-09-25）
+
+- Task Source：[b60023d复审NEEDS CHANGES](https://github.com/dccaoxy/codex-feishu-bot/pull/15#issuecomment-5826524555)。复审确认旧群指代及隐藏终态问题已解决；新增发现单条资源元数据过大时预览为空，增量读取永久停滞。上一轮输出预算测试仅覆盖多条正文累计，不能证明单条超限成立。
+- 实现提交 `27fe15a`：仅在模型读取预览层为资源类型/ID/URL、附件字段、限制说明、父级引用设置上限；URL超2048字符整体省略并标记，避免截断链接误导。总字段仍超限时返回messageId/短正文/序号/原文分页提示的可见最小记录。结果数组最多22000 UTF-8字节，为Owner包装留余量；原文按既有offset接口读取，限制说明也有界。Raw及数据库原文/元数据不改，不静默越过可见记录。
+- 复现/验证：4个新增用例在旧版本全部失败（原30个网关用例通过），data/rework2-before.log。修复后check及184项全量测试PASS，PR #5 d305eaf组合check及217项PASS，0失败/跳过。新增覆盖正常ingest的30KB链接query、隐藏终态后超长消息、queued完成后可达、单条巨大元数据及多条累计预算；只使用返回cursor可到达后续普通消息，原文分页重建一致、Raw/FIFO/Group cursor不变。
+- 真实安装Codex doctor/7模型/schema smoke通过；Group首次/恢复16次及Knowledge12次假provider隔离探针通过。独立空飞书配置，不调用真实模型或发送真实消息；没有远端CI PASS声明。
+- 本轮仅代码/文档提交推送并重新Ready复审，未部署、未Merge、未改变运行配置/授权/Shared/PR #5。线上仍为f291e48旧组合，不将代码测试当作线上修复。Human真实群验收豁免继续保留为未执行；真实发送正文/回执/一次效果、线上只读零发送及长期稳定性仍未验证。原Knowledge blocked不处理。
+
 ## PR #15 审核返工（2026-09-25）
 
 - Task Source：[ae43cb2审核NEEDS CHANGES](https://github.com/dccaoxy/codex-feishu-bot/pull/15#issuecomment-5826388256)。P1旧群指代可误放行；P2隐藏终态卡住增量游标；既有170/203项通过没有覆盖这些问题。PR已先转Draft，在同一分支返工。
