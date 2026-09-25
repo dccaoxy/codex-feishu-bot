@@ -1,3 +1,11 @@
+## Issue #13 候选部署（2026-09-25 11:32，北京时间）
+
+- Human明确批准部署。已将实现 `f291e48` 与 PR #5 `d305eaf` 的已测组合部署到既有候选；只替换 bot/main 并新增 owner-group-gateway 三个运行文件，不替换配置。部署前用户任务与知识任务均空闲，已备份配置、旧文件和两份SQLite。
+- 机器人PID由65936变为36000；日志确认Codex已连接、飞书长连接已建立，无本次新增启动错误。Shared App Server PID67006未变；配置SHA256不变，原两群授权、Owner Gateway、FIFO、Shared权限不变，未改PR #5遥测/服务。
+- 部署后候选check/doctor/smoke通过；组合全量203项再次PASS，0失败/跳过；包含10个新工具schema的组合真实协议smoke通过（独立空凭据配置，无模型调用）。组合smoke首次因缺本地配置未启动，补齐独立诊断配置后通过。运行src逐文件hash等于已测组合。Raw对部署前备份逐行核对，丢失或变化0行；私人发送审计表已创建。
+- 证据保留本机ignored data/issue13-deployment.json、data/issue13-backup-20260925113214；组合回归日志在开发worktree的issue13-deploy-regression.log。未发送真实验收消息，未执行真实Owner私聊读群/明确发送验收，未声称模型端到端通过。既有Knowledge blocked不追加重试，非本轮修复范围。
+- PR #15继续Draft；下一步由Owner在机器人自有私聊任务触发目录、计数、事实来源回查及明确单条发送，核对无额外群副作用。通过后再Ready；不Merge。
+
 ## 当前任务：Issue #13 Owner Group Gateway（2026-09-25）
 
 - Task Source：Human要求从最新main执行更新后的[Issue #13](https://github.com/dccaoxy/codex-feishu-bot/issues/13)；完整读取AGENTS、README、PROJECT及Issue（无评论）。基线main `d8b4f0d`已合并PR #14；PR #5实际仍open/Draft、head `d305eaf`，不将其视为main能力。独立worktree `codex-feishu-issue-13` / 分支 `codex/issue-13-owner-group-gateway`，不改现有运行目录、配置、数据库、服务、遥测。
