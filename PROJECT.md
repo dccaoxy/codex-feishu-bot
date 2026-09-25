@@ -1,3 +1,13 @@
+## PR #15 审核返工（2026-09-25）
+
+- Task Source：[ae43cb2审核NEEDS CHANGES](https://github.com/dccaoxy/codex-feishu-bot/pull/15#issuecomment-5826388256)。P1旧群指代可误放行；P2隐藏终态卡住增量游标；既有170/203项通过没有覆盖这些问题。PR已先转Draft，在同一分支返工。
+- 修复提交 `240920f`：接收新可信私聊请求时立即失效旧选择（即使后续无工具调用）；只有紧接着且符合窄语法的指代发送可恢复同Owner/私聊/Thread的已验证选择。带冒号、换行、引号/代码引用、多群候选的请求仍可读取，但不建立发送指代；要求明确目标，不猜测。重启清除旧选择，发送一次性审计不清除。兼容正常A→B切换、显式目标和原发送前授权检查。
+- 增量读取每次至多扫描limit行，queue_full/cancelled保持隐藏并推进返回游标；queued前停止且不跨过，完成后可读。输出满24000字符时不消费未返回的可见记录，hasMore与retention及可读消息连接条件一致。不删除Raw、不改终态/FIFO、不写Group Thread cursor。
+- 实测：修改前新增8个复现用例全部失败（旧20用例通过），日志data/rework-before.log；随后补充单引号/代码引用，共新增10项。修复后check、180项全量测试PASS；以已解决冲突的PR #5 d305eaf组合更新本轮两个源文件及测试，组合check/213项PASS，均0失败/跳过。覆盖隐藏连续页/尾页、queued后续完成、输出预算、retention、Raw/FIFO/cursor不变和选择隔离/重启。
+- 真实安装Codex的doctor握手/登录/7模型、schema smoke通过；Group首次及恢复16次、Knowledge12次隔离探针通过（假provider）。使用独立空飞书凭据配置，不连接真实群、不调用真实模型；未声称远端CI通过。
+- 部署/验收：本次修复未部署。在线仍为旧实现f291e48与PR #5组合，包含上述已知缺陷；修复部署前发送需明确群名，避免“这个群”。没有重启机器人/Desktop/Shared、修改授权或PR #5遥测。Human豁免剩余真实群发送验收仍有效，但不视为修复真实验收PASS；真实发送回执/正文/一次效果及线上只读零发送未验证。Knowledge blocked保持原状。
+- 交付：更新README、PROJECT及PR/Issue报告，推送后核对远端head再Ready触发复审；不Merge、不自动部署。等待审核与单独部署授权。
+
 ## Issue #13 Human Gate 调整（2026-09-25）
 
 - Human明确要求“跳过群验收，进行下一步”。剩余真实群发送验收豁免，不标记为通过，不继续发送测试消息；准备将PR #15转Ready触发审核，不Merge。
