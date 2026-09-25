@@ -1,10 +1,20 @@
+## PR #14 e619bf1 已审核版本部署（2026-09-25）
+
+- 授权：Human明确要求部署e619bf1到当前候选；已读取该head自动复审PASS（https://github.com/dccaoxy/codex-feishu-bot/pull/14#issuecomment-5825090846）。未修改已审核运行代码，不做精细语义验收，不Merge。
+- 已部署：备份候选配置、旧knowledge-store和两份SQLite后，仅替换运行文件src/knowledge-store.mjs；机器人正常重启，Codex与飞书长连接恢复。配置SHA256未变，授权群/Owner Gateway/FIFO/Shared权限和其他运行文件未变；Shared App Server PID 67006未变，PR #5遥测不改动。部署记录data/knowledge-mvp-deployment.json，备份data/knowledge-e619bf1-backup-20260925092515。
+- 部署后验证：候选check、doctor、真实协议smoke通过；150项分支测试、183项PR #5组合回归通过；部署src与组合回归src逐文件一致。Raw与备份逐行比对无丢失。
+- 既有补算问题：部署前两群分别在2026-02-27、2026-08-18出现knowledge_worker_failed三次上限，和终态来源问题不同；当前数据库没有仍保留在messages中的queue_full/cancelled行，不能声称已在线重现/解除本轮终态缺陷。终态修复以本轮回归覆盖为证。
+- 为验证部署后实际日期推进，保留失败快照data/deploy-e619bf1-controlled-retry.json，并对上述两个原失败日期各给予一次受控重试；不提高全局上限、不跳过日期、不关闭校验。09:35最终核对：两个日期均再次进入blocked / attempts=3 / knowledge_worker_failed；next_date仍为2026-02-27和2026-08-18，后者last_successful_day仍为2026-08-17。实际日期推进未通过，不将模型失败归因于已修复的终态缺陷；具体生成失败根因尚未查明，不再追加重试。
+- 连接最终核对：飞书历史同步状态仍为complete，09:32有成功reconcile；无活动用户队列。此次未发送群消息、未重做人工@或精细语义验收。剩余：单独诊断knowledge_worker_failed，恢复后再验证两个日期实际前进。部署成功不等于完整在线验收通过。
+- 交付：本节作为部署记录提交/推送同一PR；仅文档变化，实际运行Knowledge代码仍为已审核e619bf1，不自动部署后续文档head。
+
 ## PR #14 审核返工：终态来源阻塞补算（2026-09-25）
 
 - Task Source：https://github.com/dccaoxy/codex-feishu-bot/pull/14#issuecomment-5824986193 ，审核3431340为NEEDS CHANGES。本机新增两例测试在旧组合代码上均复现“终态请求导致当日无法生成”，失败证据保留data/rework-terminal-before.log；原145项通过不能覆盖该缺口。
 - 已修改：snapshot仅排除queue_full/cancelled终态，仍等待queued；不删除Raw、不改终态、不放宽visible。过滤发生在模型输入及大小限制之前；coverage记录filtered、总数/纳入数/分状态排除数，随输入指纹校验，日报及主题revision读取可见。仅终态日以明确零输入覆盖推进，不冒充全消息完整摘要。
 - 自动回归新增：两个终态与重启/次日补算、真正queued等待至完成、全终态日、撤回活动请求取消其他排队消息后重启；断言Raw保留、隐藏正文不进入Worker/派生知识、既有隐藏策略不变。语义细分类不扩展。
 - 验证：check、150项全量测试、独立PR #5 d305eaf组合check/183项测试通过；真实安装Codex二进制的Group正反向/恢复探针（12次调用）及Knowledge隔离探针（10次越权调用）通过，使用假provider。隔离开发配置的doctor握手/登录检查及真实协议smoke通过；飞书凭据为空，因此不声称本轮真实飞书或模型验收通过。
-- 当前状态：本轮修复已提交并推送同一PR，重新Ready触发复审；本轮修复尚未部署；在线仍为3431340。不得把上轮最小真实模型验收作为本修复真实验收；本轮不操作在线数据库、不重启服务，部署后需核对受影响群补算进度。不Merge，不启动Issue #13。
+- 返工当时状态（后续部署结果见顶部）：本轮修复已提交并推送同一PR，重新Ready触发复审；当时修复尚未部署，在线为3431340。不得把上轮最小真实模型验收作为本修复真实验收；本轮不操作在线数据库、不重启服务，部署后需核对受影响群补算进度。不Merge，不启动Issue #13。
 
 ## PR #14 MVP 最终验证（2026-09-25）
 
