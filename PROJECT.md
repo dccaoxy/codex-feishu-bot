@@ -1,3 +1,20 @@
+## PR #14 MVP 最终验证（2026-09-25）
+
+- 修复真实模型工具调用返回 `code-mode host is disabled`：不再禁用内部工具分发宿主；code_mode、shell、文件、插件等能力仍禁用，注册工具名单保持受限。Group真实二进制探针增加合法group_search正向调用，首次/恢复均通过，原10次越权攻击及Knowledge 10次攻击仍拒绝。
+- 修改后check、145项分支测试、178项PR #5组合测试重新通过。最小在线模型验收真实调用 `group_topics → group_topic_read → group_daily_digest → group_message`，读取实际生成的主题与日报，并用真实飞书API核对来源，内容一致、跨群读取拒绝。模型运行在隔离临时任务，在线库使用SQLite只读备份，无用户任务/FIFO写入。
+- 本轮按最新MVP Gate转Ready；人工客户端@验收未重做，历史大日补算未全部完成，语义细分类不继续扩展。无Merge、无Issue #13开发、无Phase 3。
+
+## PR #14 Human MVP 收口（2026-09-25，当前事实源）
+
+- 权威验收调整：https://github.com/dccaoxy/codex-feishu-bot/pull/14#issuecomment-5824698226 。不再要求语义 Schema 精雕或相同21条消息的第二轮逐项人工验收；原真实两日/v2/来源隔离验收继续有效。Issue #13 仅为后续优先级，本任务未开始其开发。
+- 实现代码 27cf19b 已部署到既有候选，与 PR #5 d305eaf 组合；只新增 `groups.knowledge.enabled=true`，原两群名单、Owner Gateway、Shared连接/权限、FIFO配置不变。备份和部署文件清单保存在本机 data/knowledge-mvp-deployment.json；没有重启 Desktop/Shared App Server，没有修改 PR #5 遥测。
+- check、145项独立测试、178项组合测试通过；真实 Codex 协议 doctor/smoke、Group 与 Knowledge 权限隔离探针通过（探针使用假provider）。新加调度顺序测试覆盖历史成功/失败异步结束后才整理，避免一分钟同步竞争导致永久延后。
+- 线上后台已从真实群2026-08-13消息生成Daily Digest和“AEG 新羽计划欢迎仪式”Topic v1。通过已部署 GroupAssistant.execute 读取日报、Topic、原始消息，来源正文与真实飞书 message.get 返回完全匹配；其他群无法读取同一Topic/来源。核对主题主要时间、地点、参加要求与原通知一致，未将计划冒充已举行。部署前Raw逐行比对无丢失。
+- 最小验收证据仅本机 data/knowledge-mvp-online-result.json，不向公开仓库上传群内容/账号标识。此次未伪造用户事件、未占用持久用户群任务、未发送验收群消息。Human暂不方便做人工@；本轮按最新指令进行最小在线验证，不把它表述为人工客户端端到端验收。
+- 保留局限：最早较大日期2026-02-27曾worker_failed，保留有界退避；独立21条复测03-16两次因knowledge_lost_fact被拒绝，未发布不完整派生内容，未关闭校验或手改JSON。此复测不再是Human Gate；不宣称全历史补算完成或一次生成可靠性已解决。精细语义质量及大日可靠性留待后续。
+- 验收工具纠正：首次本机查询探针误用了会执行启动恢复的Store构造器，使当时后台running知识任务被标为interrupted；没有Raw丢失或用户FIFO在途请求。后续探针已改为只读SQLite在线备份，在临时副本运行工具，避免触碰在线调度；该诊断干扰与模型失败分别记录，不混为产品故障。
+- 收口：完成最小真实模型工具链核验后转Ready触发独立Reviewer；不Merge，等待审核/Human Gate。
+
 ## MVP 部署验收中的调度修复（2026-09-25）
 
 - 真实启用发现同步定时器与 Knowledge 定时器同时触发，知识快照总在 syncing 状态被延后。改为每轮历史同步完成后调用知识调度；单群同步失败仍由快照覆盖校验阻止发布，不阻塞其他已完整群。

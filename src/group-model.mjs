@@ -9,7 +9,7 @@ import { CodexClient } from './codex.mjs';
 // per-group home prevents user skills, MCP, memories and private task discovery.
 // Fail closed on other versions until the protocol isolation smoke is rerun.
 export const GROUP_CODEX_VERSION='codex-cli 0.155.0-alpha.16.3';
-const disabled=['hooks','image_generation','memories','goals','apps','plugins','remote_plugin','recommended_plugins','tool_suggest','shell_tool','view_image','browser_use','browser_use_external','computer_use','multi_agent','multi_agent_v2','memory_tool','skill_search','skill_mcp_dependency_install','request_permissions_tool','workspace_dependencies','artifact','code_mode','code_mode_host','standalone_web_search','sleep_tool'];
+const disabled=['hooks','image_generation','memories','goals','apps','plugins','remote_plugin','recommended_plugins','tool_suggest','shell_tool','view_image','browser_use','browser_use_external','computer_use','multi_agent','multi_agent_v2','memory_tool','skill_search','skill_mcp_dependency_install','request_permissions_tool','workspace_dependencies','artifact','code_mode','standalone_web_search','sleep_tool'];
 export const GROUP_STARTUP_CONFIG='[skills]\ninclude_instructions = false\n[skills.bundled]\nenabled = false\n[cloud.skills]\nenabled = false\n[features]\nskip_host_skill_discovery = true\n'+disabled.map(x=>`${x} = false\n`).join('');
 export function groupThreadParams(cwd,tools,model) {
   return {cwd,ephemeral:false,environments:[],selectedCapabilityRoots:[],sandbox:'read-only',approvalPolicy:'never',dynamicTools:tools,model:model||undefined,
