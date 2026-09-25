@@ -22,7 +22,15 @@
     "allowedChatIds": [],
     "retentionDays": null,
     "queueLimit": 10,
-    "documentIds": {}
+    "documentIds": {},
+    "knowledge": {
+      "enabled": false,
+      "timezone": "Asia/Shanghai",
+      "dailyAt": "02:00",
+      "maxDaysPerCycle": 2,
+      "maxMessages": 500,
+      "maxInputChars": 80000
+    }
   },
   "ownerGateway": {
     "enabled": false,

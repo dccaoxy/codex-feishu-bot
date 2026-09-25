@@ -1,3 +1,4 @@
+import {KnowledgeStore} from './knowledge-store.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -38,6 +39,24 @@ export function resourceReferences(content) {
   }
   return [...refs.values()];
 }
+// Model-facing previews only. Raw content/metadata remain unchanged in SQLite.
+const PREVIEW_BUDGET=22000; // UTF-8 bytes, leaving room for the gateway envelope.
+const previewHint='元数据或正文预览已截断；使用 messageId 和原文读取工具按 offset 分页核对。';
+function previewMetadata(raw){
+  let meta;try{meta=JSON.parse(raw);}catch{meta={};}
+  let truncated=false;
+  const bound=(value,n)=>{if(typeof value!=='string')return '';if(value.length>n)truncated=true;return value.slice(0,n);};
+  const list=(value,n)=>{if(!Array.isArray(value))return [];if(value.length>n)truncated=true;return value.slice(0,n);};
+  const resources=list(meta?.resources,8).map(r=>{
+    const url=typeof r?.url==='string'?r.url:null,omitted=url!==null&&url.length>2048;
+    if(omitted)truncated=true;
+    return {type:bound(r?.type,32),id:bound(r?.id,256),url:omitted?null:url,...(omitted?{urlOmitted:true}:{}),state:'reference_only',currentContentFetched:false};
+  });
+  const attachments=list(meta?.attachments,4).map(a=>({type:bound(a?.type,32),key:bound(a?.key,256),name:bound(a?.name,300),duration:Number.isFinite(a?.duration)?a.duration:null}));
+  const limitations=list(meta?.limitations,8).map(x=>bound(x,300));
+  if(truncated)limitations.push(previewHint);
+  return {resources,attachments,limitations,truncated};
+}
 export class GroupMessageStore {
   constructor(dir, retentionDays=null) {
     fs.mkdirSync(dir,{recursive:true,mode:0o700}); this.retentionDays=retentionDays; this.dir=dir;
@@ -60,7 +79,7 @@ export class GroupMessageStore {
     this.db.exec(`UPDATE history_sync SET oldest_message=(SELECT id FROM messages m WHERE m.chat=history_sync.chat ORDER BY time,id LIMIT 1),newest_message=anchor WHERE initial_complete=1 AND oldest_message IS NULL;`);
     // Only durable requests explicitly not started survive. Legacy queued rows
     // lack trusted live-event provenance and must never be recovered.
-    this.db.exec("UPDATE group_requests SET state='uncertain' WHERE state IN ('running','sending'); UPDATE messages SET state='uncertain' WHERE state IN ('running','sending') OR (state='queued' AND NOT EXISTS(SELECT 1 FROM group_requests q WHERE q.chat=messages.chat AND q.id=messages.id AND q.state='queued'));"); this.prune();
+    this.db.exec("UPDATE group_requests SET state='uncertain' WHERE state IN ('running','sending'); UPDATE messages SET state='uncertain' WHERE state IN ('running','sending') OR (state='queued' AND NOT EXISTS(SELECT 1 FROM group_requests q WHERE q.chat=messages.chat AND q.id=messages.id AND q.state='queued'));"); this.knowledge=new KnowledgeStore(this); this.prune();
   }
   stopped(chat) { return Boolean(this.db.prepare('SELECT 1 FROM stopped WHERE chat=?').get(chat)); }
   ingest(event, mentioned) {
@@ -71,12 +90,13 @@ export class GroupMessageStore {
     const inserted=this.db.prepare('INSERT OR IGNORE INTO messages VALUES(?,?,?,?,?,?,?,?,?,?,?,?)').run(m.chat_id,m.message_id,sender.sender_id?.open_id || sender.sender_id?.app_id || '',sender.sender_type,time,m.message_type,p.text,JSON.stringify(p),m.parent_id||null,m.root_id||null,m.thread_id||null,mentioned?'queued':'recorded').changes===1;
     this.db.prepare('INSERT OR IGNORE INTO raw_messages(chat,id,content) VALUES(?,?,?)').run(m.chat_id,m.message_id,m.content);
     this.db.prepare("UPDATE raw_messages SET content=? WHERE chat=? AND id=? AND content=''").run(m.content,m.chat_id,m.message_id);
+    if(inserted)this.knowledge.inserted(m.chat_id,time);
     return inserted;
   }
   read(chat,id,offset=0) {
     if(!Number.isSafeInteger(offset)||offset<0)throw new Error('Invalid text offset');
     const r=this.get(chat,id);if(!this.visible(chat,id)||!r||this.stopped(chat)||r.time<this.lowerBound())return null;
-    return {messageId:id,time:new Date(r.time).toISOString(),text:r.text.slice(offset,offset+4000),nextOffset:offset+4000<r.text.length?offset+4000:null,limitations:JSON.parse(r.metadata).limitations};
+    return {messageId:id,time:new Date(r.time).toISOString(),text:r.text.slice(offset,offset+4000),nextOffset:offset+4000<r.text.length?offset+4000:null,limitations:previewMetadata(r.metadata).limitations};
   }
   claimLive(chat,id) {if(this.stopped(chat))return false;return this.db.prepare("UPDATE messages SET state='queued' WHERE chat=? AND id=? AND state='recorded'").run(chat,id).changes===1;}
   mark(chat,id,state) {
@@ -113,12 +133,19 @@ export class GroupMessageStore {
   visible(chat,id){return !['queued','queue_full','cancelled'].includes(this.requestState(chat,id));}
   get(chat,id) { return this.db.prepare('SELECT * FROM messages WHERE chat=? AND id=?').get(chat,id); }
   result(rows) {
-    let remaining=24000;const result=[];
+    const result=[];
     for(const r of rows){
       if(!this.visible(r.chat,r.id))continue;
-      const meta=JSON.parse(r.metadata);
-      const item={messageId:r.id,sender:r.sender,time:new Date(r.time).toISOString(),type:r.kind,text:r.text.slice(0,2000),parentId:r.parent,rootId:r.root,threadId:r.thread,sequence:r.seq,resources:(meta.resources||[]).slice(0,8),attachments:meta.attachments.slice(0,4),limitations:meta.limitations,truncated:r.text.length>2000||meta.attachments.length>4||(meta.resources||[]).length>8};
-      const size=JSON.stringify(item).length;if(size>remaining)break;remaining-=size;result.push(item);
+      const meta=previewMetadata(r.metadata);
+      let item={messageId:r.id,sender:r.sender,time:new Date(r.time).toISOString(),type:r.kind,text:r.text.slice(0,2000),parentId:clip(r.parent,256)||null,rootId:clip(r.root,256)||null,threadId:clip(r.thread,256)||null,sequence:r.seq,resources:meta.resources,attachments:meta.attachments,limitations:meta.limitations,truncated:meta.truncated||r.text.length>2000||[r.parent,r.root,r.thread].some(x=>typeof x==='string'&&x.length>256)};
+      if(item.truncated&&!item.limitations.includes(previewHint))item.limitations.push(previewHint);
+      // Even bounded fields may cumulatively exceed the page budget. Keep a
+      // visible source stub rather than silently skipping or blocking this row.
+      if(Buffer.byteLength(JSON.stringify([item]))>PREVIEW_BUDGET){
+        item={messageId:r.id,time:new Date(r.time).toISOString(),sequence:r.seq,text:r.text.slice(0,2000),resources:[],attachments:[],truncated:true,limitations:[previewHint],nextOffset:r.text.length>2000?2000:null};
+      }
+      if(Buffer.byteLength(JSON.stringify([...result,item]))>PREVIEW_BUDGET)break;
+      result.push(item);
     }
     return result;
   }
@@ -142,6 +169,7 @@ export class GroupMessageStore {
     if(this.db.prepare('SELECT 1 FROM recalls WHERE chat=? AND id=?').get(chat,id))return;
     // These states have never dispatched and are excluded from model-facing reads.
     // Other states may have entered context, so retain conservative privacy cleanup.
+    this.knowledge.changed(chat,id);
     const neverDispatched=['queued','queue_full'].includes(this.requestState(chat,id));
     this.db.prepare("UPDATE group_requests SET state='cancelled',event='{}' WHERE chat=? AND id=?").run(chat,id);
     this.db.prepare('INSERT OR IGNORE INTO recalls VALUES(?,?)').run(chat,id);
@@ -149,7 +177,7 @@ export class GroupMessageStore {
     this.db.prepare('DELETE FROM raw_messages WHERE chat=? AND id=?').run(chat,id);
     if(!neverDispatched)this.invalidateThread(chat);
   }
-  leave(chat) { this.cancelQueued(chat);this.db.prepare("UPDATE group_requests SET state='cancelled',event='{}' WHERE chat=?").run(chat); this.db.prepare('INSERT OR IGNORE INTO stopped VALUES(?)').run(chat); this.db.prepare('DELETE FROM messages WHERE chat=?').run(chat); this.db.prepare('DELETE FROM documents WHERE chat=?').run(chat); this.db.prepare('DELETE FROM raw_messages WHERE chat=?').run(chat);this.db.prepare('DELETE FROM history_sync WHERE chat=?').run(chat);this.invalidateThread(chat); }
+  leave(chat) { this.knowledge.leave(chat);this.cancelQueued(chat);this.db.prepare("UPDATE group_requests SET state='cancelled',event='{}' WHERE chat=?").run(chat); this.db.prepare('INSERT OR IGNORE INTO stopped VALUES(?)').run(chat); this.db.prepare('DELETE FROM messages WHERE chat=?').run(chat); this.db.prepare('DELETE FROM documents WHERE chat=?').run(chat); this.db.prepare('DELETE FROM raw_messages WHERE chat=?').run(chat);this.db.prepare('DELETE FROM history_sync WHERE chat=?').run(chat);this.invalidateThread(chat); }
   addDocument(chat,id) { this.db.prepare('INSERT OR IGNORE INTO documents VALUES(?,?)').run(chat,id); }
   hasDocument(chat,id) { return Boolean(this.db.prepare('SELECT 1 FROM documents WHERE chat=? AND id=?').get(chat,id)); }
   lowerBound() { return this.retentionDays===null?0:Date.now()-this.retentionDays*86400000; }
@@ -162,8 +190,19 @@ export class GroupMessageStore {
     if(!Number.isSafeInteger(after)||after<0||!Number.isInteger(limit)||limit<1||limit>50)throw new Error('Invalid cursor');
     if(this.stopped(chat))return {messages:[],cursor:after,hasMore:false};
     const rows=this.db.prepare('SELECT m.*,r.seq FROM raw_messages r JOIN messages m ON m.chat=r.chat AND m.id=r.id WHERE r.chat=? AND r.seq>? AND m.time>=? ORDER BY r.seq LIMIT ?').all(chat,after,this.lowerBound(),limit);
-    const messages=this.result(rows),cursor=messages.at(-1)?.sequence??after;
-    return {messages,cursor,hasMore:Boolean(this.db.prepare('SELECT 1 FROM raw_messages WHERE chat=? AND seq>? LIMIT 1').get(chat,cursor))};
+    const messages=[];let cursor=after;
+    for(const row of rows){
+      const state=this.requestState(chat,row.id);
+      // Queued is temporary: stop before it so a later read can see it once
+      // completed. Terminal hidden rows can be consumed without revealing them.
+      if(state==='queued')break;
+      if(['queue_full','cancelled'].includes(state)){cursor=row.seq;continue;}
+      const [item]=this.result([row]);
+      if(!item||Buffer.byteLength(JSON.stringify([...messages,item]))>PREVIEW_BUDGET)break;
+      messages.push(item);cursor=row.seq;
+    }
+    const hasMore=Boolean(this.db.prepare('SELECT 1 FROM raw_messages r JOIN messages m ON m.chat=r.chat AND m.id=r.id WHERE r.chat=? AND r.seq>? AND m.time>=? LIMIT 1').get(chat,cursor,this.lowerBound()));
+    return {messages,cursor,hasMore};
   }
   coverage(chat) {const h=this.sync(chat);const b=this.db.prepare('SELECT COUNT(*) count,MIN(time) oldest,MAX(time) newest FROM messages WHERE chat=?').get(chat);return {...b,historicalSync:h.state,initialComplete:Boolean(h.initial_complete),lastReconciledAt:h.last_reconciled_at,oldestSyncedMessage:h.oldest_message,newestSyncedMessage:h.newest_message,retentionDays:this.retentionDays};}
   prune() { if(this.retentionDays!==null)for(const r of this.db.prepare('SELECT DISTINCT chat FROM messages WHERE time<?').all(this.lowerBound()))this.invalidateThread(r.chat); this.db.prepare("UPDATE group_requests SET state='cancelled',event='{}' WHERE EXISTS(SELECT 1 FROM messages m WHERE m.chat=group_requests.chat AND m.id=group_requests.id AND m.time<?)").run(this.lowerBound());this.db.prepare('DELETE FROM messages WHERE time<?').run(this.lowerBound()); this.db.exec('DELETE FROM raw_messages WHERE NOT EXISTS(SELECT 1 FROM messages m WHERE m.chat=raw_messages.chat AND m.id=raw_messages.id); PRAGMA wal_checkpoint(TRUNCATE)'); }

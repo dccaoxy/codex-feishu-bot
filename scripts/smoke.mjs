@@ -1,3 +1,4 @@
+import {OWNER_GROUP_TOOLS} from '../src/owner-group-gateway.mjs';
 import { loadConfig } from '../src/config.mjs';
 import { CodexClient } from '../src/codex.mjs';
 import { TOOLS } from '../src/history.mjs';
@@ -8,7 +9,7 @@ const rpc = new CodexClient(config.codex.binary, {url: config.codex.appServerUrl
 try {
   await rpc.start();
   const r = await rpc.request('thread/start', { cwd: config.codex.cwd, ephemeral: true,
-    sandbox: 'read-only', approvalPolicy: 'on-request', dynamicTools: TOOLS });
+    sandbox: 'read-only', approvalPolicy: 'on-request', dynamicTools: [...TOOLS,...OWNER_GROUP_TOOLS] });
   if (!r.thread?.id) throw new Error('No thread ID returned');
   const loaded = await rpc.request('thread/loaded/list', {});
   if (!loaded.data.includes(r.thread.id)) throw new Error('Ephemeral thread not loaded');

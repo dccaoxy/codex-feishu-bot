@@ -1,3 +1,120 @@
+# 当前交接：PR #5 Phase 2 最终收口（2026-09-25）
+
+本节为最新事实源；下方各节保留各历史时点的部署、验收及限制，不将旧“待验收/保持Draft”误作本次Gate。
+
+- **Task Source**：Human最新明确指令及PR #5最终收口计划（评论5815781893），Issue #3仅Phase 2。最新main `9de09265c2c50702913c575aeb90ed3e53bd9f0b`已含PR #14/#15；集成到原`codex/issue-3-work-attach`，不是合并PR到main。
+- **Implementation**：保留main完整群历史、Persistent Group Thread、Owner Resource Gateway、FIFO、Group Knowledge、Owner Group Gateway及审查修复。group/knowledge/owner模块和既有测试与main逐文件一致；仅Bot imports/recover冲突需组合：外部Work待处理消息标uncertain不重放，机器人自有私聊待处理消息恢复Owner请求授权再调度。保留Shared WS/Unix、原Thread start/steer/interrupt/fork/detach、审批token/卡片生命周期和遥测；Full继续拒绝，不扩展群Control。
+- **Validation**：Node24.21.0/Codex0.155.0-alpha.16.3；check、218项全量测试PASS，0失败/跳过（原217项加组合恢复用例）。覆盖Raw/FIFO/Knowledge/Owner边界，以及审批一次性token、对端先处理、迟到卡片、展示失败不重放、FD分类/阈值/轮换。doctor真实握手、登录、7模型和含Owner工具schema的smoke通过；使用本checkout配置（群功能关闭），不冒充在线群配置验证。Group首次/恢复16次及Knowledge12次隔离攻击探针通过（真实二进制、假provider）。
+- **真实协议**：WebSocket及Unix独立临时服务器work:check通过，覆盖原ID、idle start、active steer、竞争start同回合、fork、interrupt、detach和绑定恢复。真实Bot+共享App Server+模拟对端/UI通过双向结果、active steer/interrupt、对端拒绝后旧批准失效、Bot批准后迟到拒绝不重复执行（一次无副作用printf）。实际调用模型，只清理测试创建的任务，不发送真实飞书消息、不重做Desktop UI验收。
+- **首次失败及修正**：Unix work:check曾在历史完成/恢复后仍读到active，实际返回steer而测试预期start，未算通过；测试原先仅检查历史终态。脚本现在同时等待控制器读取的live idle，且attach之后再次确认，再测试idle start，未放宽生产控制器或把steer算作start。修正后WS/Unix均通过。原始失败及全部成功日志保留本机Git忽略目录`data/pr5-final-check/`。
+- **Human Gate**：Human确认双端Shared Runtime已持续真实使用且稳定，明确接受现有长期证据，免重复8小时soak和双端同步人工验收。沿用下方09-25 07:02记录：483样本、8小时4分15.751秒、最大间隔60.392秒，FD31/峰51/末27、pipe3、子进程1、loaded0–2、RSS225632/峰235344/末146288KiB，窗口内无新EMFILE。此次没有重新执行soak/UI，不把历史版本证据称为新head实测，也不承诺绝对无泄漏。
+- **部署与边界**：本轮没有部署、重启服务、修改运行目录/真实配置/授权群/数据库/Shared Runtime或遥测安排；现有PR #15 f3d9ec1与PR #5组合候选继续运行。既有Knowledge补算blocked属于保留的已知问题，不借此次收敛重试/扩大整改。自动回归通过不等于其线上补算已恢复。
+- **交付与下一步**：README/PROJECT同步，提交推送同一PR #5后核对远端head并Draft→Ready，等待该head独立审核；Ready不等于PASS。新head未部署，不自动Merge，Issue #3保持开放（Phase 3未实施）。此次免重复验收为Human明确调整，不是Agent自行豁免。停止任务不会撤销已发生修改。
+
+## PR #15 真实私聊验收完成（2026-09-25）
+
+- Human明确反馈四步“测试都成功了”：授权群目录、历史事实及原文来源只读查询、明确目标单条发送、带冒号切换群后指代发送被要求明确目标。群客户端正文一致/仅一条、查询及模糊指代不发消息由Human确认，不冒充Agent独立读取全部客户端记录。
+- Agent只读核对：私人发送审计相对f3d9ec1部署备份新增且总共仅1条sent记录，存在消息回执；body_hash与指定验收文本完全一致，target为指定测试群；没有新增其他发送审计。任务表无活动任务。该证据支持本轮一次明确发送，不等同网络层恰好一次或所有发送渠道全局零副作用证明。
+- 当前运行仍为已审PASS f3d9ec1与PR #5组合；此前184分支/217组合及部署检查结果不重复充当本次Human证据。验收记录已回写PR；PR保持Ready，未Merge，未更改配置/服务/授权。剩余：Human决定合并，既有Knowledge blocked及长期稳定性仍独立跟踪。
+
+## PR #15 已审核 f3d9ec1 部署（2026-09-25）
+
+- Human明确授权部署已自动复审PASS的 `f3d9ec1fafd35c1975df09326f95d5dea70907e4`（评论5826626796）。使用保留PR #5 d305eaf的已测组合；仅替换group-store和owner-group-gateway两个运行文件，其他src逐文件哈希核对不变。
+- 部署前用户任务/知识任务空闲，备份配置、两个旧文件及两份SQLite。只重启机器人（PID36000→74706），Shared App Server PID67006不变；Desktop、Shared权限、PR #5遥测未改。配置SHA256不变，原授权群、Owner Gateway、FIFO、Knowledge开关不变。
+- 部署后check、doctor、smoke及含10个Owner工具schema的组合smoke通过；217项完整PR #5组合回归PASS（0失败/跳过），运行src与测试组合哈希完全一致。日志确认Codex已连接、飞书长连接已建立，无新增启动错误/EMFILE。Raw、messages、group_requests、group_threads对备份无丢失/改变行。重启按已审核逻辑清除旧发送目标选择，持久发送审计保留。
+- Knowledge仍为2个既有blocked、5个completed，本次不重试也不宣称补算问题解决。证据本机data/pr15-f3d9ec1-deployment.json及对应备份；组合日志开发worktree data/pr15-deploy-217.log。
+- 可以开始真实Owner私聊验收。本次未发送真实测试消息、未调用真实模型；部署/连接正常不等于发送正文、回执、一次效果或长期稳定性已验收。未Merge。本节是后续文档记录，实际部署代码仍为f3d9ec1审查版本与PR #5组合。
+
+## PR #15 第二轮审核返工（2026-09-25）
+
+- Task Source：[b60023d复审NEEDS CHANGES](https://github.com/dccaoxy/codex-feishu-bot/pull/15#issuecomment-5826524555)。复审确认旧群指代及隐藏终态问题已解决；新增发现单条资源元数据过大时预览为空，增量读取永久停滞。上一轮输出预算测试仅覆盖多条正文累计，不能证明单条超限成立。
+- 实现提交 `27fe15a`：仅在模型读取预览层为资源类型/ID/URL、附件字段、限制说明、父级引用设置上限；URL超2048字符整体省略并标记，避免截断链接误导。总字段仍超限时返回messageId/短正文/序号/原文分页提示的可见最小记录。结果数组最多22000 UTF-8字节，为Owner包装留余量；原文按既有offset接口读取，限制说明也有界。Raw及数据库原文/元数据不改，不静默越过可见记录。
+- 复现/验证：4个新增用例在旧版本全部失败（原30个网关用例通过），data/rework2-before.log。修复后check及184项全量测试PASS，PR #5 d305eaf组合check及217项PASS，0失败/跳过。新增覆盖正常ingest的30KB链接query、隐藏终态后超长消息、queued完成后可达、单条巨大元数据及多条累计预算；只使用返回cursor可到达后续普通消息，原文分页重建一致、Raw/FIFO/Group cursor不变。
+- 真实安装Codex doctor/7模型/schema smoke通过；Group首次/恢复16次及Knowledge12次假provider隔离探针通过。独立空飞书配置，不调用真实模型或发送真实消息；没有远端CI PASS声明。
+- 本轮仅代码/文档提交推送并重新Ready复审，未部署、未Merge、未改变运行配置/授权/Shared/PR #5。线上仍为f291e48旧组合，不将代码测试当作线上修复。Human真实群验收豁免继续保留为未执行；真实发送正文/回执/一次效果、线上只读零发送及长期稳定性仍未验证。原Knowledge blocked不处理。
+
+## PR #15 审核返工（2026-09-25）
+
+- Task Source：[ae43cb2审核NEEDS CHANGES](https://github.com/dccaoxy/codex-feishu-bot/pull/15#issuecomment-5826388256)。P1旧群指代可误放行；P2隐藏终态卡住增量游标；既有170/203项通过没有覆盖这些问题。PR已先转Draft，在同一分支返工。
+- 修复提交 `240920f`：接收新可信私聊请求时立即失效旧选择（即使后续无工具调用）；只有紧接着且符合窄语法的指代发送可恢复同Owner/私聊/Thread的已验证选择。带冒号、换行、引号/代码引用、多群候选的请求仍可读取，但不建立发送指代；要求明确目标，不猜测。重启清除旧选择，发送一次性审计不清除。兼容正常A→B切换、显式目标和原发送前授权检查。
+- 增量读取每次至多扫描limit行，queue_full/cancelled保持隐藏并推进返回游标；queued前停止且不跨过，完成后可读。输出满24000字符时不消费未返回的可见记录，hasMore与retention及可读消息连接条件一致。不删除Raw、不改终态/FIFO、不写Group Thread cursor。
+- 实测：修改前新增8个复现用例全部失败（旧20用例通过），日志data/rework-before.log；随后补充单引号/代码引用，共新增10项。修复后check、180项全量测试PASS；以已解决冲突的PR #5 d305eaf组合更新本轮两个源文件及测试，组合check/213项PASS，均0失败/跳过。覆盖隐藏连续页/尾页、queued后续完成、输出预算、retention、Raw/FIFO/cursor不变和选择隔离/重启。
+- 真实安装Codex的doctor握手/登录/7模型、schema smoke通过；Group首次及恢复16次、Knowledge12次隔离探针通过（假provider）。使用独立空飞书凭据配置，不连接真实群、不调用真实模型；未声称远端CI通过。
+- 部署/验收：本次修复未部署。在线仍为旧实现f291e48与PR #5组合，包含上述已知缺陷；修复部署前发送需明确群名，避免“这个群”。没有重启机器人/Desktop/Shared、修改授权或PR #5遥测。Human豁免剩余真实群发送验收仍有效，但不视为修复真实验收PASS；真实发送回执/正文/一次效果及线上只读零发送未验证。Knowledge blocked保持原状。
+- 交付：更新README、PROJECT及PR/Issue报告，推送后核对远端head再Ready触发复审；不Merge、不自动部署。等待审核与单独部署授权。
+
+## Issue #13 Human Gate 调整（2026-09-25）
+
+- Human明确要求“跳过群验收，进行下一步”。剩余真实群发送验收豁免，不标记为通过，不继续发送测试消息；准备将PR #15转Ready触发审核，不Merge。
+- Human提供的真实私聊回复展示了两个授权群及本地计数，并查询出欢迎仪式通知、时间地点要求及两条原文来源。本轮按用户提供的客户端记录确认读取展示，不冒充独立后台逐条复核。仅查询零发送的后台效果、明确发送一次的正文/回执与无重复效果仍未实测。
+- 沿用实现f291e48的170项分支测试、203项组合回归及部署后check/doctor/smoke结果；本次仅更新交付记录，不改代码、配置、运行服务或PR #5观测。真实发送仍依赖自动测试证据，作为审核Remaining/Risks保留。
+
+## Issue #13 候选部署（2026-09-25 11:32，北京时间）
+
+- Human明确批准部署。已将实现 `f291e48` 与 PR #5 `d305eaf` 的已测组合部署到既有候选；只替换 bot/main 并新增 owner-group-gateway 三个运行文件，不替换配置。部署前用户任务与知识任务均空闲，已备份配置、旧文件和两份SQLite。
+- 机器人PID由65936变为36000；日志确认Codex已连接、飞书长连接已建立，无本次新增启动错误。Shared App Server PID67006未变；配置SHA256不变，原两群授权、Owner Gateway、FIFO、Shared权限不变，未改PR #5遥测/服务。
+- 部署后候选check/doctor/smoke通过；组合全量203项再次PASS，0失败/跳过；包含10个新工具schema的组合真实协议smoke通过（独立空凭据配置，无模型调用）。组合smoke首次因缺本地配置未启动，补齐独立诊断配置后通过。运行src逐文件hash等于已测组合。Raw对部署前备份逐行核对，丢失或变化0行；私人发送审计表已创建。
+- 证据保留本机ignored data/issue13-deployment.json、data/issue13-backup-20260925113214；组合回归日志在开发worktree的issue13-deploy-regression.log。未发送真实验收消息，未执行真实Owner私聊读群/明确发送验收，未声称模型端到端通过。既有Knowledge blocked不追加重试，非本轮修复范围。
+- PR #15继续Draft；下一步由Owner在机器人自有私聊任务触发目录、计数、事实来源回查及明确单条发送，核对无额外群副作用。通过后再Ready；不Merge。
+
+## 当前任务：Issue #13 Owner Group Gateway（2026-09-25）
+
+- Task Source：Human要求从最新main执行更新后的[Issue #13](https://github.com/dccaoxy/codex-feishu-bot/issues/13)；完整读取AGENTS、README、PROJECT及Issue（无评论）。基线main `d8b4f0d`已合并PR #14；PR #5实际仍open/Draft、head `d305eaf`，不将其视为main能力。独立worktree `codex-feishu-issue-13` / 分支 `codex/issue-13-owner-group-gateway`，不改现有运行目录、配置、数据库、服务、遥测。
+- Implementation：独立Private→Group Gateway；可信p2p sender、当前绑定Owner、当前allowlist、群本地状态、停止/退出与活动私聊Turn共同授权。有限可信名称目录/稳定引用、同名候选、Raw检索/长消息/上下文/增量/确定性count/coverage；Knowledge只读日报/主题/来源同时接入，不注册GroupAssistant工具对象、不写Group cursor/FIFO/Raw、不创建群Turn。群名/原文/链接/派生内容均为不可信资料。
+- Owner Explicit Send：宿主从当前可信私聊原文解析窄格式发送意图和唯一目标；近期选择按Owner+私聊+任务隔离且不能由模型选择建立。原文发送逐字核对，明确的总结发送允许当前上下文整理；模糊/重名/非文字来源不发。仅普通文字、禁止mention，4000字符/12000字节上限。私人库持久原子claim+稳定UUID、未知发送结果不重试；实际Feishu.call队列临界点复核撤权/换Owner/停止/任务结束/新消息。新私聊消息立即撤销旧未发发送权。未扩展其他Control权限。
+- Validation：check、170项完整自动测试PASS（新增20项网关与真实Bot/Feishu排队路径测试，外部transport/model模拟）；保留PR #5 d305eaf的隔离组合check/203项PASS。组合以共同基线fcd1ab7三方合成，只解决Bot imports与recover冲突，保留PR #5外部绑定恢复不重放语义；未改原PR #5分支。真实安装Codex `0.155.0-alpha.16.3` 的doctor握手/登录/7模型、无模型smoke（含10个网关工具schema）通过。真实二进制Group首次+恢复16次、Knowledge12次攻击探针PASS（假provider），新增owner_groups/send攻击不可用。
+- 真实环境：本轮诊断使用空飞书凭据的独立配置，无真实飞书/远端模型调用，未部署、未重启机器人或Shared/Desktop、未发送真实消息；原在线Knowledge补算失败问题保持原状，不借本Issue扩大修复范围。未Merge。
+- Commit / PR：实现提交`f291e48`已推送，[Draft PR #15](https://github.com/dccaoxy/codex-feishu-bot/pull/15)已创建。
+- Remaining / Human Gate：按Issue要求先Draft。真实Owner私聊列群/计数/具体事实/来源回查、明确发送一次及只分析零发送尚未执行；需授权更新现有候选后由真实Owner私聊触发并核对。验收完成后才Ready触发审核。不为满足形式提前Ready或自动Merge。
+- 局限：首次目录依赖群信息API权限，失败则不列出该群；只查镜像而非同步阻塞，coverage明确陈旧/partial/retention。窄自然语言语法及文字入口，不识别任意复合指令；元数据缓存一分钟。已读取资料可保留在Owner私人上下文，撤权后阻止新读取，不抹除已披露上下文。PR #5外部Work不新增网关工具注册，原Work/审批能力以组合回归保障。当前共享环境承载真实任务，候选更新须先核对空闲与备份，不能把以前PR #14部署许可扩张为本轮服务替换许可。
+
+## PR #14 e619bf1 已审核版本部署（2026-09-25）
+
+- 授权：Human明确要求部署e619bf1到当前候选；已读取该head自动复审PASS（https://github.com/dccaoxy/codex-feishu-bot/pull/14#issuecomment-5825090846）。未修改已审核运行代码，不做精细语义验收，不Merge。
+- 已部署：备份候选配置、旧knowledge-store和两份SQLite后，仅替换运行文件src/knowledge-store.mjs；机器人正常重启，Codex与飞书长连接恢复。配置SHA256未变，授权群/Owner Gateway/FIFO/Shared权限和其他运行文件未变；Shared App Server PID 67006未变，PR #5遥测不改动。部署记录data/knowledge-mvp-deployment.json，备份data/knowledge-e619bf1-backup-20260925092515。
+- 部署后验证：候选check、doctor、真实协议smoke通过；150项分支测试、183项PR #5组合回归通过；部署src与组合回归src逐文件一致。Raw与备份逐行比对无丢失。
+- 既有补算问题：部署前两群分别在2026-02-27、2026-08-18出现knowledge_worker_failed三次上限，和终态来源问题不同；当前数据库没有仍保留在messages中的queue_full/cancelled行，不能声称已在线重现/解除本轮终态缺陷。终态修复以本轮回归覆盖为证。
+- 为验证部署后实际日期推进，保留失败快照data/deploy-e619bf1-controlled-retry.json，并对上述两个原失败日期各给予一次受控重试；不提高全局上限、不跳过日期、不关闭校验。09:35最终核对：两个日期均再次进入blocked / attempts=3 / knowledge_worker_failed；next_date仍为2026-02-27和2026-08-18，后者last_successful_day仍为2026-08-17。实际日期推进未通过，不将模型失败归因于已修复的终态缺陷；具体生成失败根因尚未查明，不再追加重试。
+- 连接最终核对：飞书历史同步状态仍为complete，09:32有成功reconcile；无活动用户队列。此次未发送群消息、未重做人工@或精细语义验收。剩余：单独诊断knowledge_worker_failed，恢复后再验证两个日期实际前进。部署成功不等于完整在线验收通过。
+- 交付：本节作为部署记录提交/推送同一PR；仅文档变化，实际运行Knowledge代码仍为已审核e619bf1，不自动部署后续文档head。
+
+## PR #14 审核返工：终态来源阻塞补算（2026-09-25）
+
+- Task Source：https://github.com/dccaoxy/codex-feishu-bot/pull/14#issuecomment-5824986193 ，审核3431340为NEEDS CHANGES。本机新增两例测试在旧组合代码上均复现“终态请求导致当日无法生成”，失败证据保留data/rework-terminal-before.log；原145项通过不能覆盖该缺口。
+- 已修改：snapshot仅排除queue_full/cancelled终态，仍等待queued；不删除Raw、不改终态、不放宽visible。过滤发生在模型输入及大小限制之前；coverage记录filtered、总数/纳入数/分状态排除数，随输入指纹校验，日报及主题revision读取可见。仅终态日以明确零输入覆盖推进，不冒充全消息完整摘要。
+- 自动回归新增：两个终态与重启/次日补算、真正queued等待至完成、全终态日、撤回活动请求取消其他排队消息后重启；断言Raw保留、隐藏正文不进入Worker/派生知识、既有隐藏策略不变。语义细分类不扩展。
+- 验证：check、150项全量测试、独立PR #5 d305eaf组合check/183项测试通过；真实安装Codex二进制的Group正反向/恢复探针（12次调用）及Knowledge隔离探针（10次越权调用）通过，使用假provider。隔离开发配置的doctor握手/登录检查及真实协议smoke通过；飞书凭据为空，因此不声称本轮真实飞书或模型验收通过。
+- 返工当时状态（后续部署结果见顶部）：本轮修复已提交并推送同一PR，重新Ready触发复审；当时修复尚未部署，在线为3431340。不得把上轮最小真实模型验收作为本修复真实验收；本轮不操作在线数据库、不重启服务，部署后需核对受影响群补算进度。不Merge，不启动Issue #13。
+
+## PR #14 MVP 最终验证（2026-09-25）
+
+- 修复真实模型工具调用返回 `code-mode host is disabled`：不再禁用内部工具分发宿主；code_mode、shell、文件、插件等能力仍禁用，注册工具名单保持受限。Group真实二进制探针增加合法group_search正向调用，首次/恢复均通过，原10次越权攻击及Knowledge 10次攻击仍拒绝。
+- 修改后check、145项分支测试、178项PR #5组合测试重新通过。最小在线模型验收真实调用 `group_topics → group_topic_read → group_daily_digest → group_message`，读取实际生成的主题与日报，并用真实飞书API核对来源，内容一致、跨群读取拒绝。模型运行在隔离临时任务，在线库使用SQLite只读备份，无用户任务/FIFO写入。
+- 本轮按最新MVP Gate转Ready；人工客户端@验收未重做，历史大日补算未全部完成，语义细分类不继续扩展。无Merge、无Issue #13开发、无Phase 3。
+
+## PR #14 Human MVP 收口（2026-09-25，当前事实源）
+
+- 权威验收调整：https://github.com/dccaoxy/codex-feishu-bot/pull/14#issuecomment-5824698226 。不再要求语义 Schema 精雕或相同21条消息的第二轮逐项人工验收；原真实两日/v2/来源隔离验收继续有效。Issue #13 仅为后续优先级，本任务未开始其开发。
+- 实现代码 27cf19b 已部署到既有候选，与 PR #5 d305eaf 组合；只新增 `groups.knowledge.enabled=true`，原两群名单、Owner Gateway、Shared连接/权限、FIFO配置不变。备份和部署文件清单保存在本机 data/knowledge-mvp-deployment.json；没有重启 Desktop/Shared App Server，没有修改 PR #5 遥测。
+- check、145项独立测试、178项组合测试通过；真实 Codex 协议 doctor/smoke、Group 与 Knowledge 权限隔离探针通过（探针使用假provider）。新加调度顺序测试覆盖历史成功/失败异步结束后才整理，避免一分钟同步竞争导致永久延后。
+- 线上后台已从真实群2026-08-13消息生成Daily Digest和“AEG 新羽计划欢迎仪式”Topic v1。通过已部署 GroupAssistant.execute 读取日报、Topic、原始消息，来源正文与真实飞书 message.get 返回完全匹配；其他群无法读取同一Topic/来源。核对主题主要时间、地点、参加要求与原通知一致，未将计划冒充已举行。部署前Raw逐行比对无丢失。
+- 最小验收证据仅本机 data/knowledge-mvp-online-result.json，不向公开仓库上传群内容/账号标识。此次未伪造用户事件、未占用持久用户群任务、未发送验收群消息。Human暂不方便做人工@；本轮按最新指令进行最小在线验证，不把它表述为人工客户端端到端验收。
+- 保留局限：最早较大日期2026-02-27曾worker_failed，保留有界退避；独立21条复测03-16两次因knowledge_lost_fact被拒绝，未发布不完整派生内容，未关闭校验或手改JSON。此复测不再是Human Gate；不宣称全历史补算完成或一次生成可靠性已解决。精细语义质量及大日可靠性留待后续。
+- 验收工具纠正：首次本机查询探针误用了会执行启动恢复的Store构造器，使当时后台running知识任务被标为interrupted；没有Raw丢失或用户FIFO在途请求。后续探针已改为只读SQLite在线备份，在临时副本运行工具，避免触碰在线调度；该诊断干扰与模型失败分别记录，不混为产品故障。
+- 收口：完成最小真实模型工具链核验后转Ready触发独立Reviewer；不Merge，等待审核/Human Gate。
+
+## MVP 部署验收中的调度修复（2026-09-25）
+
+- 真实启用发现同步定时器与 Knowledge 定时器同时触发，知识快照总在 syncing 状态被延后。改为每轮历史同步完成后调用知识调度；单群同步失败仍由快照覆盖校验阻止发布，不阻塞其他已完整群。
+- 新增异步同步顺序回归；check、独立 145 项、PR #5 组合 178 项通过。候选 doctor、真实协议 smoke、Group 隔离探针通过。真实飞书长连接已建立；完整链路仍在验收，PR 保持 Draft。
+
+## PR #14 MVP 验收调整（2026-09-25）
+
+- Task Source：Human 最新指令将验收调整为 MVP：Raw Messages 完整、来源可追溯、跨群与 Worker 权限隔离、无明显编造、不影响群聊/FIFO；精细语义分类为后续质量优化，不作为本轮阻断条件。
+- 已保留完成的轻量改进：聊天陈述归入 reported_facts，独立 verified_facts 为空；旧知识只读兼容投影，不改写旧版本；增加计划字段和来源覆盖约束。此举不代表精细语义分类已人工验收。
+- check、独立分支 144 项测试、保留 PR #5 d305eaf 共享连接配置的组合 177 项测试通过；真实 Codex 二进制的 Knowledge 隔离探针通过（假 provider）。
+- 下一步：备份后部署组合候选，仅开启现有授权群 Knowledge；验证真实生成、群内 @ 查询及来源回查后才转 Ready。当前尚未部署该变更；不 Merge。
+
 # 飞书本地 Codex 机器人 — 项目状态
 
 ## 项目目标
@@ -54,7 +171,45 @@ Task Source：用户明确要求将新群加入本地授权名单，启用@自�
 
 原8小时资源观察继续，起点未重置；本次新增生产群和机器人重启作为负载/部署事件记入本地遥测deployment-events.jsonl。最新23:06:28样本同一共享PID，FD25、pipe3、子进程1、loaded0、RSS211712KiB、连接1、normal。点状正常不代表8小时已完成；长期稳定Gate仍在进行中。PR #5保持Draft等待收口，不将本次生产启用等同于最终验收完成。
 
-## 已合并基线记录：Issue #10 Group Request Queue
+## 当前任务：Issue #12 Group Knowledge（独立开发线）
+
+Task Source：[Issue #12](https://github.com/dccaoxy/codex-feishu-bot/issues/12)完整正文（读取时无评论），以及用户要求“PR #5继续独立长期观察，两条开发线不要互相覆盖”。从最新main fcd1ab7建立独立worktree和分支codex/issue-12-group-knowledge。未将PR #5未合并能力带入main分支；原PR #5分支仍00ade11，工作区无改动，运行候选仍8cd4418，部署源码哈希逐项核对未变。未更改生产配置/服务/数据库或PR #5采样安排。
+
+### Implementation
+
+- 在群SQLite新增每日摘要、摘要版本、主题当前状态、主题版本、调度状态及主题重建身份表。原始消息不被派生知识覆盖；正式摘要和主题版本事务提交，成功日期幂等，重启恢复未完成任务。
+- 显式groups.knowledge配置默认关闭；时区自然日及每日时间、顺序离线补算、全局一分钟最多一次后台模型调用、每周期日期上限、持久错误与三次失败停止重试。历史完整且同步已覆盖该日末尾才允许完整摘要；有限retention截断日标skipped，超量整日失败不伪装完整。
+- 独立临时Knowledge Worker复用GroupModel隔离启动底层，但没有动态工具、执行环境、私人线程、Owner Gateway或文件/shell/审批能力。每个job独立临时home与ephemeral thread，结束/中止清理；崩溃目录下次启用清理。不写用户Persistent Group Thread，不向飞书主动发送日报。
+- 严格schema、消息/主题/资源来源范围、输出上限、旧事实变化与未决冲突保留校验，提交前重新核对输入指纹。事实/观点/决定/行动/问题分别存储，责任人及截止未知用null。无实质日不生成Topic。
+- 撤回后保守隐藏并清除本群派生正文、标dirty/invalid，保留版本号/来源审计元数据并顺序重建；没有唯一来源匹配时不强行复用主题身份。退群/撤权清理派生库并终止Worker；有限保留期后主题明示来源原文不可用。迟到更早历史重新排入补算。
+- group_topics/topic_read/daily_digest只读当前群、按需获取；已有持久任务以group_search + group_message(topic:ID)兼容读取，不重建用户任务。实时@中止后台、照常进入FIFO；未@消息静默入库。
+
+### Validation
+
+- Node24.21.0、Codex0.155.0-alpha.16.3；check及142项全量测试通过，含新增27项知识测试。覆盖分类/无实质内容、DST、幂等、补算与限流、partial/failed/缺失覆盖、同主题版本与新主题、伪造来源/ID/JSON、冲突、撤回重算/迟到历史、退群、retention、超量、重启、失败封闭、实时抢占与只读范围。
+- 在本机真实二进制上，原群首次/恢复共10项隔离探针通过；Knowledge独立模式10项恶意工具探针通过（假provider、未调用真实模型）。shell、文件、Owner线程/数据库、权限申请、跨群检索、GitHub调用不可用；技能权限为空。
+- 真实模型合成数据两日期验证通过：同一Topic、2个revision、来源回查保留；首日1条fact/decision/action/open question；用户群任务表0条。没有真实群内容、没有飞书连接或消息发送。该结果不冒充真实群验收。
+- 独立空凭据配置doctor登录/7模型、无模型smoke和只读knowledge:status通过。飞书未联网验证，Owner配置与群功能均关闭。
+- 在忽略的独立临时组合目录，以PR #5代码00ade11为基底叠加本Issue源码，check及175项组合测试通过，包含单聊/Work/审批和PR #7/#9/#11回归。未覆盖/部署PR #5源码。PR #5遥测23:27:34仍同PID、status ok、FD30、子进程1、loaded1、连接1；不以点状值宣称长期观察完成。
+
+### 359b024 真实历史隔离验收（2026-09-24）
+
+用户授权在不影响PR #5的隔离方式验证原授权测试群，且明确保持Draft。以359b024原源码运行独立Knowledge Worker及独立SQLite，生产群库仅read-only事务选取原测试群两日Raw与实际history_sync证明；未启动第二条飞书长连接，未连接Shared App Server、Owner Gateway或用户持久群任务。未替换生产候选、配置、遥测或launchd。
+
+- 最终选取2026-03-15（8条）及03-16（13条），实际同步状态complete、initial_complete=1，last_reconciled_at覆盖两个日末。输出2份正式Digest、3个Topic；其中2个既有Topic沿用相同ID更新为v2，另1个为第二日新主题。13个唯一source_message_ids全部匹配快照原文，用户群任务0条。原文及派生内容仅保存在独立worktree忽略目录，不上传GitHub。
+- 如实保留失败：最初02-27/28日期组首日worker_failed，未写正式产物；随后03-15首次knowledge_digest_lineage校验拒绝，按持久退避规则第二次成功。未修改359b024源码、未关闭校验、未手工修补模型JSON。成功不能掩盖首次失败，模型一次生成可靠性仍是风险。
+- check通过；最终核对PR #5候选47个部署文件哈希均未变化；Shared PID67006维持，23:54:41采样status ok、FD28、pipe3、子进程1、loaded1、RSS226672KiB、连接1。仅点状健康证据，不替代PR #5独立8小时观察。本次模型进程与生产服务隔离，但共享主机CPU/内存负载。
+- 本地人工核对页：data/knowledge-acceptance-359b024-march/人工核对.html，包含完整Daily Digest、Topic当前状态及逐日版本、可点击source_message_ids与两日21条原始消息；账号标识在展示中隐藏。snapshot.json/results.json/verification.json和执行日志为本机证据；最初失败保留在data/knowledge-acceptance-359b024。快照不接收后续撤回，正式使用前应重新核验来源有效性。
+- 待人工核对至少一项fact、文档归档行动项、两Topic更新及来源；特别核对机器人自述与实际完成的区别。未实测在线群@读取Topic、来源回复、实时@抢占或普通消息并行。此次仅完成真实历史生成与程序化来源核对，不能称Issue #12全部真实验收PASS。PR #14保持Draft，不Merge、不转Ready；生产knowledge仍关闭。
+
+### Remaining / 交接
+
+已实现、已本机测试、已真实模型合成验证；尚未部署、尚未真实群验收，未Merge。核心实现提交c550954，已推送并创建[Draft PR #14](https://github.com/dccaoxy/codex-feishu-bot/pull/14)，Issue #12已回写阶段交付报告。后续修正以该PR最新head为准。本Issue要求“自动测试 + 真实群验收完成后 Ready”，因此保持Draft，不提前触发最终审核。后续须安排独立或PR #5观察结束后的授权测试环境，再核对真实两日期知识、人工内容/来源、群内Topic查询与实时@并行。当前生产仍运行原组合候选，knowledge未启用；不自行重启或替换它。
+
+已知限制：模型语义仍需人工核验；大量输入/超过50主题/单主题过大将停止该群补算，需要明确诊断处置；不做分块归并或向量检索。撤回采用整群派生重建以避免间接污染，成本较高，重建期间知识不可读但原始消息及正常群请求保留。所有运行日志/配置/数据库仅本机忽略目录，不提交凭据、群ID或消息正文。
+
+## 已合并基线：Issue #10 Group Request Queue
+
 
 Task Source：[Issue #10](https://github.com/dccaoxy/codex-feishu-bot/issues/10)，用户要求读取AGENTS并执行。核实PR #7、#9均已合并，从最新main `51db514`创建独立分支 `codex/issue-10-group-queue`；PR #5仍open、未合并，head `53c8575`。用户已明确允许完成自动测试后更新原单群候选、仅重启机器人，不重启Desktop、不Merge。
 

@@ -282,3 +282,25 @@ test('card update failure cannot replay a locally approved permission request',a
     await assert.rejects(bot.action('chat',{token,decision:'accept'}),/失效/);assert.equal(rpc.responses.length,1);
   }finally{await bot.close();}
 });
+
+
+test('combined recovery restores owner gateway acceptance only for bot-owned pending input',async t=>{
+  const {config,store,rpc,controller}=setup(t);
+  await controller.attach('external-chat','external');
+  store.enqueue('external-pending','external-chat',{});
+  store.enqueue('private-pending','private-chat',{});
+  const accepted=[],scheduled=[];
+  const bot=new Bot(config,store,rpc,{text:async()=>{}},()=>{});
+  bot.ownerGroups={accept:(chat,id)=>accepted.push([chat,id])};
+  bot.schedule=chat=>scheduled.push(chat);
+  rpc.calls=[];
+  try {
+    await bot.recover();
+    assert.deepEqual(accepted,[['private-chat','private-pending']]);
+    assert.deepEqual(scheduled,['private-chat']);
+    assert.deepEqual(store.pending().map(r=>r.id),['private-pending']);
+    assert.equal(store.binding('external-chat').thread,'external');
+    assert.equal(store.binding('external-chat').status,'unknown');
+    assert.equal(rpc.calls.length,0);
+  } finally { bot.ownerGroups=null; await bot.close(); }
+});

@@ -25,7 +25,7 @@ const calls=[];const request=b.request.bind(b);b.request=(method,params,...rest)
 a.on('request',m=>a.reject(m.id,'Test does not authorize tools'));
 b.on('request',m=>b.reject(m.id,'Test does not authorize tools'));
 async function waitIdle(id, turnId) {
-  for(let i=0;i<120;i++) {const r=await controller.turns(id);const t=turnId?r.data.find(t=>t.id===turnId):r.data[0];if(t && t.status!=='inProgress')return;await delay(500);}
+  for(let i=0;i<120;i++) {const r=await controller.turns(id);const t=turnId?r.data.find(t=>t.id===turnId):r.data[0];if(t && t.status!=='inProgress' && (await controller.inspect(id)).status==='idle')return;await delay(500);}
   throw new Error('Test turn did not become idle');
 }
 try {
@@ -41,6 +41,9 @@ try {
   await waitIdle(thread.id,first.turn.id);
   await controller.attach('test-chat',thread.id);
   assert.equal(store.chat('test-chat').thread,thread.id);
+  // Resume and history persistence may briefly disagree with live turn state.
+  // This case exercises idle start, so wait for the same live state used by send.
+  await waitIdle(thread.id,first.turn.id);
   const sent=await controller.send('test-chat',[{type:'text',text:'请输出从 1 到 1000 的数字，每个数字一行。不要使用工具。'}]);
   assert.equal(sent.kind,'start');
   const active=await controller.status('test-chat');assert.equal(active.status,'active');

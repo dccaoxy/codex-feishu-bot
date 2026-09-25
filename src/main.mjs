@@ -1,3 +1,4 @@
+import {OwnerGroupGateway} from './owner-group-gateway.mjs';
 import { GroupAssistant } from './group-assistant.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -32,6 +33,7 @@ async function main() {
       console.log(config.feishu.appId && config.feishu.appSecret ? '✓ 飞书凭证已填写（未联网验证）' : '待填写：config.local.json 的 feishu.appId / appSecret');
       console.log(`群助手：${config.groups.enabled ? '启用' : '关闭'}；授权群数量：${config.groups.allowedChatIds.length}；启用前运行 npm run group:check 验证受限工具。`);
       console.log(`Owner Gateway：${config.ownerGateway.enabled ? '启用' : '关闭'}；授权数据源：${config.ownerGateway.resources.length}；私人任务读取：${config.ownerGateway.privateThreads ? '启用' : '关闭'}。`);
+      console.log(`群知识：${config.groups.knowledge.enabled?'启用':'关闭'}；时区 ${config.groups.knowledge.timezone}，每日 ${config.groups.knowledge.dailyAt}；启用前运行 npm run knowledge:check。`);
       console.log('诊断不会发起模型任务，也不会给飞书发送消息。');
       if (!account.account) process.exitCode = 1;
     } finally { await rpc.close(); }
@@ -81,13 +83,14 @@ async function main() {
     console.log('Codex 已连接。');
     if (!bot.owner) console.log(`首次配对：私聊机器人发送任意文字，它会返回配对码。把码告诉本机 Codex 助手确认。\n也可在 15 分钟内私聊发送 /pair ${bot.pairCode} 直接配对。`);
     else console.log('已加载单聊绑定账号；群聊使用独立授权策略。');
-    await bot.recover();
     bot.ownerTimer = setInterval(() => bot.refreshOwner(),1000);
     if (config.groups.enabled) {
       const info = await feishu.call(() => feishu.client.request({method:'GET',url:'/open-apis/bot/v3/info'}));
       if (!info.bot?.open_id) throw new Error('无法确认机器人身份，群聊未启用');
       groups = new GroupAssistant(config,feishu,() => bot.owner,info.bot.open_id,{rpc});
+      bot.setOwnerGroups(new OwnerGroupGateway(config,store,groups,feishu,()=>config.feishu.ownerOpenId||store.get('owner')||''));
     }
+    await bot.recover();
     await feishu.start(data => {
       if ((data.event || data).message?.chat_type === 'group') return groups?.onMessage(data);
       return bot.onMessage(data);
