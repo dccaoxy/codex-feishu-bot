@@ -17,7 +17,9 @@
     "service:restart": "node scripts/service.mjs restart",
     "service:uninstall": "node scripts/service.mjs uninstall",
     "group:check": "node scripts/group-model-check.mjs",
-    "group:status": "node scripts/group-status.mjs"
+    "group:status": "node scripts/group-status.mjs",
+    "knowledge:check": "node scripts/group-model-check.mjs --knowledge",
+    "knowledge:status": "node scripts/knowledge-status.mjs"
   },
   "dependencies": {
     "@larksuiteoapi/node-sdk": "1.74.0",

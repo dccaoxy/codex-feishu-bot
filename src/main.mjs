@@ -32,6 +32,7 @@ async function main() {
       console.log(config.feishu.appId && config.feishu.appSecret ? '✓ 飞书凭证已填写（未联网验证）' : '待填写：config.local.json 的 feishu.appId / appSecret');
       console.log(`群助手：${config.groups.enabled ? '启用' : '关闭'}；授权群数量：${config.groups.allowedChatIds.length}；启用前运行 npm run group:check 验证受限工具。`);
       console.log(`Owner Gateway：${config.ownerGateway.enabled ? '启用' : '关闭'}；授权数据源：${config.ownerGateway.resources.length}；私人任务读取：${config.ownerGateway.privateThreads ? '启用' : '关闭'}。`);
+      console.log(`群知识：${config.groups.knowledge.enabled?'启用':'关闭'}；时区 ${config.groups.knowledge.timezone}，每日 ${config.groups.knowledge.dailyAt}；启用前运行 npm run knowledge:check。`);
       console.log('诊断不会发起模型任务，也不会给飞书发送消息。');
       if (!account.account) process.exitCode = 1;
     } finally { await rpc.close(); }
