@@ -246,3 +246,30 @@ test('changes output budget and retention never skip an undelivered visible mess
  assert.equal(ids.length,31);assert.equal(new Set(ids).size,31);
  f.groupStore.retentionDays=0;const r=(await f.gateway.execute('owner_group_changes',{group:g.reference,after:0,limit:1},c)).result;assert.deepEqual(r.messages,[]);assert.equal(r.hasMore,false);
 });
+
+for(const prefix of ['none','cancelled','queued'])test('oversized resource metadata remains reachable through returned cursors after '+prefix,async t=>{
+ const f=setup(t),url='https://example.feishu.cn/docx/validToken?query='+'x'.repeat(30000);
+ if(prefix!=='none'){f.add('a','prefix','pending or hidden');f.groupStore.db.prepare('INSERT INTO group_requests(chat,id,event,state) VALUES(?,?,?,?)').run('a','prefix','{}',prefix);}
+ f.add('a','huge',url);f.add('a','after-huge','ordinary');
+ const c=f.context('读取机器人们群'),[g]=await directory(f,c);const read=after=>f.gateway.execute('owner_group_changes',{group:g.reference,after,limit:1},c).then(r=>r.result);
+ let r=await read(0),cursor=r.cursor;
+ if(prefix==='queued'){r=await read(cursor);assert.equal(r.cursor,cursor);assert.deepEqual(r.messages,[]);f.groupStore.db.prepare("UPDATE group_requests SET state='done' WHERE id='prefix'").run();}
+ const snapshot=()=>['messages','raw_messages','group_requests','group_threads'].map(t=>JSON.stringify(f.groupStore.db.prepare('SELECT * FROM '+t).all()));const before=snapshot();let seen=[];
+ for(let i=0;i<6;i++){r=await read(cursor);assert.ok(Buffer.byteLength(JSON.stringify(r))<=24000);seen.push(...r.messages);if(!r.hasMore)break;assert.ok(r.cursor>cursor,'must advance using only returned cursor');cursor=r.cursor;}
+ assert.ok(seen.some(m=>m.messageId==='after-huge'));const huge=seen.find(m=>m.messageId==='huge');assert.ok(huge);assert.equal(huge.truncated,true);assert.ok(huge.limitations.some(x=>/分页/.test(x)));
+ assert.equal(huge.resources[0].url,null);assert.equal(huge.resources[0].urlOmitted,true);
+ let text='',offset=0;do{const page=(await f.gateway.execute('owner_group_message',{group:g.reference,messageId:'huge',offset},c)).result.message;text+=page.text;offset=page.nextOffset;}while(offset!==null);assert.equal(text,url);assert.deepEqual(snapshot(),before);assert.equal(f.sent.length,0);
+});
+
+test('oversized individual and cumulative metadata yields bounded previews without losing visible records',async t=>{
+ const f=setup(t);for(let i=0;i<8;i++){
+  f.add('a','metadata'+i,'资料'.repeat(2000));
+  const resources=Array.from({length:8},()=>({url:'https://example.feishu.cn/docx/x?'+ 'y'.repeat(1900),id:'z'.repeat(30000),type:'docx',extra:'e'.repeat(30000)}));
+  const metadata={resources,attachments:Array.from({length:20},()=>({type:'file',key:'k'.repeat(30000),name:'名'.repeat(30000)})),limitations:Array(20).fill('限'.repeat(30000))};
+  f.groupStore.db.prepare('UPDATE messages SET metadata=?,parent=? WHERE id=?').run(JSON.stringify(metadata),'p'.repeat(30000),'metadata'+i);
+ }
+ const c=f.context('读取机器人们群'),[g]=await directory(f,c);let cursor=0,seen=[];
+ for(let i=0;i<20;i++){const response=await f.gateway.execute('owner_group_changes',{group:g.reference,after:cursor,limit:50},c);assert.ok(Buffer.byteLength(JSON.stringify(response))<=24000);const r=response.result;seen.push(...r.messages.map(m=>m.messageId));if(!r.hasMore)break;assert.ok(r.cursor>cursor);cursor=r.cursor;}
+ assert.equal(new Set(seen).size,9);assert.equal(seen.length,9);
+ const page=(await f.gateway.execute('owner_group_message',{group:g.reference,messageId:'metadata0'},c)).result.message;assert.ok(Buffer.byteLength(JSON.stringify(page))<=24000);assert.ok(page.limitations.some(x=>/分页/.test(x)));
+});
