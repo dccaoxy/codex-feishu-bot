@@ -50,17 +50,24 @@ export class KnowledgeStore {
     const start=dayStart(date,c.timezone),end=dayStart(nextDate(date),c.timezone),h=this.raw.sync(chat);
     if(!h.initial_complete||h.state!=='complete'||!Number.isFinite(Date.parse(h.last_reconciled_at))||Date.parse(h.last_reconciled_at)<end)throw Error('knowledge_history_incomplete');
     if(this.raw.lowerBound()>start)throw Error('knowledge_retention_incomplete');
-    const size=this.db.prepare('SELECT COUNT(*) n,COALESCE(SUM(length(text)+length(metadata)+length(id)+length(sender)),0) chars FROM messages WHERE chat=? AND time>=? AND time<?').get(chat,start,end);
+    // Hidden terminal requests remain in Raw, but will never become executable.
+    // Exclude them before size limits and model input; queued requests still wait.
+    const excludedMessageCounts={queue_full:0,cancelled:0};
+    for(const r of this.db.prepare("SELECT q.state,COUNT(*) n FROM messages m JOIN group_requests q ON q.chat=m.chat AND q.id=m.id WHERE m.chat=? AND m.time>=? AND m.time<? AND q.state IN ('queue_full','cancelled') GROUP BY q.state").all(chat,start,end))excludedMessageCounts[r.state]=r.n;
+    const excludedCount=Object.values(excludedMessageCounts).reduce((a,b)=>a+b,0);
+    const eligible="NOT EXISTS(SELECT 1 FROM group_requests q WHERE q.chat=messages.chat AND q.id=messages.id AND q.state IN ('queue_full','cancelled'))";
+    const size=this.db.prepare('SELECT COUNT(*) n,COALESCE(SUM(length(text)+length(metadata)+length(id)+length(sender)),0) chars FROM messages WHERE chat=? AND time>=? AND time<? AND '+eligible).get(chat,start,end);
     if(size.n>c.maxMessages||size.chars>c.maxInputChars)throw Error('knowledge_input_limit');
-    const rows=this.db.prepare('SELECT id,time,sender,kind,text,metadata FROM messages WHERE chat=? AND time>=? AND time<? ORDER BY time,id LIMIT ?').all(chat,start,end,c.maxMessages+1);
+    const rows=this.db.prepare('SELECT id,time,sender,kind,text,metadata FROM messages WHERE chat=? AND time>=? AND time<? AND '+eligible+' ORDER BY time,id LIMIT ?').all(chat,start,end,c.maxMessages+1);
     if(rows.length>c.maxMessages)throw Error('knowledge_input_limit');
     if(rows.some(m=>!this.raw.visible(chat,m.id)))throw Error('knowledge_pending_source');
     const messages=rows.map(r=>({id:r.id,time:new Date(r.time).toISOString(),sender:r.sender,type:r.kind,text:r.text,resources:JSON.parse(r.metadata).resources||[],limitations:JSON.parse(r.metadata).limitations}));
     const topics=this.db.prepare("SELECT * FROM knowledge_topics WHERE chat=? AND status='valid' ORDER BY topic_id LIMIT 51").all(chat).map(r=>({...readKnowledgePayload(r.payload),topic_id:r.topic_id,version:r.version}));
     if(topics.length>50)throw Error('knowledge_topic_limit');
-    const input={date,timezone:c.timezone,messages,topics};
+    const selection={status:excludedCount?'filtered':'complete',messageCount:messages.length,totalMessageCount:messages.length+excludedCount,excludedMessageCounts};
+    const input={date,timezone:c.timezone,messages,topics,coverage:selection};
     if(JSON.stringify(input).length>c.maxInputChars)throw Error('knowledge_input_limit');
-    return {input,fingerprint:hash(input),coverage:{status:'complete',start:new Date(start).toISOString(),end:new Date(end).toISOString(),last_reconciled_at:h.last_reconciled_at,messageCount:messages.length,scope:'API-visible raw messages; attachments/reference content not fetched'}};
+    return {input,fingerprint:hash(input),coverage:{...selection,start:new Date(start).toISOString(),end:new Date(end).toISOString(),last_reconciled_at:h.last_reconciled_at,scope:'Eligible API-visible raw messages only; hidden terminal requests excluded; attachments/reference content not fetched'}};
   }
   commit(chat,date,c,snapshot,text,now){
     const out=validateKnowledge(text,snapshot.input);
@@ -91,6 +98,6 @@ export class KnowledgeStore {
   }
   sourceStatus(chat,ids){const missing=ids.filter(id=>{const row=this.raw.get(chat,id);return !row||row.time<this.raw.lowerBound();});return {status:missing.length?'partial_unavailable':'available',unavailable_source_message_ids:missing,note:'模型派生资料，不是原始事实；消息来源可用不表示附件内容已读取。'};}
   list(chat,keyword='',offset=0){if(typeof keyword!=='string'||keyword.length>200||!Number.isSafeInteger(offset)||offset<0)throw Error('Invalid knowledge query');return this.db.prepare("SELECT topic_id,title,version,updated_at FROM knowledge_topics WHERE chat=? AND status='valid' AND instr(lower(title),lower(?))>0 ORDER BY updated_at DESC,topic_id LIMIT 20 OFFSET ?").all(chat,keyword,offset);}
-  read(chat,id){if(typeof id!=='string'||id.length>100)throw Error('Invalid topic');const r=this.db.prepare("SELECT * FROM knowledge_topics WHERE chat=? AND topic_id=? AND status='valid'").get(chat,id);if(!r)return null;const state=readKnowledgePayload(r.payload);const revisions=this.db.prepare('SELECT version,date,digest_revision,status,source_ids,generated_at FROM topic_revisions WHERE chat=? AND topic_id=? ORDER BY version DESC LIMIT 5').all(chat,id).map(r=>({...r,source_ids:JSON.parse(r.source_ids).slice(0,10),source_count:JSON.parse(r.source_ids).length}));return {state,revisions,provenance:this.sourceStatus(chat,state.source_message_ids)};}
+  read(chat,id){if(typeof id!=='string'||id.length>100)throw Error('Invalid topic');const r=this.db.prepare("SELECT * FROM knowledge_topics WHERE chat=? AND topic_id=? AND status='valid'").get(chat,id);if(!r)return null;const state=readKnowledgePayload(r.payload);const revisions=this.db.prepare('SELECT version,date,digest_revision,status,source_ids,generated_at FROM topic_revisions WHERE chat=? AND topic_id=? ORDER BY version DESC LIMIT 5').all(chat,id).map(r=>({...r,source_ids:JSON.parse(r.source_ids).slice(0,10),source_count:JSON.parse(r.source_ids).length,coverage:JSON.parse(this.db.prepare('SELECT coverage FROM daily_digests WHERE chat=? AND date=? AND revision=?').get(chat,r.date,r.digest_revision)?.coverage||'null')}));return {state,revisions,provenance:this.sourceStatus(chat,state.source_message_ids)};}
   daily(chat,date){if(!validDate(date))throw Error('Invalid date');const r=this.db.prepare("SELECT * FROM daily_digests WHERE chat=? AND date=? AND status IN ('complete','no_material_content')").get(chat,date);if(!r)return null;const digest=readKnowledgePayload(r.payload);return {...r,payload:undefined,digest,coverage:JSON.parse(r.coverage),provenance:this.sourceStatus(chat,digest.source_message_ids)};}
 }

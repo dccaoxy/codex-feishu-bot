@@ -162,3 +162,47 @@ test('assistant waits for history reconciliation before knowledge tick, includin
  try{GroupAssistant.prototype.start.call(fake);await new Promise(r=>setImmediate(r));assert.deepEqual(calls,['sync:A','sync:B']);release();await new Promise(r=>setImmediate(r));assert.deepEqual(calls,['sync:A','sync:B','complete:A','knowledge']);}
  finally{clearInterval(fake.queueTimer);clearInterval(fake.historyTimer);release();}
 });
+
+for(const terminal of ['queue_full','cancelled'])test(`terminal ${terminal} does not block catch-up or expose hidden raw after restart`,async t=>{
+ const x=fixture(t);const a=event('a','VISIBLE_A'),b=event('b','HIDDEN_TERMINAL');
+ x.raw.ingest(a,false);assert.equal(x.raw.enqueue(a,1),'queued');
+ if(terminal==='queue_full'){x.raw.ingest(b,false);assert.equal(x.raw.enqueue(b,1),'queue_full');x.raw.mark('oc_A','a','done');}
+ else{x.raw.cancelQueued('oc_A');x.raw.ingest(event('visible','VISIBLE_A'),false);}
+ x.raw.ingest(event('tomorrow','NEXT_DAY','2026-09-21'),false);
+ const rawBefore=x.raw.db.prepare('SELECT * FROM raw_messages ORDER BY seq').all();
+ assert.equal(x.raw.pending().length,0);await x.scheduler.tick();
+ const first=x.raw.knowledge.daily('oc_A','2026-09-20');assert(first,'terminal request blocked day');
+ assert.equal(first.coverage.status,'filtered');assert.equal(first.coverage.excludedMessageCounts[terminal],1);
+ const topic=x.raw.knowledge.read('oc_A',x.raw.knowledge.list('oc_A')[0].topic_id);assert.deepEqual(topic.revisions[0].coverage,first.coverage);
+ assert(!JSON.stringify(first).includes('HIDDEN_TERMINAL'));assert(!JSON.stringify(topic).includes('HIDDEN_TERMINAL'));
+ assert.equal(x.calls[0].messages.length,1);assert(!JSON.stringify(x.calls).includes(terminal==='queue_full'?'HIDDEN_TERMINAL':'"id":"a"'));
+ assert.equal(x.raw.visible('oc_A',terminal==='queue_full'?'b':'a'),false);
+ assert.deepEqual(x.raw.db.prepare('SELECT * FROM raw_messages ORDER BY seq').all(),rawBefore);
+ await x.scheduler.close();const restarted=new GroupMessageStore(x.dir);const scheduler=new KnowledgeScheduler(x.c,restarted,{allowed:()=>true,busy:()=>false,clock:()=>x.now()+3600000,worker:{run:async input=>JSON.stringify(output(input.messages.map(m=>m.id))),close:async()=>{}}});
+ try{await scheduler.tick();assert(restarted.knowledge.daily('oc_A','2026-09-21'));assert.equal(restarted.db.prepare('SELECT COUNT(*) n FROM digest_revisions WHERE date=?').get('2026-09-20').n,1);assert.equal(restarted.visible('oc_A',terminal==='queue_full'?'b':'a'),false);assert.deepEqual(restarted.db.prepare('SELECT * FROM raw_messages ORDER BY seq').all(),rawBefore);}finally{await scheduler.close();restarted.close();}
+});
+
+test('genuinely queued source waits without publishing and proceeds after normal completion',async t=>{
+ const x=fixture(t),e=event('waiting','PENDING_BODY');x.raw.ingest(e,false);x.raw.enqueue(e,1);
+ for(let i=0;i<6;i++){await x.scheduler.tick();x.advance(3600000);}
+ assert.equal(x.calls.length,0);assert.equal(x.raw.knowledge.daily('oc_A','2026-09-20'),null);
+ assert.equal(x.raw.db.prepare('SELECT error FROM knowledge_jobs').get().error,'knowledge_pending_source');
+ x.raw.mark('oc_A','waiting','done');await x.scheduler.tick();assert.equal(x.calls.length,1);assert.equal(x.raw.knowledge.daily('oc_A','2026-09-20').coverage.status,'complete');
+});
+test('all hidden terminal sources advance with explicit zero-input coverage, not fabricated completeness',async t=>{
+ const x=fixture(t),e=event('hidden','NEVER_SEND_TO_WORKER');x.raw.ingest(e,false);x.raw.enqueue(e,1);x.raw.cancelQueued('oc_A');
+ x.raw.ingest(event('next','VISIBLE_NEXT','2026-09-21'),false);await x.scheduler.tick();
+ const d=x.raw.knowledge.daily('oc_A','2026-09-20');assert.equal(d.status,'no_material_content');assert.equal(d.coverage.status,'filtered');assert.equal(d.coverage.messageCount,0);assert.equal(d.coverage.totalMessageCount,1);assert(x.raw.knowledge.daily('oc_A','2026-09-21'));assert.equal(x.raw.read('oc_A','hidden'),null);assert(x.raw.db.prepare('SELECT content FROM raw_messages WHERE id=?').get('hidden').content.includes('NEVER_SEND'));
+ assert(!JSON.stringify(x.calls).includes('NEVER_SEND'));
+});
+test('active recall cancels queued source, restart catch-up excludes both and keeps cancelled raw',async t=>{
+ const x=fixture(t),controller=new AbortController();
+ const g=new GroupAssistant({...x.c,storageDir:x.dir},{},()=> 'owner','bot',{store:x.raw,model:{close:async()=>{},invalidate:()=>{}},knowledgeWorker:{close:async()=>{}}});
+ const active=event('active','RECALLED_BODY'),queued=event('queued','CANCELLED_BODY');
+ for(const e of [active,queued]){x.raw.ingest(e,false);x.raw.enqueue(e,10);}
+ x.raw.mark('oc_A','active','running');x.raw.setThread('oc_A',{state:'running',thread_id:'fake'});g.jobs.set('oc_A',{controller});
+ g.onRecall({chat_id:'oc_A',message_id:'active'});assert(controller.signal.aborted);assert.equal(x.raw.requestState('oc_A','queued'),'cancelled');assert.equal(x.raw.get('oc_A','active'),undefined);
+ g.jobs.clear();clearInterval(g.timer);await g.knowledge.close();await x.scheduler.close();
+ const raw=new GroupMessageStore(x.dir),calls=[];const scheduler=new KnowledgeScheduler(x.c,raw,{allowed:()=>true,busy:()=>false,clock:x.now,worker:{run:async input=>{calls.push(input);return JSON.stringify(output(input.messages.map(m=>m.id)));},close:async()=>{}}});
+ try{raw.ingest(event('next','SAFE_NEXT','2026-09-21'),false);await scheduler.tick();assert.equal(raw.knowledge.daily('oc_A','2026-09-20').coverage.excludedMessageCounts.cancelled,1);assert(raw.knowledge.daily('oc_A','2026-09-21'));assert(!JSON.stringify(calls).includes('RECALLED_BODY'));assert(!JSON.stringify(calls).includes('CANCELLED_BODY'));assert.equal(raw.read('oc_A','queued'),null);assert(raw.db.prepare('SELECT content FROM raw_messages WHERE id=?').get('queued'));}finally{await scheduler.close();raw.close();}
+});
