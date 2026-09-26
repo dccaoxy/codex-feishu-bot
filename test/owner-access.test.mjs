@@ -120,3 +120,31 @@ test('concurrent command guards stay isolated and cleanup can close a cancelled 
  const owner=f.withGuard(bot.ownerEffectGuard('group',null,'m1'),()=>f.text('group','synthetic')).catch(()=>{});const privateWork=f.withGuard(()=>{},()=>f.text('private','safe'));
  config.ownerAccess.enabled=false;release();await Promise.all([owner,privateWork]);assert.deepEqual(sent,['private']);await f.effects.run(()=>{throw Error('cancelled');},()=>f.finish('card',1,'已停止'));assert.deepEqual(closed,['card']);
 });
+import {Documents} from '../src/documents.mjs';
+function toolRun(bot){const r={chat:'group',thread:'t',turn:'turn',sourceIds:new Set(['m1']),flush:Promise.resolve(),sequence:0};bot.runs.set('t',r);bot.available=true;return r;}
+function toolCall(bot,tool,args={}){return bot.serverRequest({id:41,method:'item/tool/call',params:{threadId:'t',turnId:'turn',tool,arguments:args}});}
+for(const tool of ['feishu_thread_read','feishu_threads_search','owner_groups','aegpc_repository_approval'])for(const reason of ['recall','revoke','leave'])test(`${tool} await result discarded after ${reason}`,async t=>{
+ const {bot,config,event,groups}=setup(t);bot.onMessage(event);toolRun(bot);let opened,release;const opening=new Promise(r=>{opened=r;});const read=()=>{opened();return new Promise(r=>{release=r;});};bot.history.read=read;bot.history.search=read;bot.ownerGroups={execute:read};bot.repositoryApproval.execute=read;bot.rpc.request=async()=>{};const responses=[];bot.rpc.respond=(...a)=>responses.push(a);
+ const pending=toolCall(bot,tool,{threadId:'private'});await opening;if(reason==='recall')await bot.cancelOwnerGroup('group','m1');else if(reason==='revoke')config.ownerAccess.enabled=false;else groups.closed=true;release({text:'synthetic-private-history'});await pending;assert.deepEqual(responses,[]);
+});
+for(const reason of ['recall','revoke','leave'])test(`document patch queued before ${reason} never reaches SDK`,async t=>{
+ const {bot,config,event,groups}=setup(t);bot.onMessage(event);toolRun(bot);const f=new Feishu(config,()=>{});bot.feishu=f;bot.documents=new Documents(f,()=>bot.owner);let release;f.queue=new Promise(r=>{release=r;});const calls=[],responses=[];f.client={docx:{documentBlock:{patch:async()=>{calls.push('patch');return {data:{document_revision_id:2}};}}}};bot.rpc.request=async()=>{};bot.rpc.respond=(...a)=>responses.push(a);
+ const pending=toolCall(bot,'feishu_doc_update_text',{documentId:'doc1',blockId:'block1',text:'synthetic',revisionId:1});await new Promise(r=>setImmediate(r));if(reason==='recall')await bot.cancelOwnerGroup('group','m1');else if(reason==='revoke')config.ownerAccess.enabled=false;else groups.closed=true;release();await pending;assert.deepEqual(calls,[]);assert.deepEqual(responses,[]);
+});
+for(const stopAfter of ['convert','create','insert','permission',null])test(`document creation stage fencing after ${stopAfter}`,async t=>{
+ const {bot,config,event}=setup(t);bot.onMessage(event);toolRun(bot);const f=new Feishu(config,()=>{});bot.feishu=f;bot.documents=new Documents(f,()=>bot.owner);const calls=[],responses=[];
+ const stage=(name,result)=>async()=>{calls.push(name);if(name===stopAfter)config.ownerAccess.enabled=false;return {data:result};};
+ f.client={docx:{document:{convert:stage('convert',{blocks:[{block_id:'b',block_type:2}],first_level_block_ids:['b']}),create:stage('create',{document:{document_id:'doc1'}})},documentBlockDescendant:{create:stage('insert',{})}},drive:{permissionMember:{create:stage('permission',{})}}};bot.rpc.respond=(...a)=>responses.push(a);
+ await toolCall(bot,'feishu_doc_create',{title:'synthetic',content:'synthetic'});const all=['convert','create','insert','permission'];assert.deepEqual(calls,stopAfter?all.slice(0,all.indexOf(stopAfter)+1):all);assert.equal(responses.length,stopAfter?0:1);if(!stopAfter)assert.equal(responses[0][1].success,true);
+});
+test('cancelled owner tool does not suppress concurrent private tool response',async t=>{
+ const {bot,config,event}=setup(t);bot.onMessage(event);toolRun(bot);bot.runs.set('private-thread',{chat:'private',thread:'private-thread',turn:'private-turn'});let release,opened;const opening=new Promise(r=>{opened=r;});bot.history.read=()=>{opened();return new Promise(r=>{release=r;});};bot.history.search=async()=>({text:'private-valid'});const responses=[];bot.rpc.respond=(...a)=>responses.push(a);
+ const pending=toolCall(bot,'feishu_thread_read',{threadId:'private'});await opening;config.ownerAccess.enabled=false;await bot.serverRequest({id:42,method:'item/tool/call',params:{threadId:'private-thread',turnId:'private-turn',tool:'feishu_threads_search',arguments:{}}});release({text:'cancelled'});await pending;assert.deepEqual(responses.map(x=>x[0]),[42]);
+});
+for(const tool of ['feishu_thread_read','feishu_threads_search','owner_groups','aegpc_repository_approval'])test(`${tool} valid run responds exactly once unchanged`,async t=>{
+ const {bot,event}=setup(t);bot.onMessage(event);toolRun(bot);let calls=0;const expected={text:'synthetic-authorized'};const read=async()=>{calls++;return expected;};bot.history.read=read;bot.history.search=read;bot.ownerGroups={execute:read};bot.repositoryApproval.execute=read;const responses=[];bot.rpc.respond=(...a)=>responses.push(a);await toolCall(bot,tool,{});assert.equal(calls,1);assert.equal(responses.length,1);assert.deepEqual(JSON.parse(responses[0][1].contentItems[0].text),expected);
+});
+test('Documents explicit guard fences queued SDK without command or tool async context',async t=>{
+ const {bot,config,event}=setup(t);bot.onMessage(event);const run=toolRun(bot),f=new Feishu(config,()=>{}),docs=new Documents(f,()=>bot.owner);let release;f.queue=new Promise(r=>{release=r;});let writes=0;f.client={docx:{documentBlock:{patch:async()=>{writes++;return {};}}}};
+ const pending=docs.execute('feishu_doc_update_text',{documentId:'doc1',blockId:'block1',text:'synthetic',revisionId:1},bot.ownerEffectGuard('group',run));const rejected=assert.rejects(pending);config.ownerAccess.enabled=false;release();await rejected;assert.equal(writes,0);
+});

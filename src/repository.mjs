@@ -13,7 +13,8 @@ export const REPOSITORY_TOOLS = [{
 
 export class RepositoryApproval {
   constructor(config, owner, fetcher=fetch){this.config=config;this.owner=owner;this.fetcher=fetcher;}
-  async execute(args, context={}){
+  async execute(args, context={}, guard=()=>{}){
+    guard();
     const filename=this.config.repositoryApproval?.credentialFile;
     if(!filename)throw Error('Repository 审批尚未配置');
     const info=fs.lstatSync(filename);
@@ -34,10 +35,11 @@ export class RepositoryApproval {
       if(['release','cancel-release'].includes(args.action)&&(!Number.isInteger(args.run_id)||args.run_id<1||!(/^[0-9a-f]{64}$/).test(args.plan_hash||'')))throw Error('必须提供发布清单 ID 和摘要');
       path+=`/${args.action}`;
     }
+    guard();
     const response=await this.fetcher(credential.base_url+path,{method:write?'POST':'GET',redirect:'error',signal:AbortSignal.timeout(30000),
       headers:{Authorization:'Bearer '+credential.token,'Content-Type':'application/json'},
       ...(write?{body:JSON.stringify({head_sha:args.head_sha,run_id:args.run_id,plan_hash:args.plan_hash,reason:args.reason,context:{source:'codex-feishu',thread_id:String(context.thread_id||'').slice(0,300)}})}:{})});
     if(!response.ok)throw Error(`Repository 审批请求失败（${response.status}）；请刷新状态，勿盲目重试写操作`);
-    return response.json();
+    const result=await response.json();guard();return result;
   }
 }

@@ -1,3 +1,11 @@
+# 当前交接：PR #16 工具生命周期返工 R6（2026-09-26）
+
+- Task Source：Human 转交 [b93e100 的 R6/P1](https://github.com/dccaoxy/codex-feishu-bot/pull/16#issuecomment-5846176831)。原 R1–R5 独立复现通过，但 288 项未覆盖持久 RPC 触发的工具在 await 期间失权；同一 PR 先转 Draft 返工。
+- Implementation：item/tool/call 从当前 run 捕获同一 Owner effect guard 和回合 ID，覆盖所有本地工具分支，在执行前和最终 rpc.respond 前检查；取消/撤权后丢弃结果与错误内容，不自动批准/拒绝 Shared 请求。工具阶段显式建立独立的 Feishu 异步守卫上下文，不假定继承 command。history/read/search、owner_group*、repository、文档和文件统一保护结果回传；原未知 Desktop 工具仍由其宿主处理。
+- 文档：Documents 的所有 Feishu.call 显式携带 guard，实际 transport 与每次读取重试前检查，API 返回后再次检查。convert/create/insert/协作者授权各阶段串联，取消错误不得被部分成功处理吞掉后继续授权；已有阶段不回滚。Repository 在读取本地凭据前、实际 fetch 前及解析返回结果后检查，不重试写入。
+- Validation：check、314/314 全量测试（0失败/跳过）、diff check、doctor 握手/登录/7模型与无模型 ephemeral smoke 通过。新增 history read/search、owner_groups、repository 四分支 × 撤回/撤权/离群的 await 结果丢弃；文档 patch 三种失权队列零写入；文档创建四个阶段失权和正常恰好一次；普通私聊并发不受影响；四种正常工具结果不变；无异步上下文时 Documents 显式守卫也阻止排队写入。真实 Bot/Store/Feishu.call、合成资料、模拟 SDK，无真实飞书出站。保留 R1–R5、PR #5 和群/Knowledge 自动回归；未重复未修改的真实 work/隔离探针。
+- 交付边界：修复提交推送同一 PR，Draft→Ready 请求新 head 复审，未宣称 PASS。未部署、未改真实配置/权限/群/数据库/Shared 服务/遥测、未 Merge。doctor 为无飞书凭据开发配置，不算线上连接验收；真实群及双端验收仍未执行。以下为历史交接，旧测试数不代表 R6 已覆盖。
+
 # 当前交接：PR #16 命令边界返工 R4–R5（2026-09-26）
 
 - Task Source：Human 转交 [3ec83ab 的 NEEDS CHANGES](https://github.com/dccaoxy/codex-feishu-bot/pull/16#issuecomment-5846082237)。上轮 R1–R3 独立复现已通过，但 268 项未覆盖命令历史出站和 /reference 来源丢失；先转 Draft，在同一 PR 返工。

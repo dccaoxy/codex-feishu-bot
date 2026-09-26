@@ -723,22 +723,30 @@ ${this.ownerGroups?OWNER_GROUP_INSTRUCTIONS:''}` };
     if (m.method === 'item/tool/call') {
       // Shared desktop tools must be answered by their owner, not raced with an error.
       if (run.external && this.rpc.shared && !['feishu_threads_search','feishu_thread_read','feishu_send_file','aegpc_repository_approval'].includes(p.tool) && !p.tool?.startsWith('feishu_doc_')) return;
-      let result, success = true;
-      try {
-        const a = p.arguments || {};
-        if (p.tool.startsWith('owner_group')) {
-          if(!this.ownerGroups||p.turnId!==run.turn)throw Error('群资料或操作不可用');
-          try { result=await this.ownerGroups.execute(p.tool,a,run.groupContext); }
-          catch { throw Error('群资料或操作不可用；请检查当前授权、参数，或明确选择唯一目标和发送要求。'); }
-        }
-        else if (p.tool === 'feishu_threads_search') result = await this.history.search(a.query, a.cursor);
-        else if (p.tool === 'feishu_thread_read') result = await this.history.read(a.threadId, a.cursor);
-        else if (p.tool.startsWith('feishu_doc_')) result = await this.documents.execute(p.tool,a);
-        else if (p.tool === 'aegpc_repository_approval') result = await this.repositoryApproval.execute(a, {thread_id: run.thread});
-        else if (p.tool === 'feishu_send_file') result = await this.sendFile(run.chat, a.path,this.ownerEffectGuard(run.chat,run));
-        else throw new Error('不支持的工具');
-      } catch (e) { success = false; result = { error: this.redact(e) }; }
-      this.rpc.respond(m.id, { success, contentItems: [{ type: 'inputText', text: JSON.stringify(result) }] }); return;
+      const check=this.ownerEffectGuard(run.chat,run), turn=run.turn;
+      const guard=()=>{check();if(this.store.get(`ownerChannel:${run.chat}`) && run.turn!==turn)throw Error('工具所属回合已失效');};
+      const execute=async()=>{
+        let result, success = true;
+        try {
+          guard();
+          const a = p.arguments || {};
+          if (p.tool.startsWith('owner_group')) {
+            if(!this.ownerGroups||p.turnId!==run.turn)throw Error('群资料或操作不可用');
+            try { result=await this.ownerGroups.execute(p.tool,a,run.groupContext); }
+            catch { throw Error('群资料或操作不可用；请检查当前授权、参数，或明确选择唯一目标和发送要求。'); }
+          }
+          else if (p.tool === 'feishu_threads_search') result = await this.history.search(a.query, a.cursor);
+          else if (p.tool === 'feishu_thread_read') result = await this.history.read(a.threadId, a.cursor);
+          else if (p.tool.startsWith('feishu_doc_')) result = await this.documents.execute(p.tool,a,guard);
+          else if (p.tool === 'aegpc_repository_approval') result = await this.repositoryApproval.execute(a, {thread_id: run.thread},guard);
+          else if (p.tool === 'feishu_send_file') result = await this.sendFile(run.chat, a.path,guard);
+          else throw new Error('不支持的工具');
+        } catch (e) { success = false; result = { error: this.redact(e) }; }
+        try{guard();}catch{return;}
+        this.rpc.respond(m.id, { success, contentItems: [{ type: 'inputText', text: JSON.stringify(result) }] });
+      };
+      try {return this.feishu.withGuard ? await this.feishu.withGuard(guard,execute) : await execute();}
+      catch {try{guard();}catch{return;}throw Error('工具执行失败');}
     }
     if (!['item/commandExecution/requestApproval','item/fileChange/requestApproval','item/tool/requestUserInput','item/permissions/requestApproval','mcpServer/elicitation/request'].includes(m.method)) {
       if (run.external && this.rpc.shared) {
