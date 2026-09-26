@@ -193,13 +193,13 @@ test('external read opt-in searches and reads without allowing external control'
   assert.equal(rpc.calls.find(c => c.method === 'turn/start').params.threadId, 't1');
   assert.ok(!rpc.calls.some(c => c.method === 'turn/start' && c.params.threadId === 'external'));
 
-  await bot.serverRequest({id:90,method:'item/tool/call',params:{threadId:'t1',tool:'feishu_threads_search',arguments:{query:'外部'}}});
+  await bot.serverRequest({id:90,method:'item/tool/call',params:{threadId:'t1',turnId:bot.runs.get('t1').turn,tool:'feishu_threads_search',arguments:{query:'外部'}}});
   assert.equal(rpc.responses.at(-1).result.success, true);
   assert.match(rpc.responses.at(-1).result.contentItems[0].text, /external/);
   const listed = JSON.parse(rpc.responses.at(-1).result.contentItems[0].text);
   assert.equal(listed.threads[0].updatedAtIso, '1970-01-01T00:00:00.000Z');
   assert.equal(listed.threads[1].updatedAtIso, null);
-  await bot.serverRequest({id:91,method:'item/tool/call',params:{threadId:'t1',tool:'feishu_thread_read',arguments:{threadId:'external'}}});
+  await bot.serverRequest({id:91,method:'item/tool/call',params:{threadId:'t1',turnId:bot.runs.get('t1').turn,tool:'feishu_thread_read',arguments:{threadId:'external'}}});
   assert.equal(rpc.responses.at(-1).result.success, true);
   assert.match(rpc.responses.at(-1).result.contentItems[0].text, /旧结论/);
 });
@@ -207,7 +207,7 @@ test('external read opt-in searches and reads without allowing external control'
 test('natural-language history tool returns scoped data to current turn', async t => {
   const {bot,rpc,store} = setup(t); store.addThread('old','先前方案');
   await bot.run('chat',[{type:'text',text:'参考先前方案'}]);
-  await bot.serverRequest({id:9,method:'item/tool/call',params:{threadId:'t1',tool:'feishu_threads_search',arguments:{query:'先前'}}});
+  await bot.serverRequest({id:9,method:'item/tool/call',params:{threadId:'t1',turnId:bot.runs.get('t1').turn,tool:'feishu_threads_search',arguments:{query:'先前'}}});
   assert.equal(rpc.responses.at(-1).result.success,true);
   assert.match(rpc.responses.at(-1).result.contentItems[0].text,/先前方案/);
 });

@@ -721,10 +721,12 @@ ${this.ownerGroups?OWNER_GROUP_INSTRUCTIONS:''}` };
     if ((!run || run.ending || (run.external && p.turnId && run.turn !== p.turnId)) && this.rpc.shared) return;
     if (!run || run.ending) { this.rpc.reject(m.id, '没有对应的飞书任务'); return; }
     if (m.method === 'item/tool/call') {
+      // Bind authority to the request's turn, never borrow a newer run's turn.
+      if(typeof p.turnId!=='string' || !p.turnId.trim() || p.turnId!==run.turn)return;
       // Shared desktop tools must be answered by their owner, not raced with an error.
       if (run.external && this.rpc.shared && !['feishu_threads_search','feishu_thread_read','feishu_send_file','aegpc_repository_approval'].includes(p.tool) && !p.tool?.startsWith('feishu_doc_')) return;
-      const check=this.ownerEffectGuard(run.chat,run), turn=run.turn;
-      const guard=()=>{check();if(this.store.get(`ownerChannel:${run.chat}`) && run.turn!==turn)throw Error('工具所属回合已失效');};
+      const check=this.ownerEffectGuard(run.chat,run), turn=run.turn, requestTurn=p.turnId;
+      const guard=()=>{check();if(requestTurn!==turn || run.turn!==requestTurn || this.runs.get(run.thread)!==run || run.ending)throw Error('工具所属回合已失效');};
       const execute=async()=>{
         let result, success = true;
         try {

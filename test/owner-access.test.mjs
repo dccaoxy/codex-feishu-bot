@@ -148,3 +148,15 @@ test('Documents explicit guard fences queued SDK without command or tool async c
  const {bot,config,event}=setup(t);bot.onMessage(event);const run=toolRun(bot),f=new Feishu(config,()=>{}),docs=new Documents(f,()=>bot.owner);let release;f.queue=new Promise(r=>{release=r;});let writes=0;f.client={docx:{documentBlock:{patch:async()=>{writes++;return {};}}}};
  const pending=docs.execute('feishu_doc_update_text',{documentId:'doc1',blockId:'block1',text:'synthetic',revisionId:1},bot.ownerEffectGuard('group',run));const rejected=assert.rejects(pending);config.ownerAccess.enabled=false;release();await rejected;assert.equal(writes,0);
 });
+const localTools=['feishu_thread_read','feishu_threads_search','owner_groups',...['status','message','search','context','changes','daily_digest','topics','topic_read','send'].map(n=>'owner_group_'+n),'aegpc_repository_approval',...['create','read','append','update_text','permissions'].map(n=>'feishu_doc_'+n),'feishu_send_file'];
+for(const tool of localTools)for(const turnId of ['old-turn','',undefined,42])test(`${tool} rejects invalid request turn ${String(turnId)}`,async t=>{
+ const {bot,event}=setup(t);bot.onMessage(event);toolRun(bot);let calls=0;const call=async()=>{calls++;return {};};bot.history.read=call;bot.history.search=call;bot.ownerGroups={execute:call};bot.repositoryApproval.execute=call;bot.documents.execute=call;bot.sendFile=call;bot.rpc.respond=call;bot.rpc.reject=call;
+ await bot.serverRequest({id:51,method:'item/tool/call',params:{threadId:'t',turnId,tool,arguments:{}}});assert.equal(calls,0);
+});
+for(const tool of localTools)test(`${tool} result discarded if turn switches during await`,async t=>{
+ const {bot,event}=setup(t);bot.onMessage(event);const run=toolRun(bot);let opened,release;const opening=new Promise(r=>{opened=r;});const call=()=>{opened();return new Promise(r=>{release=r;});};bot.history.read=call;bot.history.search=call;bot.ownerGroups={execute:call};bot.repositoryApproval.execute=call;bot.documents.execute=call;bot.sendFile=call;const responses=[];bot.rpc.respond=(...a)=>responses.push(a);
+ const pending=toolCall(bot,tool);await opening;run.turn='next-turn';release({text:'synthetic'});await pending;assert.deepEqual(responses,[]);
+});
+for(const tool of localTools)test(`${tool} current turn executes and responds once`,async t=>{
+ const {bot,event}=setup(t);bot.onMessage(event);toolRun(bot);let calls=0;const call=async()=>{calls++;return {value:'synthetic'};};bot.history.read=call;bot.history.search=call;bot.ownerGroups={execute:call};bot.repositoryApproval.execute=call;bot.documents.execute=call;bot.sendFile=call;const responses=[];bot.rpc.respond=(...a)=>responses.push(a);await toolCall(bot,tool);assert.equal(calls,1);assert.equal(responses.length,1);assert.equal(responses[0][1].success,true);
+});

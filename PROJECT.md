@@ -1,3 +1,10 @@
+# 当前交接：PR #16 迟到工具回合身份返工 R7（2026-09-26）
+
+- Task Source：Human 要求继续同一分支处理 [a64c336 的 R7/P1](https://github.com/dccaoxy/codex-feishu-bot/pull/16#issuecomment-5846383282)，不部署、不 Merge。先转 Draft。R6 固定当前 run.turn 并不足以证明请求自身属于该回合；原 314 项没有旧 turn 测试。
+- Implementation：所有本地 item/tool/call 执行前要求 params.turnId 为非空字符串且严格等于 run.turn，不限 Owner 群或 external。旧/缺失/非法 turn 直接丢弃，无工具调用、无 RPC 响应/拒绝/重放。guard 同时固定请求 turn 与捕获的 run.turn，并在异步阶段检查当前 turn、原 run 对象身份及结束状态；history、全部 Group Gateway、文档、文件及 Repository 分支统一适用。未知 Desktop 工具继续由原宿主处理。
+- Validation：check、428/428 全量测试（0失败/跳过）、diff check、doctor 握手/登录/7模型与无模型 ephemeral smoke 通过。19 个本地工具逐一覆盖旧 turn、空/缺失/非字符串 ID、await 期间换 turn、正常恰好一次执行和响应；底层执行替身为零意味着未到达对应 transport。既有跨 Thread/并发私聊、R1–R6 和 PR #5 组合回归保留。两个旧测试文件调整为有效协议夹具：历史工具补真实当前 turnId，Group Gateway 错误 turn 改断言零响应，未放宽生产校验。无真实飞书出站；未重复未改动的真实 work/Group/Knowledge 隔离探针。
+- 交付：更新本文件并推送同一 PR，Draft→Ready 请求新 head 独立审核；不宣称 PASS。未部署、未改真实配置/权限/群/数据库/Shared 服务/遥测、未 Merge；真实群和双端验收仍未执行。以下历史说明中的“捕获回合”由本次请求身份校验补齐。
+
 # 当前交接：PR #16 工具生命周期返工 R6（2026-09-26）
 
 - Task Source：Human 转交 [b93e100 的 R6/P1](https://github.com/dccaoxy/codex-feishu-bot/pull/16#issuecomment-5846176831)。原 R1–R5 独立复现通过，但 288 项未覆盖持久 RPC 触发的工具在 await 期间失权；同一 PR 先转 Draft 返工。

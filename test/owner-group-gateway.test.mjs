@@ -161,7 +161,7 @@ test('real Bot event path registers tools and binds trusted identity, turn and c
  const start=rpc.calls.find(x=>x.method==='thread/start');assert.ok(start.params.dynamicTools.some(x=>x.name==='owner_group_send'));
  const call=async(id,tool,args={},turnId='turn')=>{await bot.serverRequest({id,method:'item/tool/call',params:{threadId:'private-thread',turnId,tool,arguments:args}});return rpc.responses.at(-1).result;};
  assert.equal((await call(1,'owner_groups')).success,true);
- assert.equal((await call(2,'owner_groups',{},'wrong')).success,false);
+ const count=rpc.responses.length;await call(2,'owner_groups',{},'wrong');assert.equal(rpc.responses.length,count);
  sendEvent('ignored','去机器人们群里告诉大家，hello','stranger');assert.equal(f.gateway.latest.get('private'),'bot1');
  sendEvent('bot2','只分析，不发送');await drain();assert.ok(rpc.calls.some(x=>x.method==='turn/steer'));
  const gs=JSON.parse((await call(3,'owner_groups')).contentItems[0].text).groups;
