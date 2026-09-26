@@ -315,3 +315,29 @@ test('recalled array message is excluded after member lookup await',async t=>{
  const f=setup(t),c=f.context('读取机器人们群');await directory(f,c);members(f,async()=>{f.groupStore.recall('a','first-a');return {items:[],has_more:false};});
  assert.deepEqual((await f.gateway.execute('owner_group_search',{group:'机器人们'},c)).result.messages,[]);
 });
+
+for(const mode of ['search','changes'])test('R1 short messages with maximum UTF8 names keep bounded complete pagination: '+mode,async t=>{
+ const f=setup(t),c=f.context('读取机器人们群');await directory(f,c);
+ const ids=Array.from({length:50},(_,i)=>'om_'+String(i).padStart(32,'0'));
+ ids.forEach((id,i)=>f.add('a',id,'x','2026-09-23T12:00:00Z','person'+i));
+ members(f,async()=>({items:ids.map((_,i)=>({member_id:'person'+i,name:'名'.repeat(66)})),has_more:false}));
+ let cursor=0,offset=0,seen=[];
+ for(let i=0;i<5;i++){
+ const response=await f.gateway.execute('owner_group_'+mode,{group:'机器人们',limit:50,...(mode==='search'?{offset}:{after:cursor})},c),r=response.result;
+ assert.ok(Buffer.byteLength(JSON.stringify(response))<=24000);assert.ok(Buffer.byteLength(JSON.stringify(r))<=22000);
+ seen.push(...r.messages.map(m=>m.messageId));
+ if(mode==='changes'){if(!r.hasMore)break;assert.ok(r.cursor>cursor);cursor=r.cursor;}else{if(!r.messages.length)break;offset+=r.messages.length;}
+ }
+ assert.equal(seen.length,51);assert.equal(new Set(seen).size,51);assert.deepEqual(new Set(seen),new Set([...ids,'first-a']));
+ // Every compact preview remains recoverable via its original, unmodified ID.
+ f.feishu.lastCall=0;const call=f.feishu.call.bind(f.feishu);f.feishu.call=(...args)=>{f.feishu.lastCall=0;return call(...args);};
+ for(const id of ids){const response=await f.gateway.execute('owner_group_message',{group:'机器人们',messageId:id},c);assert.ok(Buffer.byteLength(JSON.stringify(response))<=24000);assert.equal(response.result.message.text,'x');assert.equal(response.result.message.senderName,'名'.repeat(66));}
+});
+
+test('R1 final envelope budget fails closed without returning an advanced cursor',async t=>{
+ const f=setup(t),c=f.context('读取机器人们群');await directory(f,c);
+ const coverage=f.gateway.coverage.bind(f.gateway);f.gateway.coverage=chat=>({...coverage(chat),unexpected:'x'.repeat(25000)});
+ await assert.rejects(f.gateway.execute('owner_group_changes',{group:'机器人们',after:0},c),/大小限制/);
+ f.gateway.coverage=coverage;const response=await f.gateway.execute('owner_group_changes',{group:'机器人们',after:0},c);
+ assert.deepEqual(response.result.messages.map(m=>m.messageId),['first-a']);
+});

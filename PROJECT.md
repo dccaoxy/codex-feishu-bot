@@ -1,3 +1,11 @@
+# 当前交接：PR #17 R1 字节预算返工（2026-09-26）
+
+- Task Source：Human 转交 [43d45c5 的 R1/P2 NEEDS CHANGES](https://github.com/dccaoxy/codex-feishu-bot/pull/17#issuecomment-5846600192)。同一分支返工，先转 Draft；不部署、不 Merge。原443项通过未覆盖50条短正文与最大姓名组合，不能证明该预算边界已覆盖。
+- Implementation：移除清空正文但保留所有空字段/重复说明的裁剪方式。加入姓名后按实际序列化 UTF-8 字节检查 result≤22000、完整响应≤24000。必要时替换为真正更小的紧凑记录；保留每条消息原ID/顺序/sequence/匿名引用/姓名及回查入口，继续不足时标记 omitted 省略姓名。全部回查使用原 messageId；不删除记录、不改增量 cursor/hasMore。最终检查仍超限则明确报错，不返回成功游标，调用方可缩小请求重试。
+- Regression：新增 search/changes 各50条短正文 x、35字符消息ID、198字节姓名的真实 Gateway/Store/Feishu模拟SDK回归，逐页检查完整包装与结果预算，只用返回游标或返回数量推进，验证51条原文（含夹具已有1条）无漏读/重复/停滞，并逐条回查50条原文及姓名。额外超大包装测试验证最终拒绝且原游标重读不丢消息。曾用超大源ID模拟最终异常，但被底层预览提前排除，已改为在包装层注入异常字段以准确覆盖最终守卫。
+- Validation：check、446/446 全量测试（0失败/跳过）、diff check 通过，保留 PR #5/Owner/FIFO/Knowledge 组合自动回归；doctor 握手/登录/7模型及无模型 ephemeral smoke/动态工具注册通过。无飞书凭据开发配置和模拟SDK，不代表线上姓名验收；未重复未改动的 Group/Knowledge 进程探针。
+- Delivery：修复后推送同一 PR #17 并 Draft→Ready 请求新 head 复审。不宣称 PASS；未部署、未 Merge、未更改当前候选/真实配置/权限/数据库/Shared Runtime/遥测。以下为历史记录，原443项是旧head证据。
+
 # 当前交接：Owner 群发言人姓名映射（2026-09-26）
 
 - Task Source：Human 反馈 Owner 查询只返回 s_ 匿名标识，并授权“那你来操作吧”补齐姓名映射。PR #16 已 Merge；从最新 origin/main 6f986a6 新建 codex/owner-sender-names，独立开发，不混入已结束 PR。
