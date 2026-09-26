@@ -26,9 +26,10 @@ test('recall during slow card creation starts no turn and leaves no timer',async
  store.updateChat('group',{thread:'t'});store.set('tools:t',bot.toolVersion);bot.loaded.add('t');
  let opened,release;const opening=new Promise(r=>{opened=r;});bot.feishu.stream=()=>{opened();return new Promise(r=>{release=r;});};
  const calls=[];bot.rpc.request=async(method)=>{calls.push(method);return {turn:{id:'turn'}};};
+ const closed=[];bot.feishu.finish=async id=>closed.push(id);
  const work=bot.run('group',[{type:'text',text:'test'}],'m1');await opening;
  const run=bot.runs.get('t');await bot.cancelOwnerGroup('group','m1');release('card');await work;await run.finishPromise;
- assert.equal(calls.includes('turn/start'),false);assert.equal(run.timer,undefined);assert.equal(bot.runs.size,0);
+ assert.equal(calls.includes('turn/start'),false);assert.equal(run.timer,undefined);assert.equal(bot.runs.size,0);assert.deepEqual(closed,['card']);
 });
 test('ordinary private execution does not depend on owner inbox cancellation storage',t=>{
  const {bot}=setup(t);bot.store={get:()=>null};assert.equal(bot.ownerMessageCancelled('private','m'),false);
@@ -37,4 +38,50 @@ test('existing owner resource and group document commands keep their original ro
  const {bot,event}=setup(t);
  for(const command of ['/owner query students {}','/group-doc document']){event.message.content=JSON.stringify({text:'@_user_1 '+command});assert.equal(bot.ownerAccess.routes(event),false);}
  event.message.content=JSON.stringify({text:'@_user_1 inspect files'});assert.equal(bot.ownerAccess.routes(event),true);
+});
+
+import {Feishu} from '../src/feishu.mjs';
+for(const reason of ['recall','revoke','leave'])test(`queued file upload is fenced after ${reason}`,async t=>{
+ const {bot,config,event,groups}=setup(t);bot.onMessage(event);const f=new Feishu(config,()=>{});bot.feishu=f;fs.writeFileSync(path.join(config.codex.cwd,'test.txt'),'synthetic');
+ let release;f.queue=new Promise(r=>{release=r;});const calls=[];f.client={im:{v1:{file:{create:async()=>{calls.push('upload');return {data:{file_key:'f'}};}},message:{create:async()=>{calls.push('send');return {};}}}}};
+ const pending=bot.sendFile('group','test.txt',bot.ownerEffectGuard('group',null,'m1'));const rejected=assert.rejects(pending);
+ if(reason==='recall')await bot.cancelOwnerGroup('group','m1');else if(reason==='revoke')config.ownerAccess.enabled=false;else groups.closed=true;
+ release();await rejected;assert.deepEqual(calls,[]);
+});
+test('upload completed but queued message remains fenced, normal file sends exactly once',async t=>{
+ const {bot,config,event}=setup(t);bot.onMessage(event);const f=new Feishu(config,()=>{});bot.feishu=f;fs.writeFileSync(path.join(config.codex.cwd,'test.txt'),'synthetic');
+ let uploaded,release;const gate=new Promise(r=>{uploaded=r;});const calls=[];
+ f.client={im:{v1:{file:{create:async()=>{calls.push('upload');uploaded();await new Promise(r=>{release=r;});return {data:{file_key:'f'}};}},message:{create:async()=>{calls.push('send');return {};}}}}};
+ const pending=bot.sendFile('group','test.txt',bot.ownerEffectGuard('group',null,'m1'));const rejected=assert.rejects(pending);await gate;await bot.cancelOwnerGroup('group','m1');release();await rejected;assert.deepEqual(calls,['upload']);
+ event.message.message_id='m2';bot.onMessage(event);f.client.im.v1.file.create=async()=>{calls.push('upload');return {data:{file_key:'f'}};};await bot.sendFile('group','test.txt',bot.ownerEffectGuard('group',null,'m2'));assert.deepEqual(calls,['upload','upload','send']);
+});
+test('interrupt wait immediately invalidates old approval and closes existing card',async t=>{
+ const {bot,event}=setup(t);bot.onMessage(event);const decisions=[],finished=[];let release;
+ bot.rpc.request=()=>new Promise(r=>{release=r;});bot.rpc.respond=(...a)=>decisions.push(a);bot.feishu.finish=async(...a)=>finished.push(a);
+ const r={chat:'group',thread:'t',turn:'turn',sourceIds:new Set(['m1']),card:'existing',sequence:0,flush:Promise.resolve()};bot.runs.set('t',r);
+ bot.prompts.set('token',{chat:'group',thread:'t',turn:'turn',id:3,expires:Date.now()+10000,method:'item/commandExecution/requestApproval'});
+ const cancelled=bot.cancelOwnerGroup('group','m1');await assert.rejects(bot.action('group',{token:'token',decision:'accept'}));assert.equal(bot.prompts.has('token'),false);assert.deepEqual(decisions,[]);release();await cancelled;await r.finishPromise;assert.equal(finished[0][0],'existing');
+});
+for(const entry of ['command','tool','final'])test(`actual ${entry} entry cannot send queued files after revoke`,async t=>{
+ const {bot,config,event}=setup(t);bot.onMessage(event);bot.available=true;const f=new Feishu(config,()=>{});bot.feishu=f;fs.writeFileSync(path.join(config.codex.cwd,'test.txt'),'synthetic');let release;f.queue=new Promise(r=>{release=r;});const calls=[];
+ f.client={im:{v1:{file:{create:async()=>{calls.push('upload');return {data:{file_key:'f'}};}},message:{create:async()=>{calls.push('send');return {};}}}}};
+ const r={chat:'group',thread:'t',turn:'turn',sourceIds:new Set(['m1']),messages:new Map([['x',{text:'x'.repeat(11000)}]]),card:'card',sequence:0,flush:Promise.resolve()};bot.runs.set('t',r);bot.rpc.respond=()=>{};f.update=async()=>{};f.finish=async()=>{};
+ const pending=entry==='command'?bot.command('group','/send test.txt','m1'):entry==='tool'?bot.serverRequest({id:1,method:'item/tool/call',params:{threadId:'t',turnId:'turn',tool:'feishu_send_file',arguments:{path:'test.txt'}}}):bot.finishRun(r,'completed');
+ const settled=pending.catch(()=>{});await new Promise(resolve=>setImmediate(resolve));config.ownerAccess.enabled=false;release();await settled;assert.deepEqual(calls,[]);
+});
+for(const failure of [false,true])test(`late card on leave closes without old result; cleanup failure=${failure}`,async t=>{
+ const {bot,store,event,config,groups}=setup(t);bot.onMessage(event);bot.available=true;config.streamIntervalMs=60000;store.updateChat('group',{thread:'t'});store.set('tools:t',bot.toolVersion);bot.loaded.add('t');let opened,release;const opening=new Promise(r=>{opened=r;});const closed=[],sent=[];
+ bot.feishu.stream=()=>{opened();return new Promise(r=>{release=r;});};bot.feishu.finish=async id=>{closed.push(id);if(failure)throw Error('synthetic close failure');};bot.feishu.text=async()=>sent.push('text');bot.rpc.request=async()=>{throw Error('no turn allowed');};
+ const work=bot.run('group',[{type:'text',text:'test'}],'m1');await opening;const r=bot.runs.get('t');groups.closed=true;await bot.cancelOwnerGroup('group');release('late-card');await work;await r.finishPromise;assert.deepEqual(closed,['late-card']);assert.deepEqual(sent,[]);assert.equal(r.timer,undefined);assert.equal(bot.runs.size,0);
+});
+test('send retry rechecks authorization before invoking transport again',async t=>{
+ const {bot,config,event}=setup(t);bot.onMessage(event);const f=new Feishu(config,()=>{});let attempts=0;f.client={im:{v1:{message:{create:async()=>{attempts++;config.ownerAccess.enabled=false;return {code:230020};}}}}};
+ await assert.rejects(f.send('group','file',{file_key:'synthetic'},undefined,bot.ownerEffectGuard('group',null,'m1')));assert.equal(attempts,1);
+});
+test('failed interrupt cannot restore old approval or tool authority and leaves other run intact',async t=>{
+ const {bot,event}=setup(t);bot.onMessage(event);bot.available=true;const decisions=[];bot.rpc.respond=(...a)=>decisions.push(a);bot.rpc.request=async()=>{throw Error('interrupt timeout');};
+ const r={chat:'group',thread:'t',turn:'turn',sourceIds:new Set(['m1']),sequence:0,flush:Promise.resolve()};bot.runs.set('t',r);bot.runs.set('other',{chat:'private',thread:'other'});
+ bot.prompts.set('token',{chat:'group',thread:'t',id:1,expires:Date.now()+10000});bot.prompts.set('other-token',{chat:'private',thread:'other',id:2,expires:Date.now()+10000});await bot.cancelOwnerGroup('group','m1');
+ assert.notEqual(bot.onAction({operator:{open_id:'owner'},context:{open_chat_id:'group'},action:{value:{token:'token',decision:'accept'}}}).toast.content,'已收到，正在处理。');await assert.rejects(bot.action('group',{token:'token',decision:'accept'}));
+ await bot.serverRequest({id:3,method:'item/tool/call',params:{threadId:'t',tool:'feishu_send_file',arguments:{path:'test.txt'}}});await r.finishPromise;assert.deepEqual(decisions,[]);assert.ok(bot.prompts.has('other-token'));assert.ok(bot.runs.has('other'));
 });

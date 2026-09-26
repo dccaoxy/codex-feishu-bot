@@ -41,12 +41,13 @@ export class Feishu {
     this.client = new lark.Client({ appId: config.feishu.appId, appSecret: config.feishu.appSecret,
       appType: lark.AppType.SelfBuild, domain: lark.Domain.Feishu, logger: quietLogger });
   }
-  async call(fn, retry = true) {
+  async call(fn, retry = true, guard = () => {}) {
     const work = async () => {
       for (let attempt = 0; ; attempt++) {
         await delay(Math.max(0, 300 - (Date.now() - this.lastCall)));
         this.lastCall = Date.now();
         try {
+          guard();
           const r = await fn();
           if (r?.code) {
             const e = new Error(`飞书 API ${r.code}: ${String(r.msg || '').slice(0,200)}`); e.feishuCode = r.code; throw e;
@@ -62,15 +63,15 @@ export class Feishu {
     };
     const result = this.queue.then(work); this.queue = result.catch(() => {}); return result;
   }
-  async send(chat, type, content, uuid = randomUUID()) {
+  async send(chat, type, content, uuid = randomUUID(), guard) {
     return this.call(() => this.client.im.v1.message.create({
       params: { receive_id_type: 'chat_id' },
       data: { receive_id: chat, msg_type: type, content: JSON.stringify(content), uuid },
-    }));
+    }), true, guard);
   }
-  async text(chat, text, id) {
+  async text(chat, text, id, guard) {
     let i = 0;
-    for (const part of chunks(text)) await this.send(chat, 'text', { text: part }, id ? `${id}-${i++}`.slice(0,50) : undefined);
+    for (const part of chunks(text)) await this.send(chat, 'text', { text: part }, id ? `${id}-${i++}`.slice(0,50) : undefined, guard);
   }
   async interactive(chat, title, text, buttons) { return this.send(chat, 'interactive', card(title, text, buttons)); }
   async replaceInteractive(messageId, title, text) {
@@ -86,11 +87,11 @@ export class Feishu {
     await this.send(chat, 'interactive', { type: 'card', data: { card_id: result.card_id } });
     return result.card_id;
   }
-  async update(cardId, text, sequence) {
+  async update(cardId, text, sequence, guard) {
     const data = { content: text || '正在处理…', sequence, uuid: randomUUID() };
     return this.call(() => this.client.cardkit.v1.cardElement.content({
       path: { card_id: cardId, element_id: 'answer' }, data,
-    }));
+    }), true, guard);
   }
   async finish(cardId, sequence, summary = '已完成') {
     const data = { settings: JSON.stringify({ config: { streaming_mode: false, summary: { content: summary } } }), sequence, uuid: randomUUID() };
@@ -111,14 +112,14 @@ export class Feishu {
     } catch (e) { fs.rmSync(target, { force: true }); throw e; }
     return target;
   }
-  async upload(chat, filename) {
+  async upload(chat, filename, guard) {
     const size = fs.statSync(filename).size;
     if (!size || size > 30 * 1024 * 1024) throw new Error('返回文件必须大于 0 且不超过 30 MB。');
     const result = await this.call(() => this.client.im.v1.file.create({
       data: { file_type: 'stream', file_name: path.basename(filename), file: fs.createReadStream(filename) },
-    }), false);
+    }), false, guard);
     if (!result?.file_key) throw new Error('上传文件失败，未收到 file_key。');
-    return this.send(chat, 'file', { file_key: result.file_key });
+    return this.send(chat, 'file', { file_key: result.file_key }, undefined, guard);
   }
   start(onMessage, onAction, groupEvents = {}) {
     const dispatcher = new lark.EventDispatcher({ logger: quietLogger }).register({

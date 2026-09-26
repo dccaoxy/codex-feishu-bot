@@ -1,3 +1,12 @@
+# 当前交接：PR #16 审核返工 R1–R3（2026-09-26）
+
+- Task Source：Human 转交 [93b7ec1 的 NEEDS CHANGES](https://github.com/dccaoxy/codex-feishu-bot/pull/16#issuecomment-5846012207)。原 256 项通过未覆盖副作用出站与卡片收尾边界，不能代表取消链路完整；同一分支/PR 返工，先转 Draft。
+- R1：Owner 文件工具、`/send`、最终长结果附件和文字降级共享与来源消息/run 绑定的有效性检查；在真实 Feishu.call 队列的 SDK 上传、发送、重试前检查取消、当前 Owner、授权群、离群、关闭及 run 身份。排队中的正文/流式更新也检查。已经完成的上传无法回滚，但后续消息发送仍能阻止。
+- R2：撤回在第一个 await 前标记全部匹配回合取消、清除审批 token、结束本地回合；随后才发 interrupt。接收回调、队列动作消费和迟到 serverRequest 拒绝取消回合。中断延迟或失败不恢复授权，不向 Shared 请求自动批准或拒绝；其他有效回合不变。
+- R3：已存在/迟到的流式卡片通过仅关闭 streaming 的清理路径收尾，不发布旧结果；慢创建结束后无新回合/计时器。关闭 API 失败记录明确日志，不冒称远端已关闭，也不补发旧内容。
+- Validation：check、268 项全量测试通过，0失败/跳过；保留 PR #5 全部组合用例。新增真实 Bot/Store/Feishu.call 队列、替换 SDK transport 的确定性回归：撤回/撤权/离群前尚未上传为零、上传完成后消息为零、正常恰好一次、/send/工具/最终附件入口、发送重试撤权、中断等待/失败与旧 token/迟到工具隔离、已有/慢创建撤回/离群卡片关闭及关闭失败清理。doctor 握手/登录/7模型、无模型 ephemeral smoke 再次通过；使用无飞书凭据开发配置，不算线上连接验收。Group/Knowledge 和真实 work:check 证据沿用本 PR 上轮检查，本轮未重复该未修改部分。
+- 交付：本节取代下节关于取消链路完整性的结论。修复提交推送同一 PR 后 Draft→Ready 请求新 head 独立复审，尚无新 head PASS。不部署、不改真实配置/授权群/Shared 服务/遥测、不发送真实飞书消息、不 Merge。真实双端和群卡片验收仍未执行；Desktop 工具宿主边界继续保留。
+
 # 当前交接：Owner 私聊与授权群执行入口（2026-09-26）
 
 - Task Source：Human 明确要求自己的私聊和已授权群中自己的账号拥有相同执行能力，其他群成员保持现有权限，并授权开发。基于已合并 PR #5 的 main `2f84daf`，独立分支 `codex/owner-tool-parity`。
