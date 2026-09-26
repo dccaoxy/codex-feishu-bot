@@ -73,6 +73,11 @@ export class Feishu {
     for (const part of chunks(text)) await this.send(chat, 'text', { text: part }, id ? `${id}-${i++}`.slice(0,50) : undefined);
   }
   async interactive(chat, title, text, buttons) { return this.send(chat, 'interactive', card(title, text, buttons)); }
+  async replaceInteractive(messageId, title, text) {
+    return this.call(() => this.client.im.v1.message.patch({
+      path: { message_id: messageId }, data: { content: JSON.stringify(card(title, text)) },
+    }));
+  }
   async stream(chat, title) {
     const result = await this.call(() => this.client.cardkit.v1.card.create({
       data: { type: 'card_json', data: JSON.stringify(card(title, '正在处理…', [], true)) },

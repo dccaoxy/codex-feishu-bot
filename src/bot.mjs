@@ -1,3 +1,5 @@
+import { ThreadController } from './thread-controller.mjs';
+import { externalPermission } from './config.mjs';
 import { OWNER_GROUP_TOOLS, OWNER_GROUP_INSTRUCTIONS } from './owner-group-gateway.mjs';
 import { Documents } from './documents.mjs';
 import { RepositoryApproval, REPOSITORY_TOOLS } from './repository.mjs';
@@ -14,6 +16,9 @@ export const HELP = `飞书 · 本地 Codex
 /new [标题] — 新建会话
 /threads [关键词] — 列出或查找会话
 /use <会话ID或编号> — 切换机器人会话
+/attach <会话ID或编号> — 进入外部会话（Work）
+/detach — 解除外部绑定，返回原机器人会话
+/thread — 查看绑定与实时状态
 /read <会话ID或编号> — 查看历史
 /reference <会话ID或编号> [问题] — 引用历史到当前会话
 /fork [会话ID或编号] — 从会话创建分支
@@ -34,22 +39,23 @@ export class Bot {
   constructor(config, store, rpc, feishu, log = console.log) {
     this.config = config; this.store = store; this.rpc = rpc; this.feishu = feishu; this.log = log;
     this.documents = new Documents(feishu, () => this.owner);
-    this.history = new History(rpc, store, config.codex.allowExternalThreadRead);
+    this.history = new History(rpc, store, externalPermission(config) !== 'off');
+    this.controller = new ThreadController(config, store, rpc);
     this.owner = config.feishu.ownerOpenId || store.get('owner') || '';
     this.repositoryApproval = new RepositoryApproval(config, () => this.owner);
     this.toolVersion = config.repositoryApproval ? 'repository-v1' : 'docs-v1';
     this.pairCode = randomBytes(6).toString('hex');
     this.pairExpires = Date.now() + 15 * 60 * 1000;
-    this.runs = new Map(); this.prompts = new Map(); this.draining = new Set();
+    this.retiredRuns = new Set(); this.runs = new Map(); this.prompts = new Map(); this.draining = new Set();
     this.loaded = new Set(); this.compacting = new Set(); this.closed = false;
     rpc.on('notification', m => this.notification(m));
     rpc.on('request', m => this.serverRequest(m).catch(e => {
       this.log(`处理 Codex 请求失败：${this.redact(e)}`);
-      try { rpc.reject(m.id, '客户端未能处理请求'); } catch {}
+      if (!rpc.shared) { try { rpc.reject(m.id, '客户端未能处理请求'); } catch {} }
     }));
     rpc.on('disconnected', () => {
       if (this.closed) return;
-      this.available = false; this.compacting.clear();
+      this.available = false; this.compacting.clear(); this.controller.disconnected();
       for (const run of this.runs.values()) this.endRun(run, 'failed', 'Codex 连接断开，请重启机器人后继续。');
     });
     this.available = true;
@@ -60,6 +66,7 @@ export class Bot {
     return text;
   }
   async recover() {
+    this.controller.disconnected();
     for (const r of this.store.unfinished()) {
       if (r.card) {
         try { await this.feishu.finish(r.card, r.sequence + 1, '服务重启，任务中断'); } catch {}
@@ -71,7 +78,13 @@ export class Bot {
       this.store.mark(row.id, 'uncertain');
       await this.feishu.text(row.chat, '重启前有一条消息处于处理中，未自动重放以免重复操作。请检查会话后按需重发。').catch(() => {});
     }
-    for (const row of this.store.pending()) { this.ownerGroups?.accept(row.chat,row.id); this.schedule(row.chat); }
+    const skippedExternal = new Set();
+    for (const row of this.store.pending()) {
+      if (this.store.binding(row.chat)) { this.store.mark(row.id, 'uncertain'); skippedExternal.add(row.chat); }
+      else { this.ownerGroups?.accept(row.chat,row.id); this.schedule(row.chat); }
+    }
+    for (const chat of skippedExternal) await this.feishu.text(chat, '外部绑定已保留；重启前排队消息未自动执行。请先 /thread 查看状态，再按需重发。').catch(() => {});
+
   }
   onMessage(data) {
     if (this.closed) return;
@@ -209,11 +222,45 @@ export class Bot {
     const arg = args.join(' ');
     if (command === '/help' || command === '/start') return this.feishu.text(chat, HELP);
     if (command === '/pair') return this.feishu.text(chat, '此机器人已配对。');
+    if (command === '/detach') {
+      await this.unwatchExternal(chat); this.controller.detach(chat);
+      return this.feishu.text(chat, '已解除外部绑定，返回原机器人会话；未发送停止请求，后续审批请在原入口处理。');
+    }
+    if (command === '/thread' || (command === '/status' && this.store.binding(chat))) {
+      this.requireAvailable();
+      const b = this.store.binding(chat);
+      if (!b) return this.feishu.text(chat, `当前机器人会话：${this.store.chat(chat).thread || '尚未创建'}`);
+      const state = await this.controller.status(chat);
+      return this.feishu.text(chat, `已绑定：${state.title}\n${state.id}\n来源：${b.source}\n权限：${this.controller.permission()}\n状态：${state.status}\n执行回合：${state.turn || '无'}\n工作目录：${state.cwd}`);
+    }
     if (command === '/status') {
       const c = this.store.chat(chat), r = this.runs.get(c.thread);
       return this.feishu.text(chat, `会话：${c.thread || '尚未创建'}\n模型：${c.model || this.config.codex.model || 'Codex 默认'}\n思考强度：${c.effort || this.config.codex.effort || '默认'}\n状态：${r?.status || (this.compacting.has(c.thread) ? '压缩上下文中' : this.available ? '空闲' : 'Codex 断开')}\n工作目录：${this.config.codex.cwd}`);
     }
     this.requireAvailable();
+    if (command === '/attach') {
+      if (!arg) throw new Error('用法：/attach <会话ID或编号>');
+      const old = this.store.chat(chat).thread;
+      if (!this.store.binding(chat)) this.idle(chat);
+      const id = this.resolve(chat,arg);
+      const state = await this.controller.attach(chat,id);
+      if (old !== id) await this.unwatchExternal(chat,old);
+      if (state.status === 'active') await this.watchExternal(chat,state);
+      return this.feishu.text(chat, `已进入原会话：${state.title}\n${state.id}\n状态：${state.status}\n工作目录：${state.cwd}\n普通消息将继续此会话；/stop 停止，/fork 分支，/detach 退出。`);
+    }
+    if (this.store.binding(chat) && ['/new','/use','/compact'].includes(command)) throw new Error('外部绑定不支持此操作，请先 /detach；Work 不提供管理权限。');
+    if (this.store.binding(chat) && ['/model','/effort'].includes(command) && arg) throw new Error('外部会话保留原模型设置，请先 /detach。');
+    if (command === '/stop' && this.store.binding(chat)) {
+      const stopped = await this.controller.interrupt(chat);
+      return this.feishu.text(chat, stopped ? '已请求停止绑定会话的当前回合；文件修改不会撤销。' : '绑定会话当前空闲。');
+    }
+    if (command === '/fork' && this.store.binding(chat)) {
+      const old = this.store.binding(chat).thread;
+      if (arg && this.resolve(chat,arg) !== old) throw new Error('Work 只能从当前绑定会话分支，请先 /attach 目标。');
+      const state = await this.controller.fork(chat);
+      await this.unwatchExternal(chat,old);
+      return this.feishu.text(chat, `已进入独立分支：${state.id}\n原会话未修改；分支沿用 Work 权限。`);
+    }
     if (command === '/stop') {
       const r = this.runs.get(this.store.chat(chat).thread);
       if (!r?.turn) return this.feishu.text(chat, '当前没有可停止的任务。');
@@ -223,7 +270,7 @@ export class Bot {
     if (command === '/threads') {
       const r = await this.history.search(arg);
       this.store.saveThreadSelection(chat, r.threads);
-      return this.feishu.text(chat, r.threads.length ? r.threads.map((t,i) => `${i+1}. ${t.title}（${this.store.ownThread(t.id) ? '机器人会话' : '外部会话 · 只读'}）\n${t.id}\n最后更新：${t.updatedAtLocal || '未提供'}`).join('\n\n') + '\n\n/read 编号 查看；/reference 编号 问题 引用。只有机器人会话可用 /use 编号 切换；可加关键词筛选。' : '未找到会话。发送 /new 或直接开始聊天。');
+      return this.feishu.text(chat, r.threads.length ? r.threads.map((t,i) => `${i+1}. ${t.title}（${this.store.ownThread(t.id) ? '机器人会话' : (this.controller.permission() === 'work' ? '外部会话 · Work' : '外部会话 · 只读')}）\n${t.id}\n最后更新：${t.updatedAtLocal || '未提供'}`).join('\n\n') + '\n\n/read 编号 查看；/reference 编号 问题 引用。只有机器人会话可用 /use 编号 切换；可加关键词筛选。' + (this.controller.permission() === 'work' ? '\n/attach 编号 进入外部会话（需目标在同一共享 App Server 中已加载）。' : '') : '未找到会话。发送 /new 或直接开始聊天。');
     }
     if (command === '/read' || command === '/reference') {
       const id = this.resolve(chat, args[0]);
@@ -313,6 +360,7 @@ ${this.ownerGroups?OWNER_GROUP_INSTRUCTIONS:''}` };
   }
   async run(chat, input, clientUserMessageId, source) {
     this.requireAvailable();
+    if (this.store.binding(chat)) return this.runExternal(chat,input,clientUserMessageId);
     let id = this.store.chat(chat).thread;
     if (this.compacting.has(id)) throw new Error('上下文正在压缩，请完成后重发。');
     if (!id) id = await this.createThread(chat, (input.find(i => i.type === 'text')?.text || '图片会话').slice(0,40));
@@ -359,13 +407,118 @@ ${this.ownerGroups?OWNER_GROUP_INSTRUCTIONS:''}` };
       this.endRun(r, 'failed', this.redact(e));
     }
   }
+  async unwatchExternal(chat, id = this.store.binding(chat)?.thread) {
+    const r = this.runs.get(id);
+    if (!r?.external) return;
+    r.ending = true; r.dispatchRequests?.clear(); r.fileDetails?.clear(); clearInterval(r.timer);
+    for (const [token,p] of this.prompts) if (p.thread === id) {
+      if (this.rpc.shared) this.clearPrompt(token); else this.denyPrompt(token);
+    }
+    await r.flush.catch(() => {});
+    if (r.card) await this.feishu.finish(r.card, ++r.sequence, '已解除观察').catch(() => {});
+    r.state = 'detached';
+    if (this.runs.get(id) === r) { this.store.saveRun(r); this.runs.delete(id); }
+  }
+  async watchExternal(chat, state, dispatching = false) {
+    const existing = this.runs.get(state.id);
+    if (existing) {
+      if (existing.chat !== chat || existing.ending) throw new Error('该会话仍在处理上一轮结果，请稍后重试。');
+      if (dispatching) existing.dispatching = true;
+      return existing;
+    }
+    const r = {dispatching,opening:true,thread:state.id,chat,turn:state.turn,external:true,card:null,sequence:0,state:'running',status:'正在观察外部会话',
+      messages:new Map(),lastText:'',text:'',created:Date.now(),ending:false,flush:Promise.resolve()};
+    this.runs.set(r.thread,r); this.store.saveRun(r);
+    try { r.card = await this.feishu.stream(chat,state.title); }
+    catch { /* text result delivery remains available */ }
+    r.opening = false;
+    if (r.ending || this.closed) {
+      if (r.card) await this.feishu.finish(r.card,++r.sequence,'已解除观察').catch(() => {});
+      return r;
+    }
+    if (r.pendingCompletion) this.endRun(r,r.pendingCompletion.status,r.pendingCompletion.error?.message);
+    if (r.ending) return r;
+    r.timer = setInterval(() => {
+      void this.flushRun(r);
+      if (!r.polling) {
+        r.polling = true;
+        void this.refreshExternalRun(r).catch(e => this.endRun(r,'failed',this.redact(e))).finally(() => {r.polling=false;});
+      }
+    }, Math.max(1000,this.config.streamIntervalMs));
+    return r;
+  }
+  async refreshExternalRun(r) {
+    if (!r.turn || r.ending || r.dispatching || r.opening) return;
+    const page = await this.controller.turns(r.thread);
+    if (r.ending || r.dispatching) return;
+    const turn = page.data.find(t => t.id === r.turn);
+    if (!turn) throw new Error('无法确认正在观察的回合状态，请 /thread 查看；未重跑任务。');
+    if (turn.status !== 'inProgress') {
+      for (const i of turn.items || []) if (i.type === 'agentMessage') r.messages.set(i.id,{text:i.text,phase:i.phase});
+      this.endRun(r,turn.status,turn.error?.message);
+    }
+  }
+  async runExternal(chat,input,clientUserMessageId) {
+    let r;
+    try {
+      const result = await this.controller.send(chat,input,clientUserMessageId,async state => {
+        r = await this.watchExternal(chat,state,true);
+        if (this.closed || !this.available || r.ending || this.runs.get(state.id) !== r || this.store.binding(chat)?.thread !== state.id) throw new Error('外部观察已关闭；未发送输入。');
+      });
+      if (r.turn !== result.turnId) r.messages.clear();
+      r.turn = result.turnId; r.dispatching = false;
+      if (!r.ending && !this.closed && this.available && this.runs.get(r.thread) === r) {
+        for (const [id, request] of r.dispatchRequests || []) {
+          r.dispatchRequests.delete(id);
+          if (request.params.turnId === r.turn) await this.serverRequest(request, r);
+        }
+      }
+      r.dispatchRequests?.clear();
+      if (!r.ending) this.store.saveRun(r);
+      if (result.kind === 'steer') await this.feishu.text(chat,'已向绑定会话的当前回合追加要求。');
+    } catch(e) {
+      if (r) this.endRun(r,'failed',this.redact(e));
+      throw e;
+    }
+  }
+  observeExternal(threadId, turnId) {
+    if (this.closed || !this.rpc.shared || this.controller.permission() !== 'work') return;
+    const b = this.store.bindingForThread(threadId);
+    if (!b || this.store.chat(b.chat).thread !== threadId) return;
+    let old = this.runs.get(threadId);
+    if (old && old.turn !== turnId && (old.pendingCompletion || old.ending)) {
+      this.retiredRuns.add(old); this.runs.delete(threadId); old = null;
+    }
+    if (old?.ending) {
+      void old.finishPromise?.then(() => { if (this.store.binding(b.chat)?.thread === threadId) this.observeExternal(threadId,turnId); });
+      return;
+    }
+    if (!old) void this.watchExternal(b.chat,{id:threadId,title:b.title,turn:turnId}).catch(e => this.log(this.redact(e)));
+  }
   notification(m) {
-    const p = m.params || {}, r = this.runs.get(p.threadId);
+    const p = m.params || {};
+    if (m.method === 'turn/started') this.observeExternal(p.threadId,p.turn?.id);
+    const r = this.runs.get(p.threadId);
     if ((m.method === 'item/completed' && p.item?.type === 'contextCompaction') || m.method === 'thread/compacted' || m.method === 'error') this.compacting.delete(p.threadId);
     if (m.method === 'serverRequest/resolved') {
-      for (const [token, prompt] of this.prompts) if (prompt.id === p.requestId) this.clearPrompt(token);
+      for (const run of this.runs.values()) {
+        const request = run.dispatchRequests?.get(p.requestId);
+        if (request) run.fileDetails?.delete(JSON.stringify([request.params.turnId,request.params.itemId]));
+        run.dispatchRequests?.delete(p.requestId);
+      }
+      for (const [token, prompt] of this.prompts) if (prompt.id === p.requestId) {
+        this.runs.get(prompt.thread)?.fileDetails?.delete(JSON.stringify([prompt.turn,prompt.params.itemId]));
+        this.clearPrompt(token, '已由客户端处理');
+        void this.feishu.text(prompt.chat,'该审批已由一个客户端处理，旧卡片已失效。').catch(() => {});
+      }
     }
     if (!r || r.ending) return;
+    // File approvals reference a separate item event. Preserve that event even
+    // while the streaming card is opening, before the live turn is reconciled.
+    if (['item/started','item/completed'].includes(m.method) && p.item?.type === 'fileChange') this.rememberFileDetails(r,p);
+    if (r.dispatching) return;
+    const eventTurn = p.turnId || p.turn?.id;
+    if (r.external && eventTurn && r.turn && eventTurn !== r.turn) return;
     if (m.method === 'turn/started') { r.turn = p.turn.id; this.store.saveRun(r); }
     if (m.method === 'item/agentMessage/delta') {
       const old = r.messages.get(p.itemId) || { text: '', phase: null };
@@ -373,14 +526,16 @@ ${this.ownerGroups?OWNER_GROUP_INSTRUCTIONS:''}` };
     }
     if (m.method === 'item/started' || m.method === 'item/completed') {
       const item = p.item;
-      if (item.type === 'fileChange') r.fileChanges = item.changes;
       if (item.type === 'agentMessage') r.messages.set(item.id, { text: item.text || '', phase: item.phase });
       const labels = { webSearch: '正在搜索资料', commandExecution: '正在运行命令', fileChange: '正在修改文件',
         mcpToolCall: '正在使用工具', dynamicToolCall: '正在调用工具', contextCompaction: '正在压缩上下文', plan: '正在规划' };
       if (labels[item.type]) r.status = labels[item.type];
     }
     if (m.method === 'turn/plan/updated') r.status = '计划：' + (p.plan || []).map(s => `${s.status === 'completed' ? '✓' : '·'} ${s.step}`).join('；');
-    if (m.method === 'turn/completed') this.endRun(r, p.turn.status, p.turn.error?.message);
+    if (m.method === 'turn/completed') {
+      if (r.opening) r.pendingCompletion = p.turn;
+      else this.endRun(r, p.turn.status, p.turn.error?.message);
+    }
   }
   body(r, final = false) {
     const messages = [...r.messages.values()];
@@ -409,21 +564,21 @@ ${this.ownerGroups?OWNER_GROUP_INSTRUCTIONS:''}` };
   }
   endRun(r, state, error) {
     if (r.ending) return;
-    r.ending = true; clearInterval(r.timer);
+    r.ending = true; r.dispatchRequests?.clear(); r.fileDetails?.clear(); clearInterval(r.timer);
     r.finishPromise = this.finishRun(r, state, error).catch(e => {
       this.log(`结果发送失败：${this.redact(e)}；请用 /read 查看已保存的会话。`);
       this.feishu.text(r.chat, '结果发送失败，已保留本地会话。请发送 /read 查看。').catch(() => {});
-    }).finally(() => { this.runs.delete(r.thread); });
+    }).finally(() => { if (this.runs.get(r.thread) === r) this.runs.delete(r.thread); this.retiredRuns.delete(r); });
   }
   async finishRun(r, state, error) {
     await r.flush.catch(() => {});
-    for (const [token,prompt] of this.prompts) if (prompt.thread === r.thread) this.clearPrompt(token);
+    for (const [token,prompt] of this.prompts) if (prompt.thread === r.thread && (!prompt.turn || prompt.turn === r.turn)) this.clearPrompt(token);
     const label = state === 'completed' ? '已完成' : state === 'interrupted' ? '已停止' : '执行失败';
     let text = this.body(r, true) || (state === 'completed' ? '任务已完成。' : '任务未完成。');
     if (error) text += `\n\n${this.redact(new Error(error))}`;
     if (state !== 'completed') text += `\n\n状态：${label}`;
     r.text = text; r.state = state;
-    this.store.saveRun(r);
+    if (this.runs.get(r.thread) === r) this.store.saveRun(r);
     const parts = chunks(text,10000);
     let delivered = false;
     if (r.card) {
@@ -439,7 +594,7 @@ ${this.ownerGroups?OWNER_GROUP_INSTRUCTIONS:''}` };
       const file = path.join(dir, `answer-${randomUUID()}.md`); fs.writeFileSync(file, text, { mode: 0o600 });
       try { await this.feishu.upload(r.chat, file); } catch { await this.feishu.text(r.chat, text); }
     }
-    this.store.saveRun(r);
+    if (this.runs.get(r.thread) === r) this.store.saveRun(r);
   }
   async sendFile(chat, filename) {
     const root = fs.realpathSync(this.config.codex.cwd);
@@ -449,10 +604,56 @@ ${this.ownerGroups?OWNER_GROUP_INSTRUCTIONS:''}` };
     await this.feishu.upload(chat, file);
     return { sent: true, filename: path.basename(file) };
   }
-  async serverRequest(m) {
+  rememberFileDetails(run, p) {
+    if (typeof p.turnId !== 'string' || typeof p.item.id !== 'string' ||
+        p.turnId.length > 256 || p.item.id.length > 256) return;
+    if (run.external && !run.dispatching && p.turnId !== run.turn) return;
+    const key = JSON.stringify([p.turnId,p.item.id]);
+    const entries = run.fileDetails ??= new Map();
+    // No eviction: an over-limit event cannot resurrect an older reviewable
+    // snapshot. Byte accounting is cumulative for this run, including updates.
+    if (!entries.has(key) && entries.size >= 32) return;
+    entries.set(key,null);
+    const changes = p.item.changes;
+    if (!Array.isArray(changes) || !changes.length || !changes.every(c =>
+      c && typeof c.path === 'string' && c.path.length && c.kind && typeof c.diff === 'string')) return;
+    const details = JSON.stringify(changes), size = Buffer.byteLength(details);
+    if (size > 10000 || (run.fileDetailBytes || 0) + size > 64000) return;
+    run.fileDetailBytes = (run.fileDetailBytes || 0) + size;
+    entries.set(key,details);
+  }
+  dispatchOverflow(run) {
+    if (run.dispatchOverflowNotified) return;
+    run.dispatchOverflowNotified = true;
+    void this.feishu.text(run.chat,'共享交互暂存已达上限，请在原客户端处理待决请求；未自动批准、拒绝或重跑。').catch(() => {});
+  }
+  async serverRequest(m, dispatchOwner = null) {
     const p = m.params || {}, run = this.runs.get(p.threadId);
+    if (this.closed || !this.available) return;
+    if (dispatchOwner && (run !== dispatchOwner || run.ending || this.store.binding(run.chat)?.thread !== run.thread)) return;
+    if (run?.external && this.rpc.shared && !run.ending && ['item/commandExecution/requestApproval','item/fileChange/requestApproval','item/tool/requestUserInput','item/permissions/requestApproval','mcpServer/elicitation/request'].includes(m.method)) {
+      // Keep a bounded identity ledger for this observation, including resolved requests.
+      // Never evict IDs and later replay an old decision when the limit is reached.
+      if (!dispatchOwner) {
+        run.requestIds ??= new Set();
+        if (run.requestIds.has(m.id)) return;
+        if (run.requestIds.size >= 32) { this.dispatchOverflow(run); return; }
+        run.requestIds.add(m.id);
+      }
+      if (run.dispatching) {
+        if (this.controller.permission() !== 'work' || this.store.binding(run.chat)?.thread !== run.thread || !p.turnId) return;
+        const size = Buffer.byteLength(JSON.stringify(m));
+        if (size > 10000 || (run.dispatchBytes || 0) + size > 64000) { this.dispatchOverflow(run); return; }
+        run.dispatchBytes = (run.dispatchBytes || 0) + size;
+        (run.dispatchRequests ??= new Map()).set(m.id, structuredClone(m));
+        return;
+      }
+    }
+    if ((!run || run.ending || (run.external && p.turnId && run.turn !== p.turnId)) && this.rpc.shared) return;
     if (!run || run.ending) { this.rpc.reject(m.id, '没有对应的飞书任务'); return; }
     if (m.method === 'item/tool/call') {
+      // Shared desktop tools must be answered by their owner, not raced with an error.
+      if (run.external && this.rpc.shared && !['feishu_threads_search','feishu_thread_read','feishu_send_file','aegpc_repository_approval'].includes(p.tool) && !p.tool?.startsWith('feishu_doc_')) return;
       let result, success = true;
       try {
         const a = p.arguments || {};
@@ -471,12 +672,22 @@ ${this.ownerGroups?OWNER_GROUP_INSTRUCTIONS:''}` };
       this.rpc.respond(m.id, { success, contentItems: [{ type: 'inputText', text: JSON.stringify(result) }] }); return;
     }
     if (!['item/commandExecution/requestApproval','item/fileChange/requestApproval','item/tool/requestUserInput','item/permissions/requestApproval','mcpServer/elicitation/request'].includes(m.method)) {
+      if (run.external && this.rpc.shared) {
+        await this.feishu.text(run.chat,'此交互无法在飞书展示，请在原客户端处理。').catch(() => {}); return;
+      }
       if (m.method === 'mcpServer/elicitation/request') this.rpc.respond(m.id, { action: 'decline', content: null });
       else this.rpc.reject(m.id, '此交互暂不支持通过飞书完成');
       await this.feishu.text(run.chat, `Codex 请求了暂不支持的交互：${m.method}。请在本机处理相关配置或授权后重试。`); return;
     }
+    const fileDetails = m.method === 'item/fileChange/requestApproval'
+      ? run.fileDetails?.get(JSON.stringify([p.turnId,p.itemId])) : null;
+    if (m.method === 'item/fileChange/requestApproval' && !fileDetails) {
+      if (!(run.external && this.rpc.shared)) this.rpc.respond(m.id,{decision:'decline'});
+      await this.feishu.text(run.chat,'无法完整核对该文件审批的路径及修改内容，飞书审批入口未开放，请在原客户端处理。').catch(() => {});
+      return;
+    }
     const token = randomBytes(5).toString('hex');
-    const prompt = { id: m.id, method: m.method, params: p, chat: run.chat, thread: run.thread,
+    const prompt = { id: m.id, method: m.method, params: p, chat: run.chat, thread: run.thread, turn: p.turnId || run.turn,
       expires: Date.now() + 10*60*1000, answers: {} };
     this.prompts.set(token, prompt);
     prompt.timer = setTimeout(() => {
@@ -489,28 +700,28 @@ ${this.ownerGroups?OWNER_GROUP_INSTRUCTIONS:''}` };
       if (m.method === 'mcpServer/elicitation/request') {
         if (p.mode === 'url') {
           prompt.authorizationUrl = authorizationUrl(p.url);
-          await this.feishu.interactive(run.chat, '需要网页授权',
+          await this.promptCard(prompt, run.chat, '需要网页授权',
             `${p.serverName}：${p.message}\n\n请打开授权地址，完成后再确认：\n${prompt.authorizationUrl}\n\n/approve ${token} 或 /deny ${token}\n10 分钟内有效。`,
             [{ label: '打开授权页面', url: prompt.authorizationUrl }, { label: '已完成网页授权', value: { token, decision: 'accept' } }, { label: '拒绝', value: { token, decision: 'decline' } }]);
         } else if (['form','openai/form','openaiForm'].includes(p.mode)) {
           if (Buffer.byteLength(JSON.stringify(p)) > 10000) throw new Error('授权详情过长，请在本机处理');
           prompt.fields = formFields(p.requestedSchema);
-          await this.feishu.interactive(run.chat, 'MCP 请求确认',
+          await this.promptCard(prompt, run.chat, 'MCP 请求确认',
             `${p.serverName}：${p.message}\n\n请先回答字段，再点击提交；默认值不会自动提交。\n/approve ${token} 或 /deny ${token}\n10 分钟内有效。`,
             [{ label: '提交并批准', value: { token, decision: 'accept' } }, { label: '拒绝', value: { token, decision: 'decline' } }]);
           for (const [key, field] of prompt.fields) {
             const options = fieldOptions(field);
-            await this.feishu.interactive(run.chat, field.title || key,
+            await this.promptCard(prompt, run.chat, field.title || key,
               `${field.description || key}\n类型：${field.type}；${(p.requestedSchema.required || []).includes(key) ? '必填' : '选填'}\n${JSON.stringify(field)}\n\n/answer ${token} ${key} 你的回答`,
               options.slice(0,8).map(o => ({ label: o.label, value: { token, question: key, answer: String(o.value) } })));
           }
         } else throw new Error(`此交互需要在本机完成：${p.mode}；飞书暂不支持此类原生验证流程`);
       } else if (m.method === 'item/tool/requestUserInput') {
         if (p.questions.some(q => q.isSecret)) {
-          this.denyPrompt(token); await this.feishu.text(run.chat, '该请求涉及秘密信息，请在本机完成配置后重试。'); return;
+          this.unavailablePrompt(token,run); await this.feishu.text(run.chat, '该请求涉及秘密信息，请在本机完成配置后重试。'); return;
         }
         for (const q of p.questions) {
-          await this.feishu.interactive(run.chat, q.header || '需要你的回答',
+          await this.promptCard(prompt, run.chat, q.header || '需要你的回答',
             `${q.question}\n\n自定义回答：\n/answer ${token} ${q.id} 你的回答\n\n10 分钟内有效。`,
             (q.options || []).slice(0,8).map(o => ({ label: o.label, value: { token, question: q.id, answer: o.label } })));
         }
@@ -518,18 +729,40 @@ ${this.ownerGroups?OWNER_GROUP_INSTRUCTIONS:''}` };
         const details = [p.reason, p.command, p.cwd ? `工作目录：${p.cwd}` : '', p.permissions ? JSON.stringify(p.permissions) : '',
           p.grantRoot ? `文件授权目录：${p.grantRoot}` : '', p.additionalPermissions ? JSON.stringify(p.additionalPermissions) : '',
           p.networkApprovalContext ? JSON.stringify(p.networkApprovalContext) : '',
-          m.method === 'item/fileChange/requestApproval' && run.fileChanges ? JSON.stringify(run.fileChanges) : ''].filter(Boolean).join('\n');
+          fileDetails || ''].filter(Boolean).join('\n');
         if (Buffer.byteLength(details) > 10000) {
-          this.denyPrompt(token);
-          await this.feishu.text(run.chat, '审批详情过长，已拒绝本次操作。请让 Codex 拆成更小的操作后重试，以便完整核对。'); return;
+          this.unavailablePrompt(token,run);
+          await this.feishu.text(run.chat, '审批详情过长，飞书入口已关闭。请让 Codex 拆成更小的操作后重试，以便完整核对。'); return;
         }
-        await this.feishu.interactive(run.chat, 'Codex 需要批准',
+        await this.promptCard(prompt, run.chat, 'Codex 需要批准',
           `${details || '当前操作需要你批准。'}\n\n/approve ${token} 或 /deny ${token}\n10 分钟内有效；批准仅针对本次请求。`,
           [{ label: '批准本次', primary: true, value: { token, decision: 'accept' } }, { label: '拒绝', value: { token, decision: 'decline' } }]);
       }
-    } catch (e) { this.denyPrompt(token); await this.feishu.text(run.chat, `交互已关闭：${this.redact(e)}`).catch(() => {}); }
+    } catch (e) { this.unavailablePrompt(token,run); await this.feishu.text(run.chat, `交互已关闭：${this.redact(e)}`).catch(() => {}); }
   }
-  clearPrompt(token) { const p = this.prompts.get(token); if (p) clearTimeout(p.timer); this.prompts.delete(token); }
+  unavailablePrompt(token,run) {
+    if (this.rpc.shared && run.external) this.clearPrompt(token); else this.denyPrompt(token);
+  }
+  async promptCard(prompt, chat, title, text, buttons) {
+    const result = await this.feishu.interactive(chat, title, text, buttons);
+    if (!result?.message_id) return;
+    const entry = { id: result.message_id, text };
+    (prompt.cards ??= []).push(entry);
+    // A peer may resolve or detach while the initial message is still being sent.
+    if (prompt.closedStatus) await this.finishPromptCard(entry, prompt.closedStatus);
+  }
+  async finishPromptCard(entry, status) {
+    try { await this.feishu.replaceInteractive(entry.id, status, `${status}。此卡片已失效。\n\n${entry.text.split('\n\n/')[0]}`); }
+    catch { this.log('审批卡片状态更新失败；旧操作已失效。'); }
+  }
+  clearPrompt(token, status = '交互已关闭') {
+    const p = this.prompts.get(token);
+    if (!p) return;
+    clearTimeout(p.timer);
+    p.closedStatus = status;
+    this.prompts.delete(token);
+    for (const entry of p.cards ?? []) void this.finishPromptCard(entry, status);
+  }
   denyPrompt(token) {
     const p = this.prompts.get(token); if (!p) return;
     try {
@@ -537,7 +770,7 @@ ${this.ownerGroups?OWNER_GROUP_INSTRUCTIONS:''}` };
       else if (p.method === 'item/tool/requestUserInput') this.rpc.respond(p.id, { answers: {} });
       else if (p.method === 'item/permissions/requestApproval') this.rpc.respond(p.id, { permissions: {}, scope: 'turn' });
       else this.rpc.respond(p.id, { decision: 'decline' });
-    } finally { this.clearPrompt(token); }
+    } finally { this.clearPrompt(token, '已拒绝或已超时'); }
   }
   async action(chat, value) {
     const p = this.prompts.get(value.token);
@@ -557,13 +790,13 @@ ${this.ownerGroups?OWNER_GROUP_INSTRUCTIONS:''}` };
       if (!p.fields && !p.authorizationUrl) throw new Error('此请求无法通过飞书批准');
       if (p.fields) validateForm(p.params.requestedSchema,p.answers);
       this.rpc.respond(p.id, { action: 'accept', content: p.fields ? p.answers : null });
-      this.clearPrompt(value.token); await this.feishu.text(chat, '已提交本次确认，任务继续。'); return;
+      this.clearPrompt(value.token, '已提交处理'); await this.feishu.text(chat, '已提交本次确认，任务继续。'); return;
     }
     if (p.method === 'item/tool/requestUserInput') {
       if (!p.params.questions.some(q => q.id === value.question) || !String(value.answer || '').trim()) throw new Error('问题 ID 或回答无效。');
       p.answers[value.question] = { answers: [String(value.answer).slice(0,12000)] };
       if (p.params.questions.every(q => p.answers[q.id])) {
-        this.rpc.respond(p.id, { answers: p.answers }); this.clearPrompt(value.token);
+        this.rpc.respond(p.id, { answers: p.answers }); this.clearPrompt(value.token, '已提交处理');
         await this.feishu.text(chat, '回答已提交，任务继续。');
       } else await this.feishu.text(chat, '已记录此答案，请继续回答其他问题。');
       return;
@@ -571,13 +804,18 @@ ${this.ownerGroups?OWNER_GROUP_INSTRUCTIONS:''}` };
     if (!['accept','decline'].includes(value.decision)) throw new Error('审批操作无效。');
     if (p.method === 'item/permissions/requestApproval') this.rpc.respond(p.id, { permissions: value.decision === 'accept' ? p.params.permissions : {}, scope: 'turn' });
     else this.rpc.respond(p.id, { decision: value.decision });
-    this.clearPrompt(value.token);
+    this.clearPrompt(value.token, '已提交处理');
     await this.feishu.text(chat, value.decision === 'accept' ? '已批准本次请求。' : '已拒绝本次请求。');
   }
   async close() {
     this.closed = true;
     clearInterval(this.ownerTimer);
-    for (const token of [...this.prompts.keys()]) { try { this.denyPrompt(token); } catch {} }
-    for (const r of this.runs.values()) clearInterval(r.timer);
+    for (const [token,p] of [...this.prompts]) {
+      try { if (this.rpc.shared && this.runs.get(p.thread)?.external) this.clearPrompt(token); else this.denyPrompt(token); } catch {}
+    }
+    for (const r of [...this.runs.values(),...this.retiredRuns]) {
+      clearInterval(r.timer);
+      if (r.external && !r.ending) { r.ending=true; r.dispatchRequests?.clear(); r.fileDetails?.clear(); if (r.card) await this.feishu.finish(r.card,++r.sequence,'已解除观察').catch(() => {}); }
+    }
   }
 }

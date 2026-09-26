@@ -5,7 +5,7 @@ import { TOOLS } from '../src/history.mjs';
 
 // A real local protocol check, no model invocation and no Feishu requests.
 const config = loadConfig(undefined, false);
-const rpc = new CodexClient(config.codex.binary);
+const rpc = new CodexClient(config.codex.binary, {url: config.codex.appServerUrl, socketPath: config.codex.appServerSocket});
 try {
   await rpc.start();
   const r = await rpc.request('thread/start', { cwd: config.codex.cwd, ephemeral: true,

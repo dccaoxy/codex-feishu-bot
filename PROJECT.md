@@ -1,3 +1,36 @@
+# 当前交接：PR #5 文件审批详情返工（2026-09-25）
+
+- Task Source：[c8987ee 复审 NEEDS CHANGES](https://github.com/dccaoxy/codex-feishu-bot/pull/5#issuecomment-5829284696)，R1–R3；同一分支先转 Draft，不部署、不 Merge、不扩展 Phase 3。
+- 根因与复现：dispatching 期间仅保留 requestApproval，丢失先到达的 fileChange item。请求本身不含 changes，旧代码还使用最后一个无身份的 run.fileChanges，可能无路径/diff或显示另一修改项却允许批准。新增10项在修复前6失败、4通过；旧225项PASS不能覆盖这一缺口。失败日志保留本机忽略目录 data/pr5-file-approval-rework/before.log。
+- 修复提交 `ae7717b`：在dispatch短路之前保存fileChange详情，以run的thread及精确turnId/itemId匹配；删除最后一项替代逻辑。每run最多32项，单项10KB、累计64KB（更新也计入），不淘汰复用；更新缺失/超限会先使旧快照失效。无可靠详情时不创建审批token或按钮，共享外部请求只提示回原客户端，无自动批准/拒绝。resolved、解绑、结束、断线、close清理暂存，保留此前请求身份去重与回合检查。
+- 自动验证：Node24.21.0 / Codex0.155.0-alpha.16.3；check及236项全量测试PASS，0失败/跳过。新增11项覆盖真实Bot.run→ThreadController.send的等待期间与之后正常路径、缺失/超限、不同item/turn、resolved/detach/close/disconnect及有界缓存。正常卡片同时断言正确路径/diff、无其他item内容、零start/一次steer/一次批准；异常无token、无自动RPC决定。Group/Knowledge/Owner模块与集成main 9de0926一致，既有FIFO/隔离等测试保留。
+- 环境/协议：doctor握手、登录、7模型与无模型smoke通过；Group首次/恢复16次、Knowledge12次隔离探针通过（真实二进制、假provider）。真实Bot+共享App Server+模拟peer/UI双向、steer/interrupt、对端先拒绝及Bot批准后迟到决定不重放通过；一次无副作用printf。独立WS/Unix work:check最终复核通过。
+- 未隐藏的失败与限制：独立WS首次及一次复核报 thread/read: list_turns is not supported yet；Unix首次在活动状态断言时返回idle。后续独立复核均通过，未修改脚本、生产协议逻辑或放宽断言；初始波动根因未完全定位，不能将最终通过解释为没有波动。所有失败及成功日志保留 data/pr5-file-approval-rework。文件审批等待竞态为确定性模拟，未做真实飞书/UI文件审批故障注入；真实协议测试有模型调用，无飞书消息。
+- 交付与边界：README/PROJECT及PR/Issue同步，推送同一PR后重新Draft→Ready，等待新head独立审核，不宣称自动PASS。未部署/重启候选、修改真实配置、授权群、数据库、Shared服务或遥测；Human接受历史稳定性证据和免重复UI/8小时soak指令继续有效，本轮未重复。既有Knowledge blocked不在本次范围，Issue #3保持开放，停止不撤销已发生修改。以下各节为历史记录，以本节为最新交接。
+
+# 当前交接：PR #5 审核返工（2026-09-25）
+
+- Task Source：[189e5a8审核NEEDS CHANGES](https://github.com/dccaoxy/codex-feishu-bot/pull/5#issuecomment-5827313464)。PR先转Draft，同一分支处理R1–R3；不扩展Phase 3、不部署。
+- 复现：真实Bot.run→ThreadController.send→慢stream期间对端启动回合并请求permissions审批。旧代码新增5个用例中4个失败：正常路径漏卡片，以及detach/close/disconnect后仍可能发送输入；resolved用例通过不能证明审批正常接续。旧218项不覆盖这些路径。失败日志保留data/pr5-rework/before.log。
+- 修复提交`71d6799`：共享外部观察在dispatching期间按请求ID暂存支持的交互，控制器返回确切turn后仅处理匹配请求一次；保留turn与当前绑定/观察身份检查。每次观察最多32个交互ID，单条10KB、累计64KB；不淘汰旧ID后重新接纳，超限仅一次提示回原客户端处理，无自动决定。正常外部工具路由不受此交互上限限制。resolved删除暂存且保留去重身份；detach/endRun/disconnect/close清空。UI返回后再核对活动观察、绑定、连接及关闭状态，取消后不继续发输入；不重发模型操作、不放松审批策略。
+- 回归：225项全量测试PASS，0失败/跳过；新增正常/对端resolved/解绑/关闭/断线/错误turn及暂存上限去重共7项，保留慢卡片A→B、展示失败、迟到卡片和组合恢复。正常路径只有一次steer、0次start、正确turn审批一张、一次决定后token失效；取消路径0次决定、无旧审批恢复。check通过。
+- 真实验证：WebSocket/Unix work:check均通过（临时任务的start/steer/竞争/fork/interrupt/detach/绑定恢复）；doctor握手/登录/7模型、无模型smoke通过；Group首次/恢复16次及Knowledge12次隔离探针通过（真实二进制、假provider）。真实Bot+共享App Server+模拟对端/UI双向/steer/interrupt、对端拒绝后旧批准失效、Bot批准后迟到拒绝不重放通过（一次无副作用printf）。本轮有真实模型调用，没有真实飞书出站或Desktop UI操作。首次协议脚本在完成通知到达前检查结果失败，保留shared-initial-failure.log；脚本增加明确等待对应turn/completed，重跑通过，不删断言、不放宽生产逻辑。回归证据仅本机忽略目录data/pr5-rework。
+- 边界：main的Group/Knowledge/Owner及既有测试未改，现有生产运行目录、配置、授权群、数据库、Shared服务和遥测均未修改/重启。新修复未部署、慢卡片竞态只做确定性模拟而非真实客户端故障注入；历史部署与观察不冒称新head真实验收。沿用Human接受既有稳定性证据及免重复UI/8小时soak指令；既有Knowledge blocked未处理。
+- 交付：代码/文档提交推送后，同一PR #5重新Draft→Ready请求新head审核；Ready不等于PASS，不Merge。Issue #3保持开放，Phase 3未实施。下方收口记录是此前189e5a8时点，已由本节返工状态更新。
+
+# 当前交接：PR #5 Phase 2 最终收口（2026-09-25）
+
+本节为最新事实源；下方各节保留各历史时点的部署、验收及限制，不将旧“待验收/保持Draft”误作本次Gate。
+
+- **Task Source**：Human最新明确指令及PR #5最终收口计划（评论5815781893），Issue #3仅Phase 2。最新main `9de09265c2c50702913c575aeb90ed3e53bd9f0b`已含PR #14/#15；集成到原`codex/issue-3-work-attach`，不是合并PR到main。
+- **Implementation**：保留main完整群历史、Persistent Group Thread、Owner Resource Gateway、FIFO、Group Knowledge、Owner Group Gateway及审查修复。group/knowledge/owner模块和既有测试与main逐文件一致；仅Bot imports/recover冲突需组合：外部Work待处理消息标uncertain不重放，机器人自有私聊待处理消息恢复Owner请求授权再调度。保留Shared WS/Unix、原Thread start/steer/interrupt/fork/detach、审批token/卡片生命周期和遥测；Full继续拒绝，不扩展群Control。
+- **Validation**：Node24.21.0/Codex0.155.0-alpha.16.3；check、218项全量测试PASS，0失败/跳过（原217项加组合恢复用例）。覆盖Raw/FIFO/Knowledge/Owner边界，以及审批一次性token、对端先处理、迟到卡片、展示失败不重放、FD分类/阈值/轮换。doctor真实握手、登录、7模型和含Owner工具schema的smoke通过；使用本checkout配置（群功能关闭），不冒充在线群配置验证。Group首次/恢复16次及Knowledge12次隔离攻击探针通过（真实二进制、假provider）。
+- **真实协议**：WebSocket及Unix独立临时服务器work:check通过，覆盖原ID、idle start、active steer、竞争start同回合、fork、interrupt、detach和绑定恢复。真实Bot+共享App Server+模拟对端/UI通过双向结果、active steer/interrupt、对端拒绝后旧批准失效、Bot批准后迟到拒绝不重复执行（一次无副作用printf）。实际调用模型，只清理测试创建的任务，不发送真实飞书消息、不重做Desktop UI验收。
+- **首次失败及修正**：Unix work:check曾在历史完成/恢复后仍读到active，实际返回steer而测试预期start，未算通过；测试原先仅检查历史终态。脚本现在同时等待控制器读取的live idle，且attach之后再次确认，再测试idle start，未放宽生产控制器或把steer算作start。修正后WS/Unix均通过。原始失败及全部成功日志保留本机Git忽略目录`data/pr5-final-check/`。
+- **Human Gate**：Human确认双端Shared Runtime已持续真实使用且稳定，明确接受现有长期证据，免重复8小时soak和双端同步人工验收。沿用下方09-25 07:02记录：483样本、8小时4分15.751秒、最大间隔60.392秒，FD31/峰51/末27、pipe3、子进程1、loaded0–2、RSS225632/峰235344/末146288KiB，窗口内无新EMFILE。此次没有重新执行soak/UI，不把历史版本证据称为新head实测，也不承诺绝对无泄漏。
+- **部署与边界**：本轮没有部署、重启服务、修改运行目录/真实配置/授权群/数据库/Shared Runtime或遥测安排；现有PR #15 f3d9ec1与PR #5组合候选继续运行。既有Knowledge补算blocked属于保留的已知问题，不借此次收敛重试/扩大整改。自动回归通过不等于其线上补算已恢复。
+- **交付与下一步**：README/PROJECT同步，提交推送同一PR #5后核对远端head并Draft→Ready，等待该head独立审核；Ready不等于PASS。新head未部署，不自动Merge，Issue #3保持开放（Phase 3未实施）。此次免重复验收为Human明确调整，不是Agent自行豁免。停止任务不会撤销已发生修改。
+
 ## PR #15 真实私聊验收完成（2026-09-25）
 
 - Human明确反馈四步“测试都成功了”：授权群目录、历史事实及原文来源只读查询、明确目标单条发送、带冒号切换群后指代发送被要求明确目标。群客户端正文一致/仅一条、查询及模糊指代不发消息由Human确认，不冒充Agent独立读取全部客户端记录。
@@ -105,7 +138,58 @@
 # 飞书本地 Codex 机器人 — 项目状态
 
 ## 项目目标
-让用户在飞书中与本机 Codex 交互，由本地 Node.js 服务通过 stdio / JSON-RPC 调用 codex app-server，并通过飞书长连接收发消息、卡片和附件。
+让用户在飞书中与本机 Codex 交互，由本地 Node.js 服务通过 stdio / JSON-RPC（Work 可选本机共享 WebSocket / Unix socket）调用 codex app-server，并通过飞书长连接收发消息、卡片和附件。
+
+## Phase 2 资源观察完成（2026-09-25 07:02复核）
+
+本段为最新观察结论，覆盖下方“观察进行中”的历史记录。部署源码仍8cd4418，47个部署文件哈希与清单一致。本轮仅更新观察记录，不改代码、配置或服务。
+
+- 正式起点09-24 22:56:47；采用起点之后的483条实际样本，首条22:57:26.134、末条09-25 07:01:41.885（北京时间），实际连续覆盖8小时4分15.751秒，超过8小时。最大间隔60.392秒，无可见采样缺口、无轮换遗漏、无异常样本；不计起点前数据，也未把睡眠/停机缺口补成覆盖。
+- 全窗Shared PID67006及启动时间不变；FD31起、51峰、27末（范围25–51），pipe始终3；直接子进程始终1；连接计数始终1；loaded tasks范围0–2、末值1，10条样本为0。RSS首225632、峰235344、末146288 KiB（范围146240–235344）。没有发现FD/pipe/子进程持续累积，RSS有回落；RSS下降不单独证明对象释放。
+- alerts.jsonl不存在，采样stderr为0字节；机器人及Shared服务日志无窗口内新增EMFILE/Too many open files。日志历史错误保留，未清除。采样级连接正常不等于真实消息往返验收。
+- 空闲/低负载阶段FD及RSS回落，但末尾仍1个已加载任务，不能称所有任务已卸载；此前短测loaded 0→3→0仅作为独立短测证据。本轮不是持续高并发压力测试，也没有专门执行sleep/wake恢复测试。期间23:06授权新增群/机器人重启已记deployment-events；独立PR #14历史验收曾使用同机资源，但未替换本候选或共享服务。
+- 结论：本次至少8小时资源观察已完成，在该窗口与负载下未发现资源持续增长或句柄耗尽迹象，不承诺绝对无泄漏、无再次耗尽风险。审批沿用用户确认的此前验收，按要求免重复，未重做本次部署后UI验收。
+- 原始样本、marker、deployment-events及本次phase2-observation-result.json保留在本机忽略目录data/shared-lab/telemetry；每60秒launchd采样保留。本heartbeat按授权在回写后暂停。PR保持现有审核状态，后续最终审核/合并由既有流程另行处理；本次不Merge、不进入Phase3、不重启服务、不改权限，不影响PR #14独立开发。
+
+## 当前任务：PR #5 Phase 2 基线收敛
+
+Task Source：用户要求先完成最新main收敛与完整组合回归；[最终收口计划](https://github.com/dccaoxy/codex-feishu-bot/pull/5#issuecomment-5815781893)。PR #5先退回Draft；旧head 53c8575的PASS不覆盖本轮。基线origin/main为fcd1ab7（已合并PR #7/#9/#11），集成到原codex/issue-3-work-attach开发分支；不是合并PR到main。
+
+main提供完整群历史、Persistent Group Thread、Owner Gateway、持久FIFO Queue及最新queue_full撤回修复；这些模块与main保持一致。PR #5提供共享WebSocket/Unix socket、Work Attach及start/steer/interrupt/fork/detach、审批卡片生命周期和资源观测工具。冲突仅README及CodexClient构造器；保留两套文档，合并共享传输参数与main的独立env/cwd，保留群环境隔离。Node最低版本沿用main的24.10，当前24.21.0；Codex为0.155.0-alpha.16.3。Full仍拒绝，未进入Phase 3。
+
+当前合并源码check、148项全量测试通过（群PR #7/#9/#11及Work/审批/token/迟到卡片/显示失败不重放/FD工具全部回归）。doctor共享App Server握手、登录、7模型通过；无模型smoke通过。group:check在真实二进制上首次/恢复10项隔离探针通过（假provider、不调用真实模型）。真实Work WebSocket及Unix socket独立测试覆盖start/steer/interrupt/fork/detach、绑定恢复；真实Bot+协议对端验证双向回复、active steer/interrupt、对端拒绝后旧token失效、Bot批准后迟到拒绝不重复执行。测试只操作临时任务，飞书UI为模拟，不是本轮真实Desktop/飞书界面验收。
+
+资源短测首轮失败记录：旧shared-soak使用thread/read(includeTurns)遇到当前协议“list_turns is not supported yet”，已保留本地phase2-soak-failed.log和独立soak JSON，不算通过。脚本改为复用ThreadController.turns的thread/turns/list及仅MethodNotFound回退逻辑，轮询与清理均修正。修改后check/148项重跑通过。
+
+修正后真实共享模型soak持续约5分01秒：6回合、3次无副作用printf、3次重连、清理错误0。FD 51→84峰值→51；loaded任务0→3→0；直接子进程1→1，pipe3→3；RSS 215920→221136 KiB，仍高约5MiB。独立只读压力测试240连接/2400次元数据读取通过，6批峰值均91、关闭后均51，增长0，新EMFILE为0。只能证明这次短测回收，不能宣称长期无泄漏或历史根因已解决。原始失败与成功日志、soak/资源JSON保留在忽略的data目录。
+
+本轮尚未部署收敛分支，现有单群候选及真实配置不变；不重启机器人/Desktop/共享服务，不发真实飞书消息。真实正式审批卡片最终视觉、数小时/隔夜及sleep/wake验收仍是后续Gate；基线与协议短测不得冒充最终Phase 2收口。本轮按用户“先完成基线收敛和组合回归”范围交付，PR保持Draft，后续完整验收后再Draft→Ready，不Merge。
+
+## Phase 2 步骤3–4进行中：组合候选已部署，等待正式审批验收
+
+用户明确授权部署8cd4418并在正式双端审批卡片验收通过后开始至少8小时、每60秒资源观察。已部署精确源码8cd44185d94846e65839767b17555f1fb7854ad3到原data/issue6-candidate；部署前确认单聊无活动run、群无queued/running/sending。源文件从该提交提取；原配置字节未变，仍原单群、Owner Gateway资源与私人片段范围、FIFO及Shared Runtime Work权限。备份位于本机忽略目录 phase2-combined-backup-20260924224532（data下），保存旧源码/配置/群SQLite。
+
+实际候选check/148项组合测试、doctor（登录、7模型；群1、Owner网关启用）、无模型smoke通过。仅机器人重启，launchd running，新启动日志确认Codex与飞书长连接ready；未重启Desktop/共享服务。没有改权限、没有Merge或进入Phase 3。
+
+正式审批卡片真实验收尚待用户操作，不能以自动测试或连接ready替代。拟在已绑定共享任务用request_permissions申请一个专用测试文件的写权限，由用户在Desktop拒绝，检查飞书原审批卡片关闭/移除按钮且旧操作不再生效，不产生文件写入。通过后才设置正式观察起点并核验60秒采样任务；目前尚未开始本轮8小时验收计时，既有遥测不冒充本轮验收。需记录FD/pipe、子进程、loaded tasks、RSS与连接状态；观察不足、采样缺口或睡眠需如实记录。
+
+## Phase 2 正式资源观察已启动（2026-09-24 22:56）
+
+用户确认昨天审批测试已通过，明确不重复。本轮采用用户确认作为继续依据；没有重新执行部署后审批UI测试，不将历史截图冒充新版本视觉证据。
+
+已启用独立launchd只读采样，StartInterval=60秒，首条样本有效。正式窗口从2026-09-24 22:56:47至最早2026-09-25 06:56:47（北京时间），部署源码8cd4418。初始FD31（pipe3）、直接子进程1、loaded tasks0、RSS226064KiB、连接1、status ok。记录FD、分类、RSS、子进程、loaded任务、连接及进程身份；不得把上限提高当作根因修复。数据/起点位于忽略目录data/shared-lab/telemetry，后台每30分钟复核异常及采样覆盖，安静观察无变化状态。
+
+尚未完成8小时验收。休眠/停机/采样缺口、PID变化需单独记录，覆盖不足不能判连续稳定；结束后评估负载及空闲回收并写回PR。未改机器人/Shared Runtime权限，未重启它们，未Merge或进入Phase3。
+
+## 新群正式启用（2026-09-24 23:06）
+
+Task Source：用户明确要求将新群加入本地授权名单，启用@自动回复并允许Owner访问私人任务和数据库，正式使用机器人。本次是本机配置部署，源码仍8cd4418；授权群从1扩为2，保留原测试群。Owner Gateway仍限原先1个私人任务的1条授权片段、1个只读统计数据库资源；没有扩展字段、数据源、文档写权限或Shared Runtime Work权限。普通成员不能调用Owner Gateway，Owner须显式使用/owner命令；授权读取结果会在群中回复。
+
+已备份本地配置到忽略目录data/production-group-backup-20260924230636，并核对除groups.allowedChatIds新增一项外其余配置不变。确认无活动/排队请求后仅重启机器人，launchd running，启动后Codex与飞书长连接均ready；未重启Desktop或共享App Server。新群历史同步于23:06:43完成，initial_complete=1，收录250条可用消息，无历史请求生成、无停止标记。先前只读API检查259条含9条删除记录，与本地250条一致；complete仅指API可见历史范围，不代表附件内容或平台未提供的消息。
+
+实际候选check、doctor、无模型smoke通过；加载真实配置的本地策略检查通过（@响应、非@忽略、非Owner拒绝、非显式命令拒绝、保留资源范围）。未代用户发送群测试消息，新增群的真实@模型回复及Owner读取仍待首次实际使用确认。未修改源码，未Merge，未进入Phase3。
+
+原8小时资源观察继续，起点未重置；本次新增生产群和机器人重启作为负载/部署事件记入本地遥测deployment-events.jsonl。最新23:06:28样本同一共享PID，FD25、pipe3、子进程1、loaded0、RSS211712KiB、连接1、normal。点状正常不代表8小时已完成；长期稳定Gate仍在进行中。PR #5保持Draft等待收口，不将本次生产启用等同于最终验收完成。
 
 ## 当前任务：Issue #12 Group Knowledge（独立开发线）
 
@@ -145,6 +229,7 @@ Task Source：[Issue #12](https://github.com/dccaoxy/codex-feishu-bot/issues/12)
 已知限制：模型语义仍需人工核验；大量输入/超过50主题/单主题过大将停止该群补算，需要明确诊断处置；不做分块归并或向量检索。撤回采用整群派生重建以避免间接污染，成本较高，重建期间知识不可读但原始消息及正常群请求保留。所有运行日志/配置/数据库仅本机忽略目录，不提交凭据、群ID或消息正文。
 
 ## 已合并基线：Issue #10 Group Request Queue
+
 
 Task Source：[Issue #10](https://github.com/dccaoxy/codex-feishu-bot/issues/10)，用户要求读取AGENTS并执行。核实PR #7、#9均已合并，从最新main `51db514`创建独立分支 `codex/issue-10-group-queue`；PR #5仍open、未合并，head `53c8575`。用户已明确允许完成自动测试后更新原单群候选、仅重启机器人，不重启Desktop、不Merge。
 
@@ -307,7 +392,7 @@ Task Source：PR #7 审核评论 5811433295，用户要求返工。旧版活动�
 ## 已完成
 - README 已覆盖安装、飞书权限、运行、诊断、恢复和边界。
 - 已建立 AGENTS.md 与 PROJECT.md 作为长期 Agent 接续入口。
-- Issue #2 的外部 Thread 只读访问已在当前 Mac 的本地配置中启用；仓库示例配置仍默认为关闭。机器人已重启，代码仍禁止切换或分支外部 Thread。
+- Issue #2 的外部 Thread 只读访问已在当前 Mac 的本地配置中启用；仓库示例配置仍默认为关闭。该阶段已部署；2026-09-19 本轮按用户授权将本机机器人切到 Phase 2 共享 Work 联调，原 Read 配置已备份。
 
 ## 关键决定
 - 飞书只是交互界面，Codex 仍在本机执行。
@@ -323,7 +408,7 @@ Task Source：PR #7 审核评论 5811433295，用户要求返工。旧版活动�
 
 ## 下一步
 1. 自然语言自主读取工具仍待单独实测；用户已确认更新时间展示成功，命令方式的搜索、读取、引用和自然语言列表已验证。
-2. 按 Issue #3 的阶段顺序，先设计 Work/Attach 的并发与控制边界，再考虑 Full 权限；不得把外部会话只读开关当作控制授权。
+2. 完成下方 Desktop 人工验收，等待 PR #5 自动审核结论；不自动合并，也不进入 Full。
 3. 每次功能扩展同步更新 README 与本文件，记录真实环境的验证时间和边界。
 
 ## 最近交接：Issue #2（2026-09-19，当前 Mac）
@@ -341,4 +426,73 @@ Task Source：PR #7 审核评论 5811433295，用户要求返工。旧版活动�
 - 用户自然语言查询返回 15 项会话，但模型报告时间未提供。根因是桥接层遗漏了 Codex 原始 `updatedAt` 字段。
 - 已补充原始秒级时间戳、UTC ISO 时间和北京时间；外部列表按 `updated_at` 排序，命令列表显示“最后更新”。此字段不冒充精确的最后消息时间。
 - 真实 app-server 验证 15 项均有时间且按更新时间降序；check、30 项测试、doctor、smoke 通过。用户随后确认飞书端时间展示成功。
-- 本次修改已随 PR #4 提交和推送，本机服务已部署。PR #4 尚未合并，Issue #2 尚未关闭；实现与主要验收已完成，剩余单独实测项如上。
+- 本次修改已随 PR #4 提交和推送，本机服务已部署。PR #4 已合并至 main（2c372bd）；Issue #2 状态以 GitHub 为准；实现与主要验收已完成，剩余单独实测项如上。
+
+## 最近交接：Issue #3 Phase 2 — Work / Attach（2026-09-19）
+
+- **Task Source**：用户本轮指令及 [Issue #3](https://github.com/dccaoxy/codex-feishu-bot/issues/3) 完整需求；只执行 Phase 2，不进入 Full。从已合并 PR #4 的 main 创建 `codex/issue-3-work-attach`。
+- **已实现**：`externalThreadPermission: read/work` 与旧布尔开关兼容；Full 显式拒绝。ThreadController 统一实际 resume、状态复核、start/steer/interrupt/fork；新增 `/attach ID或编号`、`/detach`、`/thread`。绑定保存来源、原机器人会话、最近状态和活动回合，重启不自动重放外部输入。
+- **控制边界**：外部绑定不迁移/拼接历史，不覆盖原会话 cwd、模型、指令、审批或沙盒；Work 不提供 compact、模型修改及管理权限。外部分支仍为 Work 来源。附件发送仍受机器人原工作目录约束。
+- **共享运行时决定**：不同 stdio 实例不能可靠判断另一实例活动状态。Work 因此必须显式连接目标所在本机共享 WebSocket 或 Unix socket App Server；仅接受已加载、状态可靠且允许直接输入的目标。缺失能力、未知状态和不可恢复均拒绝写入；不假定桌面实例能自动接管。Unix 控制接口实际为 WebSocket，禁用扩展协商以兼容当前服务器。
+- **并发与恢复**：按 Thread 串行处理本桥接操作，每次写前重新读取服务器状态；活动回合精确 steer/interrupt。真实双客户端验证竞争 turn/start 返回同一活动回合。连接丢失清空状态缓存；恢复保留绑定但取消自动重放不确定/排队的外部消息。卡片建立期间延迟处理完成事件，避免旧回合完成导致新回合观察提前关闭。
+- **已测试**：check、47 项自动测试、doctor、smoke 通过（doctor 仅检查本地飞书配置填写，无飞书联网验证）。测试覆盖旧配置、Read/Work 隔离、状态未知、恢复失败、活动回合、并发、绑定持久化/恢复、分支和管理拒绝。
+- **真实 Codex 已验证**：当前 Mac、Node 24.21.0、Codex 0.155.0-alpha.9.2；独立共享服务器双客户端通过 `work:check` 和 `work:check -- --unix` 验证原 ID resume、空闲 start、活动 steer、竞争同回合、fork、interrupt 与绑定恢复。实际调用测试模型，仅归档本次测试创建的会话，不修改用户既有会话。
+- **未验证/未部署**：本轮未发送真实飞书消息，Work 的租户卡片交互和具体桌面运行时连接仍待实测；未安装/重启生产服务，未修改 config.local.json 或提升生产权限。原外部会话没有飞书动态工具时不会注入工具；审批仍依赖原策略及服务端路由。协议适配以上述实测版本为基准。
+- **提交/PR 交接**：实现已提交并推送：`0855150`，分支 `codex/issue-3-work-attach`；已创建 [PR #5](https://github.com/dccaoxy/codex-feishu-bot/pull/5)，本次补充记录也提交至同一 PR。Issue #3 保持开放，Phase 3 未执行；PR 不自动合并。
+
+## Desktop 共享运行时只读调查（2026-09-19）
+- 用户询问 Desktop 能否与机器人共用 App Server。本轮仅调查，未重启 Desktop、未改配置或启用共享服务。
+- 本机 ChatGPT Desktop 26.915.31945 的 App Server 进程使用默认 stdio，未发现 TCP 监听或具名 Unix 控制监听；默认 daemon version 检查报告控制 socket 不存在。
+- 安装包 `app.asar` 中 `src-C3YaUE83.js` 的 URL 选择函数读取 `CODEX_APP_SERVER_WS_URL`（除非 FORCE_CLI=1），`main-DUHZj4_w.js` 的连接工厂实际选择 WebSocket transport。属于本地实现证据，尚非 Desktop 双客户端实测或公开稳定配置承诺。
+- 同包包含 `CODEX_APP_SERVER_USE_LOCAL_DAEMON=1` 分支，连接默认 app-server-control/app-server-control.sock；受本地 host、无额外 config overrides、CLI 覆盖/打包环境和 daemon 版本检查等条件限制。不能仅设置此变量就断言成功。
+- 官方 App Server 文档明确 WebSocket/Unix 传输及 CLI --remote；未据此推断 Desktop 已公开支持同样启动参数。来源：https://learn.chatgpt.com/docs/app-server 。
+- 建议后续单独验证 Desktop 通过显式 WebSocket 地址连接自建共享实例；使用同版本 bundled Codex，并核验桌面工具、审批路由与原 Thread 双端事件。当前运行中 stdio 实例没有已确认的热添加监听方式，切换涉及 Desktop 重启，未执行。
+- 本节为当时的调查记录，随后已提交至 PR #5；后续实际验收以最新交接为准。
+
+## 当前交接：PR #5 Desktop / Shared / Feishu 联调（2026-09-19）
+
+- **Task Source**：用户要求继续 PR #5、自动搭建联调环境，验证双向、steer/interrupt 与双端审批；后续明确要求读取 GitHub 最新 AGENTS.md 并完成 Draft → Ready 自动审核。已读取 origin/main `f9116b3` 的完整协议并同步本地文件。PR #5 已转回 Draft，完成本轮代码、文档与验证后转 Ready；不 Merge，不进入 Phase 3。
+- **已配置/安装/部署**：本机独立 `io.codex.feishu-shared-lab` launchd 服务监听 `ws://127.0.0.1:4517`，使用 Desktop bundled Codex 和原 Codex home。既有飞书服务已切 Work、连接该服务器并重启。本地原配置备份在 `data/shared-lab/config.before-work.json`（600，Git 忽略）；Desktop 上有“启动共享 Codex 联调.command”和“恢复飞书原配置.command”。未改全局启动环境，未复制凭据。
+- **Desktop 实际状态**：当前 Desktop 仍是原 stdio 实例。曾尝试启动共享入口，既有单实例进程未切换；没有以此宣称成功。启动脚本已增加实际进程检查，测试确认在 Desktop 未退出时明确拒绝。必须由用户完成活动任务后 ⌘Q，再双击共享启动快捷方式；不能自动杀掉正在承载本轮开发的 Desktop。
+- **代码修正**：飞书已绑定空闲 Thread 时，其他客户端后续 turn/started 自动开始观察，短回合完成等待卡片创建完成后再结算；避免漏回传或遗留流式卡片。共享端不抢答未知桌面工具。另一端解决审批后清除 token；解绑/关闭共享观察端不主动拒绝另一端待处理审批。
+- **自动测试**：check 与 51 项测试通过；当前共享配置的 doctor、smoke 通过。新增进程保护脚本和复用现有服务的联调脚本，不增加 Full 管理入口。
+- **真实 Codex 通过**：`shared-client-check.mjs` 在实际共享服务器用真实 Bot 与另一协议客户端验证同一 Thread 双向结果、active steer 后仍同一 Turn、interrupt 返回 interrupted。审批同时投递两端：另一端拒绝后 Bot 旧批准失效；Bot 批准后另一端收到 resolved，迟到拒绝不会重跑（仅一个 printf 命令，exit 0）。真实模型已调用。另一端不是 Desktop UI，飞书 UI 为模拟。
+- **真实飞书部分通过**：`feishu-work-check.mjs --send` 向绑定用户真实单聊创建、更新并结束两张流式结果卡片，API 全部成功。模型与 Bot 真实；输入来自本地脚本，不是用户飞书消息，未测试真实按钮回调，未伪装用户发消息，未建立第二条长连接。测试仅使用新建测试任务并归档。
+- **Remaining / 人工断点**：README“人工最小验收”给出 4 步：退出并共享启动 Desktop；新建“共享联调”并飞书 attach 验证双向；活动追加/停止；双端分别处理无副作用 printf 审批。若原策略自动拒绝/不产生人工审批，记录为未验证，不能绕过策略。Desktop 专属工具配置及 UI 仍未验证。
+- **Risks / 回退**：共享入口是本地安装包的实验实现，升级可能改变；没有 Desktop 端实测前不能声称全部功能兼容。回退脚本恢复机器人配置并保留共享服务器，避免中断 Desktop；退出共享 Desktop 后再 stop-server，普通应用图标恢复默认入口。服务重启不重放不确定操作；重启后原绑定须重新 attach 才恢复该连接的订阅。
+- **交付状态**：本轮实现已提交推送 `b444165`，同步最新主线规则的提交为 `e46210b`；本交接补充亦提交至 PR #5。Issue #3 与 PR 描述同步记录实际验证和人工断点。Draft → Ready 转换以 PR 时间线为准，自动审核结果待写回，不能将“Ready”写成“PASS”。
+
+
+## 最新交接：资源限制修复与自动审核返工（2026-09-20）
+
+- **Task Source**：用户“你来实现吧”，继续 PR #5 / Issue #3 Phase 2，修复共享环境障碍并按自动审核协议交付；不进入 Phase 3、不 Merge、不自动重新启用 Work。
+- **真实用户验收更新**：用户截图确认同一“共享联调”任务在 Desktop 与飞书双向输入/回复成功；飞书活动回合追加要求被接收，两个界面出现“追加要求成功”。数数仍到 1000，不能据此认定即时中断通过。真实 `/stop` 和双端审批按钮仍待人工验证。上述记录取代前节“Desktop 尚未实测”的当时状态。
+- **故障与当前部署**：用户遇到 EMFILE（Too many open files），当时默认限制 256；尚未证明具体泄漏来源。已回退普通 stdio / Read，用户确认恢复，保持该配置。本轮仅重启无客户端连接的共享实验服务，为其实际设置 soft nofile=4096、launchd hard=8192；未修改全局限制。首次从 Documents 执行包装脚本被系统拒绝，改为 Application Support 安装位置后启动成功。Desktop 入口也设置进程级限制，但本轮未重启 Desktop 验证；机器人新代码尚未重启部署。
+- **审核返工**：针对上一轮 NEEDS CHANGES 的 R1/R2/R3，修复共享审批显示失败自动拒绝、旧回合卡片延迟创建阻塞新回合、解绑后迟到卡片不结束。旧回合清理只影响自身回合及审批；共享请求无法处理时不抢答拒绝。新增回归覆盖这些失败路径。
+- **验证**：check、55 项测试、doctor、smoke 通过；doctor/smoke 使用普通 stdio 配置，真实 Codex 握手通过，不代表飞书联网或模型验证。本轮资源压力检查实际连接共享服务 240 次、读取元数据 2400 次，6 批峰值均 72 个句柄，回落均 32，增长 0、新增 EMFILE 0；结果仅存本地忽略目录。未调用模型或发送真实飞书消息。本结果不能证明长时间 Desktop/工具负载没有泄漏。
+- **交付与断点**：本节及实现提交至同一开发分支和 PR #5，提交号以 Git 历史为准；Issue #3 同步 Implementation / Validation / Remaining。完成 Draft → Ready 后等待自动审核，Ready 不等于 PASS。下一步为审核返工（若有）及经用户安排的共享 Desktop 长期观察、真实停止和审批验收；生产保持普通模式。
+
+## 当前任务：PR #5 共享运行时遥测 / EMFILE 验收（2026-09-20）
+
+- **Task Source**：用户“继续执行 PR #5”，及 PR 评论 `5746268281` 的 A–F 补充验收要求。上一 head `9df1c31` 已获得独立自动审核 PASS（评论 `5746182164`），仅覆盖代码；本轮已转 Draft，新 head 必须重新审核。不 Merge、不进入 Phase 3。
+- **历史取证**：现存 shared server stderr 首次 EMFILE 为 `2026-09-19T18:24:26.840650Z`（北京时间 9月20日02:24:26），最后旧故障记录为23:25:10Z，总计1146条；Desktop日志含452条相关错误，bot service日志未检出EMFILE。17:00Z至首次故障前有29条transport channel closed、4条TLS握手错误和1条DNS解析错误；故障后也有pipe创建与session读取失败。读取pmset保留日志，未找到该02点窗口的Sleep/Wake记录，不能据此断言未发生睡眠。未改写这些历史日志。
+- **因果边界**：共享App Server日志确认其技能扫描、会话读取、pipe建立均被资源耗尽阻断；Desktop报错与共享服务错误相符。缺乏故障时PID绑定的限制记录和FD快照，无法从现有证据确定具体历史PID、实际soft/hard、逐步增长还是事件突增、哪类资源占满。此前默认launchctl soft256（hard unlimited）及现场记录只提供上限线索；提高到4096/8192不是根因修复。网络错误是相邻事件，不是泄漏因果证明。
+- **已实现**：独立60秒launchd只读采样；PID和启动时间匹配的wrapper-at-exec限制记录；FD数字句柄分类、RSS、直接子进程、监听端口已建立连接、协议loaded Thread数。未知值标null，进程更换丢弃混合样本。50%warning、70%snapshot、80%critical；阈值变化告警，高位快照每10分钟最多一次。快照去掉路径和端点，轮换JSONL上限约5MiB并保留一份旧日志。提供telemetry-start/stop及真实模型短时soak脚本。
+- **已部署**：仅在无客户端连接时重启共享实验服务，确认新PID启动限制记录实际为4096/8192；遥测任务已安装，真实每分钟采样且停止/重新启用已验证。普通机器人仍stdio/Read；未重启Desktop，未修改生产权限、未发送真实飞书消息。此前机器人修复代码仍未重启部署。
+- **已测试**：Node24.21.0 / Codex0.155.0-alpha.9.2；check、61项测试、doctor、smoke通过，含分类、缺失/旧PID限制拒用、阈值快照、去重和日志权限/轮换。实际loaded/list可用。遥测只观察，不自动暂停、批准、重放或重启任务；停止任务不会撤销已有修改。
+- **人工验收断点**：8小时/隔夜共享Desktop+飞书工作负载、睡眠唤醒、新wrapper Desktop接入、真实飞书 `/stop`、双端审批和旧按钮失效、Desktop专属工具仍未验证。当前开发Desktop不能由自身强制退出；用户完成活动任务后再退出并使用共享入口。在恢复Work前先核对共享服务健康和空闲状态，任何失败可回退普通stdio/Read。
+- **短时真实模型结果**：09:07:03–09:12:14（北京时间），约5分11秒，两个协议客户端、3个专用Thread、6个完成Turn、3次工具调用、3次重连；测试任务清理错误0。各检查点FD为66→64→73→84→50，30秒后仍50；峰值pipe21/子进程7，结束pipe3/子进程1、loadedThread0。RSS 187648→219584→220352→225392 KiB，结束225328 KiB，未回到启动值；仅显示该短测后段趋稳，不排除长期缓存增长/泄漏。首次准备测试发现空Thread未写入rollout时不能resume，脚本改为首回合后再resume；另一次未完成回合测试未计为通过。成功测试使用真实模型和本地命令工具，未使用真实Desktop/飞书UI。结果存在本地 `data/shared-lab/soak-with-cleanup.json`，仅此处汇总不含消息正文的统计。
+- **连接回收复验**：随后240次连接/2400次元数据读取，6批峰值均90、回落均50，新增EMFILE0；监测启用后至本轮交接无新增EMFILE。短测与连接压力测试均未覆盖隔夜或真实双端UI。
+
+
+## 最新交接：真实双端验收与审批卡片关闭（2026-09-20）
+
+- **Task Source**：用户继续 PR #5 / Issue #3 Phase 2；最新 origin/main AGENTS.md 已读取。沿用开发分支，重新 Draft → Ready，不 Merge、不进入 Full。
+- **实际部署状态（取代前文当时状态）**：用户共享启动 Desktop 后，已核验 Desktop 与 Bot 同连本机共享服务；Desktop wrapper soft4096，Shared soft4096/hard8192。Bot 已恢复 Work 并部署 accdecc，遥测继续运行。本轮卡片显示修改尚未重启部署。
+- **真实 UI 验收通过**：同一任务双向消息、active steer 接收；真实飞书 `/stop` 后两端停在57，服务端状态 interrupted。steer 数到1000后才改变回答，不当作即时中断证据。
+- **权限测试更正**：第一次 UI 标签变化未确认写入目标，后续两次 thread/settings/update 成功。实际策略变为 granular / workspace-write / reviewer=user，允许 request_permissions 与 MCP elicitation，禁止 sandbox approval；因此 require_escalated 自动拒绝是策略行为，不是飞书丢卡片。改用内置 request_permissions 的最小文件写权限。
+- **真实双端权限验收通过**：同一申请在 Desktop 与飞书同时展示；用户飞书批准后 Desktop 继续，测试文件内容经本机读取严格核对为 APPROVAL_TEST；重复点击旧批准被拦截。第二个文件申请由 Desktop 拒绝，飞书显示对端已处理，旧批准失效；本机确认拒绝测试文件未生成。仅覆盖本次文件权限路径，不宣称全部审批类型通过。证据已逐项写入 PR 评论。
+- **已修改**：记录交互卡片消息 ID；审批提交、对端解决、超时、解绑/关闭时尝试更新原消息，移除按钮并显示关闭状态。发送完成前被解决的迟到卡片补更新。token 同步失效，卡片更新失败只记录固定提示、不响应或重放 RPC。历史旧卡片未批量修改。更新接口为飞书 message.patch。
+- **已测试**：check、63 项测试、doctor、smoke 通过；新增迟到卡片与更新失败不重复批准的回归测试。doctor/smoke 是真实 Codex 握手/注册验证，未调用模型；本轮另向已绑定单聊发送一张明确标记的展示测试卡片，真实 create + patch 成功，移除按钮；未调用模型，未代替用户处理任何真实审批。客户端最终视觉仍待用户确认。
+- **资源观测与边界**：现存最早 Desktop EMFILE 为北京时间02:09:02（Shared stderr 首条仍02:24:26）；故障前30次内部 MCP extension host 创建，间隔中位约310秒，未找到对应释放记录，只是嫌疑线索。09:05–10:34遥测共91条；10:07到10:34，FD82→158、pipe21→75、子进程7→25、loaded任务3→12，RSS约372→551MiB（该窗口峰约608MiB）。同时存在实际任务/工具负载，不能仅凭增长判定泄漏，也不能宣称稳定。持续采样保留，8小时/隔夜、睡眠唤醒和闲置后回收未验收；不人为中断正在运行的任务来制造测试。
+- **交接断点**：等待本轮新 head 自动审核；新卡片显示需部署后实际用户审批复验，长期监测需后续时间窗口。停止不撤销已有文件修改。Issue #3 保持开放。

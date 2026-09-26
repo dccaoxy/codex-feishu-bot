@@ -21,7 +21,7 @@ async function main() {
     return;
   }
   if (doctor) {
-    const rpc = new CodexClient(config.codex.binary);
+    const rpc = new CodexClient(config.codex.binary, {url: config.codex.appServerUrl, socketPath: config.codex.appServerSocket});
     try {
       await rpc.start();
       const account = await rpc.request('account/read', {});
@@ -52,7 +52,7 @@ async function main() {
     if (alive) throw new Error(`已有机器人实例运行（PID ${pid}）。`);
     fs.unlinkSync(lock); fs.writeFileSync(lock, String(process.pid), { flag: 'wx', mode: 0o600 });
   }
-  const store = new Store(config.storageDir), rpc = new CodexClient(config.codex.binary), feishu = new Feishu(config);
+  const store = new Store(config.storageDir), rpc = new CodexClient(config.codex.binary, {url: config.codex.appServerUrl, socketPath: config.codex.appServerSocket}), feishu = new Feishu(config);
   const bot = new Bot(config, store, rpc, feishu);
   let groups;
   let shuttingDown = false;

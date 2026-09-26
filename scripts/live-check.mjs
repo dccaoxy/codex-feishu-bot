@@ -7,7 +7,7 @@ import { TOOLS } from '../src/history.mjs';
 const docsMode=process.argv.includes('--docs');
 const toolName=docsMode?'feishu_doc_read':'feishu_threads_search';
 const config = loadConfig(undefined, false);
-const rpc = new CodexClient(config.codex.binary);
+const rpc = new CodexClient(config.codex.binary, {url: config.codex.appServerUrl, socketPath: config.codex.appServerSocket});
 let threadId, forkId, called = false, result = '', timer;
 try {
   await rpc.start();
