@@ -1,3 +1,29 @@
+# 当前交接：PR #17 已审核版本候选部署（2026-09-26 21:39 北京时间）
+
+- Human 明确授权部署独立复审 PASS 的 `1e6ead72b71564418cf315fb4a3b9c8e042da6c3`，不 Merge，部署后等待 Human Gate；免重复专门24KB边界人工测试。审核评论： https://github.com/dccaoxy/codex-feishu-bot/pull/17#issuecomment-5846675017 。
+- 部署：原 data/issue6-candidate；60个 src/scripts/test/package 文件逐项哈希与指定版本完全一致。旧候选尚未包含已合并PR #16，本次带入指定head的既有修复，不另开功能。配置SHA256前后相同，原2个授权群、Owner Gateway（1数据源/私人任务读取）、Knowledge、Shared连接和权限设置不变；不启用配置外的新Owner群入口。备份：data/pr17-1e6ead7-backup-20260926-213912（源码、配置、两份SQLite一致性快照与验证日志），证据索引 data/pr17-deployment.json；均不入Git。
+- 服务：部署前无running/queued用户请求或running知识任务。仅重启机器人，PID41445→89055，launchd exit0；Shared App Server PID41044保持不变，Desktop/Shared/遥测服务未改。新增日志确认“Codex 已连接”“飞书长连接已建立”；部署后截至复核stderr新增0字节，无新增error/EMFILE。
+- 验证：实际候选 npm run check、446/446全量组合测试（0失败/跳过）、doctor握手/登录/7模型、无模型ephemeral smoke及动态工具注册通过。指定版本的group:check（含持久会话恢复/16类攻击）与knowledge:check（12类攻击）通过，版本0.158.0-alpha.2，无真实模型调用。原PR #5/Owner/FIFO/Knowledge组合自动回归保留。
+- 只读真实飞书验证：两个现有授权群本地历史的人类发送者分别2/36人，当前成员API分别匹配2/36个显示名，均complete、0冲突；没有发送真实消息，不等同客户端排版或历史身份验收。未重复专门24KB人工测试。
+- 数据：重启前后Raw Messages/messages各1202条、群请求10条、群线程2条、Knowledge jobs7条/digests5条/topics1条/schedule2条，以及私人settings、发送审计、绑定逐行一致。未修改源数据库、名单或权限；正常服务后续可继续写入新消息。
+- 异常与局限：部署前已有2个Knowledge blocked任务，部署后原样保留，不把它们宣称已恢复，也不在本次重试。当前连接恢复不代表长期稳定性或客户端显示已完成人工验收。本次仅文档记录提交；运行代码固定为1e6ead7，不跟随后续文档head变化。未Merge，等待Human Gate。
+
+# 当前交接：PR #17 R1 字节预算返工（2026-09-26）
+
+- Task Source：Human 转交 [43d45c5 的 R1/P2 NEEDS CHANGES](https://github.com/dccaoxy/codex-feishu-bot/pull/17#issuecomment-5846600192)。同一分支返工，先转 Draft；不部署、不 Merge。原443项通过未覆盖50条短正文与最大姓名组合，不能证明该预算边界已覆盖。
+- Implementation：移除清空正文但保留所有空字段/重复说明的裁剪方式。加入姓名后按实际序列化 UTF-8 字节检查 result≤22000、完整响应≤24000。必要时替换为真正更小的紧凑记录；保留每条消息原ID/顺序/sequence/匿名引用/姓名及回查入口，继续不足时标记 omitted 省略姓名。全部回查使用原 messageId；不删除记录、不改增量 cursor/hasMore。最终检查仍超限则明确报错，不返回成功游标，调用方可缩小请求重试。
+- Regression：新增 search/changes 各50条短正文 x、35字符消息ID、198字节姓名的真实 Gateway/Store/Feishu模拟SDK回归，逐页检查完整包装与结果预算，只用返回游标或返回数量推进，验证51条原文（含夹具已有1条）无漏读/重复/停滞，并逐条回查50条原文及姓名。额外超大包装测试验证最终拒绝且原游标重读不丢消息。曾用超大源ID模拟最终异常，但被底层预览提前排除，已改为在包装层注入异常字段以准确覆盖最终守卫。
+- Validation：check、446/446 全量测试（0失败/跳过）、diff check 通过，保留 PR #5/Owner/FIFO/Knowledge 组合自动回归；doctor 握手/登录/7模型及无模型 ephemeral smoke/动态工具注册通过。无飞书凭据开发配置和模拟SDK，不代表线上姓名验收；未重复未改动的 Group/Knowledge 进程探针。
+- Delivery：修复后推送同一 PR #17 并 Draft→Ready 请求新 head 复审。不宣称 PASS；未部署、未 Merge、未更改当前候选/真实配置/权限/数据库/Shared Runtime/遥测。以下为历史记录，原443项是旧head证据。
+
+# 当前交接：Owner 群发言人姓名映射（2026-09-26）
+
+- Task Source：Human 反馈 Owner 查询只返回 s_ 匿名标识，并授权“那你来操作吧”补齐姓名映射。PR #16 已 Merge；从最新 origin/main 6f986a6 新建 codex/owner-sender-names，独立开发，不混入已结束 PR。
+- Implementation：Owner Group Gateway 的 search/message/context/changes 按本地消息原始 open_id 查询该群当前成员名单，仅返回对应显示名和稳定匿名引用；不向模型输出整份成员表或原始 ID，不持久化姓名。ordinary Group/Knowledge 工具与授权不变。工具描述更新，沿用既有 Owner 工具升级机制。未添加多维表格或学员名单关联统计。
+- 边界：当前显示名不是历史身份；同名不合并；离群/缺失、冲突、机器人、接口不可用、分页或安全限制分别标记，不能推断零发言。20页/10000成员上限，支持飞书超过 page_size 的同批成员页。队列出站及返回前重查权限；await 期间撤回/过期原文移除；超预算预览缩短正文但保留消息和游标。
+- Validation：check、443/443 全量测试（0失败/跳过）、diff check 通过，包含现有 PR #5/Owner/FIFO/Knowledge 组合回归。新增15项：准确ID匹配、分页、同名与冲突、跨群、失败和安全限制、大页/预算、取消/Owner变化/撤权/离群及等待期间目标撤回、普通成员拒绝。使用真实 Gateway/Store/Feishu 队列和模拟成员 SDK，没有发送真实飞书消息。doctor 握手/登录/7模型与真实无模型 ephemeral smoke/动态工具注册通过；无飞书凭据开发配置，不构成线上飞书验收。未重复未改动的 Group/Knowledge 进程隔离探针。
+- 交付：创建新 Draft PR 后转 Ready 请求审核；未经复审不宣称 PASS。未部署、未 Merge、未改当前候选配置/群权限/数据库/Shared Runtime/遥测。下一步审核，通过且获得部署授权后再做 Owner 姓名真实验收。
+
 # 当前交接：PR #16 迟到工具回合身份返工 R7（2026-09-26）
 
 - Task Source：Human 要求继续同一分支处理 [a64c336 的 R7/P1](https://github.com/dccaoxy/codex-feishu-bot/pull/16#issuecomment-5846383282)，不部署、不 Merge。先转 Draft。R6 固定当前 run.turn 并不足以证明请求自身属于该回合；原 314 项没有旧 turn 测试。
