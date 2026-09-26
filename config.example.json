@@ -36,5 +36,9 @@
     "enabled": false,
     "privateThreads": false,
     "resources": []
+  },
+  "ownerAccess": {
+    "enabled": false,
+    "inheritRuntimeDefaults": false
   }
 }

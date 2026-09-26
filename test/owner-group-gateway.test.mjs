@@ -273,3 +273,9 @@ test('oversized individual and cumulative metadata yields bounded previews witho
  assert.equal(new Set(seen).size,9);assert.equal(seen.length,9);
  const page=(await f.gateway.execute('owner_group_message',{group:g.reference,messageId:'metadata0'},c)).result.message;assert.ok(Buffer.byteLength(JSON.stringify(page))<=24000);assert.ok(page.limitations.some(x=>/分页/.test(x)));
 });
+test('enabled Owner group ingress shares gateway tools while member and other-group contexts remain denied',async t=>{
+ const f=setup(t);f.config.ownerAccess={enabled:true};
+ assert.equal((await directory(f,f.context('列出授权群',{chat:'a',type:'group'}))).length,2);
+ for(const options of [{chat:'a',type:'group',user:'member'},{chat:'secret',type:'group'}])await assert.rejects(directory(f,f.context('列出授权群',options)));
+ const c=f.context('列出授权群',{chat:'a',type:'group'});f.config.ownerAccess.enabled=false;await assert.rejects(directory(f,c));
+});

@@ -1,3 +1,4 @@
+import { ownerAccessConfig } from './owner-access.mjs';
 import { gatewayConfig } from './owner-gateway.mjs';
 import { groupConfig } from './group-policy.mjs';
 import fs from 'node:fs';
@@ -9,6 +10,7 @@ export function loadConfig(filename = path.join(ROOT, 'config.local.json'), requ
   if (!fs.existsSync(filename)) throw new Error('找不到 config.local.json，请复制 config.example.json 并填写配置。');
   const c = JSON.parse(fs.readFileSync(filename, 'utf8'));
   c.groups = groupConfig(c.groups);
+  c.ownerAccess = ownerAccessConfig(c.ownerAccess);
   c.ownerGateway = gatewayConfig(c.ownerGateway);
   const base = path.dirname(path.resolve(filename));
   if (!c.feishu || !c.codex) throw new Error('配置必须包含 feishu 和 codex。');
@@ -23,6 +25,7 @@ export function loadConfig(filename = path.join(ROOT, 'config.local.json'), requ
   if (!['on-request', 'untrusted'].includes(c.codex.approvalPolicy)) throw new Error('approvalPolicy 只支持 on-request / untrusted。');
   if (typeof c.codex.binary !== 'string' || !c.codex.binary) throw new Error('请填写 codex.binary。');
   if (typeof c.codex.cwd !== 'string' || !c.codex.cwd) throw new Error('请填写 codex.cwd。');
+  if(c.codex.isolatedBinary!==undefined && (typeof c.codex.isolatedBinary!=='string'||!path.isAbsolute(c.codex.isolatedBinary)))throw Error('isolatedBinary 必须是绝对路径');
   const permission = externalPermission(c);
   c.codex.allowExternalThreadRead = permission !== 'off';
   if (c.codex.appServerUrl) {

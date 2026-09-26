@@ -1,3 +1,12 @@
+# 当前交接：Owner 私聊与授权群执行入口（2026-09-26）
+
+- Task Source：Human 明确要求自己的私聊和已授权群中自己的账号拥有相同执行能力，其他群成员保持现有权限，并授权开发。基于已合并 PR #5 的 main `2f84daf`，独立分支 `codex/owner-tool-parity`。
+- Implementation：默认关闭的 `ownerAccess` 开关；仅可信事件中的当前 Owner、新群消息、原 allowlist、明确 @ 可进入私聊 Bot 链路。每群 Owner Thread 与私聊、普通成员 GroupModel 分离；原始群消息继续落库，无第二份群 FIFO 请求。原 `/owner`、`/group-doc` 仍走原入口。Owner 复用文件/文档/命令/Shared Work 审批；Group Gateway 接受可信 Owner 群上下文，普通成员与未授权群仍拒绝。审批、工具派发、启动/steer 前重查授权。撤回取消队列或中断对应活动回合，慢卡片返回后不启动回合或遗留计时器；不撤销已发生副作用。
+- Runtime：可选继承共享服务器默认 sandbox/approval，未选择则原配置不变；外部绑定不覆写原 Desktop Thread 参数。普通 Group/Knowledge 保持独立进程与原隔离机制；版本门更新为已实测 `0.158.0-alpha.2`，可用 `codex.isolatedBinary` 独立指定。未删除版本或工具权限门。
+- Validation：check、全量 256 项测试通过（0失败/跳过），覆盖真实 Bot 撤回竞态、Owner 身份/授权撤销、审批卡隔离、原群 FIFO 与 Gateway、原 PR #5 组合用例。Group 16次、Knowledge 12次真实二进制/假 provider 隔离攻击探针通过，首次/恢复技能查询均要求空结果或不支持；原先首次 skills.list 返回不支持导致脚本解析失败，改为与原恢复断言一致，并非开放技能。doctor 握手/登录/7模型及无模型 ephemeral smoke通过；独立共享 work:check 的 start/steer/fork/interrupt/绑定恢复通过（真实模型调用，无飞书出站）。doctor 用开发配置，飞书凭据空、群功能关闭，不能称为线上飞书验收。开发中旧 fake Store 无 db 的组合测试失败已修复，最终全量复核通过。
+- Remaining / Risks：这不是复制所有 Desktop 专属工具；UI、插件及未知动态工具仍依赖目标 Thread 宿主，未增加多维表格写入能力或任意 RPC/Full 管理。Owner 活动回合沿用私聊 steer；普通成员 FIFO 不变。群内 Owner 结果对该群可见。真实飞书 Owner/普通成员对照、审批卡和 Desktop 专属工具验收尚未执行。上一轮二进制路径修复后，旧部署的 Group 版本门可能不匹配新二进制；本轮仅开发态验证修复，不能声称线上 Group/Knowledge 已恢复。
+- 交付边界：提交推送并创建 Draft→Ready PR 请求审核；Ready 不等于 PASS。未部署此分支、未改真实配置/allowlist/数据库/Shared 服务/遥测、未发送真实飞书消息、未 Merge。新入口启用需明确候选部署授权，届时只开放当前 Owner 和既有授权群。
+
 # 当前交接：PR #5 文件审批详情返工（2026-09-25）
 
 - Task Source：[c8987ee 复审 NEEDS CHANGES](https://github.com/dccaoxy/codex-feishu-bot/pull/5#issuecomment-5829284696)，R1–R3；同一分支先转 Draft，不部署、不 Merge、不扩展 Phase 3。

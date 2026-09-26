@@ -112,3 +112,10 @@ test('new request after recall may rebuild invalidated context, without replayin
 test('queued Owner read fails if private scope disabled before dispatch',async t=>{
  const x=fixture(t);x.send('A');await until(()=>x.calls.length===1);x.send('B','oc_A','/owner read ref');x.g.gateway.config.privateThreads=false;x.releases[0]();await until(()=>x.g.jobs.size===0);assert.equal(x.calls.length,1);assert.equal(x.store.requestState('oc_A','B'),'failed');
 });
+test('Owner diversion preserves raw history without adding a second group FIFO job',async t=>{
+ const f=fixture(t);f.g.onMessage(event('owner-diverted'),{recordOnly:true});
+ assert.ok(f.store.get('oc_A','owner-diverted'));assert.equal(f.store.pending().length,0);assert.equal(f.calls.length,0);
+ f.send('member-normal','oc_A','hello','member');await until(()=>f.calls.length===1);
+ assert.equal(f.calls[0].input.request.includes('hello'),true);f.releases.shift()();await until(()=>f.replies.length===1);
+ assert.deepEqual(f.replies,['member-normal']);
+});
