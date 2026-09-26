@@ -1,3 +1,11 @@
+# 当前交接：PR #16 命令边界返工 R4–R5（2026-09-26）
+
+- Task Source：Human 转交 [3ec83ab 的 NEEDS CHANGES](https://github.com/dccaoxy/codex-feishu-bot/pull/16#issuecomment-5846082237)。上轮 R1–R3 独立复现已通过，但 268 项未覆盖命令历史出站和 /reference 来源丢失；先转 Draft，在同一 PR 返工。
+- R4：所有 Owner 群命令以来源消息构建统一出站守卫。命令直接回复显式带守卫，嵌套 Feishu 调用通过实例级 AsyncLocalStorage 继承；Feishu.call 在入队时捕获该请求上下文，每次实际 SDK transport/重试前检查。不同并发命令不共享授权状态，私聊为 no-op。drain 错误通知同样绑定来源，失权后不输出原错误/历史。仅卡片 finish 的关闭 streaming 操作绕开继承守卫，以允许取消后清理，不承载旧正文。
+- R5：message → command → /reference → run 完整传递原 message_id 和可信 source；history 读取结束重新检查有效性。群请求缺失/非法 ID 明确 fail closed，不向 SQLite 绑定 undefined；活动引用回合保存原 ID，撤回、中断等待/失败及迟到请求继续沿用已修复取消机制。
+- Validation：check、288/288 全量测试（0失败/跳过）、diff check、doctor 握手/登录/7模型与无模型 ephemeral smoke 通过。新增 /read、/threads、/status × 撤回/撤权/离群九组队列阻塞测试，三个正常输出恰好一次、异步 history/controller 及错误降级失权、reference 来源传递/读取中撤回/真实 Bot turn 启动后撤回、缺失 ID、并发守卫隔离及取消卡片清理。使用真实 Bot/Store/Feishu.call 配合模拟 SDK，不发送真实飞书消息。测试中发现仅通过原型构建的既有 Feishu 测试实例没有 AsyncLocalStorage 字段，已兼容缺失初始化，保留原测试并最终全量通过。原 R1–R3、PR #5、Group/Knowledge/Gateway 自动组合用例保留；未重复上轮真实 work 与隔离探针。
+- 交付：更新代码/本文件后推送同一 PR，Draft→Ready 请求新 head 独立复审；不宣称新 head PASS。未部署/修改真实配置、授权群、数据库、Shared 服务或遥测，未 Merge。真实群/双端验收仍未执行；doctor 为无飞书凭据开发配置，不是线上验收。
+
 # 当前交接：PR #16 审核返工 R1–R3（2026-09-26）
 
 - Task Source：Human 转交 [93b7ec1 的 NEEDS CHANGES](https://github.com/dccaoxy/codex-feishu-bot/pull/16#issuecomment-5846012207)。原 256 项通过未覆盖副作用出站与卡片收尾边界，不能代表取消链路完整；同一分支/PR 返工，先转 Draft。

@@ -484,3 +484,5 @@ Owner 路径复用私聊的命令、文件、文档、Shared Runtime Work/Attach
 能力对齐不等于复制 Desktop 的所有工具：宿主 UI、浏览器、插件连接器等仍取决于目标 Thread 的工具宿主注册。Bot 不代理未知 Desktop 动态工具、不做任意 RPC 透传、不增加外部 Thread 管理权限。仅有 Desktop 客户端实现的工具需要该客户端在线处理，不声称离线可用。飞书平台权限另行生效。尚未新增多维表格写入工具。
 
 普通群助手/Knowledge 使用独立进程与隔离配置；可用 `codex.isolatedBinary` 指定独立二进制，默认使用 `codex.binary`。必须通过版本固定的 `group:check` 和 `knowledge:check` 才能升级隔离运行时。本轮验证版本为 0.158.0-alpha.2，禁止为恢复功能直接移除版本检查。
+
+Owner 群命令的回复和嵌套飞书调用在实际发送及重试前复核原消息身份、撤回和当前授权；错误通知也受同一限制。`/reference` 保留原群消息 ID，读取期间撤回不启动回合，启动后撤回取消该回合。取消后的卡片只允许关闭 streaming，不补发旧正文。

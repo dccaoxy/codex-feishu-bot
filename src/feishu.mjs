@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import * as lark from '@larksuiteoapi/node-sdk';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -35,18 +36,22 @@ export function card(title, text, buttons = [], streaming = false) {
   };
 }
 export class Feishu {
+  effects = new AsyncLocalStorage();
+  withGuard(guard, work) { guard(); return (this.effects??=new AsyncLocalStorage()).run(guard,work); }
   constructor(config, log = console.log) {
     this.config = config; this.log = log; this.queue = Promise.resolve(); this.lastCall = 0;
     lark.defaultHttpInstance.defaults.timeout = 30000;
     this.client = new lark.Client({ appId: config.feishu.appId, appSecret: config.feishu.appSecret,
       appType: lark.AppType.SelfBuild, domain: lark.Domain.Feishu, logger: quietLogger });
   }
-  async call(fn, retry = true, guard = () => {}) {
+  async call(fn, retry = true, guard = () => {}, cleanup = false) {
+    const inherited = cleanup ? null : this.effects?.getStore();
     const work = async () => {
       for (let attempt = 0; ; attempt++) {
         await delay(Math.max(0, 300 - (Date.now() - this.lastCall)));
         this.lastCall = Date.now();
         try {
+          inherited?.();
           guard();
           const r = await fn();
           if (r?.code) {
@@ -95,7 +100,7 @@ export class Feishu {
   }
   async finish(cardId, sequence, summary = '已完成') {
     const data = { settings: JSON.stringify({ config: { streaming_mode: false, summary: { content: summary } } }), sequence, uuid: randomUUID() };
-    return this.call(() => this.client.cardkit.v1.card.settings({ path: { card_id: cardId }, data }));
+    return this.call(() => this.client.cardkit.v1.card.settings({ path: { card_id: cardId }, data }), true, undefined, true);
   }
   async download(messageId, key, type, target) {
     const result = await this.call(() => this.client.im.v1.messageResource.get({
