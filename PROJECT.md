@@ -1,3 +1,44 @@
+# 当前交接：PR #16 迟到工具回合身份返工 R7（2026-09-26）
+
+- Task Source：Human 要求继续同一分支处理 [a64c336 的 R7/P1](https://github.com/dccaoxy/codex-feishu-bot/pull/16#issuecomment-5846383282)，不部署、不 Merge。先转 Draft。R6 固定当前 run.turn 并不足以证明请求自身属于该回合；原 314 项没有旧 turn 测试。
+- Implementation：所有本地 item/tool/call 执行前要求 params.turnId 为非空字符串且严格等于 run.turn，不限 Owner 群或 external。旧/缺失/非法 turn 直接丢弃，无工具调用、无 RPC 响应/拒绝/重放。guard 同时固定请求 turn 与捕获的 run.turn，并在异步阶段检查当前 turn、原 run 对象身份及结束状态；history、全部 Group Gateway、文档、文件及 Repository 分支统一适用。未知 Desktop 工具继续由原宿主处理。
+- Validation：check、428/428 全量测试（0失败/跳过）、diff check、doctor 握手/登录/7模型与无模型 ephemeral smoke 通过。19 个本地工具逐一覆盖旧 turn、空/缺失/非字符串 ID、await 期间换 turn、正常恰好一次执行和响应；底层执行替身为零意味着未到达对应 transport。既有跨 Thread/并发私聊、R1–R6 和 PR #5 组合回归保留。两个旧测试文件调整为有效协议夹具：历史工具补真实当前 turnId，Group Gateway 错误 turn 改断言零响应，未放宽生产校验。无真实飞书出站；未重复未改动的真实 work/Group/Knowledge 隔离探针。
+- 交付：更新本文件并推送同一 PR，Draft→Ready 请求新 head 独立审核；不宣称 PASS。未部署、未改真实配置/权限/群/数据库/Shared 服务/遥测、未 Merge；真实群和双端验收仍未执行。以下历史说明中的“捕获回合”由本次请求身份校验补齐。
+
+# 当前交接：PR #16 工具生命周期返工 R6（2026-09-26）
+
+- Task Source：Human 转交 [b93e100 的 R6/P1](https://github.com/dccaoxy/codex-feishu-bot/pull/16#issuecomment-5846176831)。原 R1–R5 独立复现通过，但 288 项未覆盖持久 RPC 触发的工具在 await 期间失权；同一 PR 先转 Draft 返工。
+- Implementation：item/tool/call 从当前 run 捕获同一 Owner effect guard 和回合 ID，覆盖所有本地工具分支，在执行前和最终 rpc.respond 前检查；取消/撤权后丢弃结果与错误内容，不自动批准/拒绝 Shared 请求。工具阶段显式建立独立的 Feishu 异步守卫上下文，不假定继承 command。history/read/search、owner_group*、repository、文档和文件统一保护结果回传；原未知 Desktop 工具仍由其宿主处理。
+- 文档：Documents 的所有 Feishu.call 显式携带 guard，实际 transport 与每次读取重试前检查，API 返回后再次检查。convert/create/insert/协作者授权各阶段串联，取消错误不得被部分成功处理吞掉后继续授权；已有阶段不回滚。Repository 在读取本地凭据前、实际 fetch 前及解析返回结果后检查，不重试写入。
+- Validation：check、314/314 全量测试（0失败/跳过）、diff check、doctor 握手/登录/7模型与无模型 ephemeral smoke 通过。新增 history read/search、owner_groups、repository 四分支 × 撤回/撤权/离群的 await 结果丢弃；文档 patch 三种失权队列零写入；文档创建四个阶段失权和正常恰好一次；普通私聊并发不受影响；四种正常工具结果不变；无异步上下文时 Documents 显式守卫也阻止排队写入。真实 Bot/Store/Feishu.call、合成资料、模拟 SDK，无真实飞书出站。保留 R1–R5、PR #5 和群/Knowledge 自动回归；未重复未修改的真实 work/隔离探针。
+- 交付边界：修复提交推送同一 PR，Draft→Ready 请求新 head 复审，未宣称 PASS。未部署、未改真实配置/权限/群/数据库/Shared 服务/遥测、未 Merge。doctor 为无飞书凭据开发配置，不算线上连接验收；真实群及双端验收仍未执行。以下为历史交接，旧测试数不代表 R6 已覆盖。
+
+# 当前交接：PR #16 命令边界返工 R4–R5（2026-09-26）
+
+- Task Source：Human 转交 [3ec83ab 的 NEEDS CHANGES](https://github.com/dccaoxy/codex-feishu-bot/pull/16#issuecomment-5846082237)。上轮 R1–R3 独立复现已通过，但 268 项未覆盖命令历史出站和 /reference 来源丢失；先转 Draft，在同一 PR 返工。
+- R4：所有 Owner 群命令以来源消息构建统一出站守卫。命令直接回复显式带守卫，嵌套 Feishu 调用通过实例级 AsyncLocalStorage 继承；Feishu.call 在入队时捕获该请求上下文，每次实际 SDK transport/重试前检查。不同并发命令不共享授权状态，私聊为 no-op。drain 错误通知同样绑定来源，失权后不输出原错误/历史。仅卡片 finish 的关闭 streaming 操作绕开继承守卫，以允许取消后清理，不承载旧正文。
+- R5：message → command → /reference → run 完整传递原 message_id 和可信 source；history 读取结束重新检查有效性。群请求缺失/非法 ID 明确 fail closed，不向 SQLite 绑定 undefined；活动引用回合保存原 ID，撤回、中断等待/失败及迟到请求继续沿用已修复取消机制。
+- Validation：check、288/288 全量测试（0失败/跳过）、diff check、doctor 握手/登录/7模型与无模型 ephemeral smoke 通过。新增 /read、/threads、/status × 撤回/撤权/离群九组队列阻塞测试，三个正常输出恰好一次、异步 history/controller 及错误降级失权、reference 来源传递/读取中撤回/真实 Bot turn 启动后撤回、缺失 ID、并发守卫隔离及取消卡片清理。使用真实 Bot/Store/Feishu.call 配合模拟 SDK，不发送真实飞书消息。测试中发现仅通过原型构建的既有 Feishu 测试实例没有 AsyncLocalStorage 字段，已兼容缺失初始化，保留原测试并最终全量通过。原 R1–R3、PR #5、Group/Knowledge/Gateway 自动组合用例保留；未重复上轮真实 work 与隔离探针。
+- 交付：更新代码/本文件后推送同一 PR，Draft→Ready 请求新 head 独立复审；不宣称新 head PASS。未部署/修改真实配置、授权群、数据库、Shared 服务或遥测，未 Merge。真实群/双端验收仍未执行；doctor 为无飞书凭据开发配置，不是线上验收。
+
+# 当前交接：PR #16 审核返工 R1–R3（2026-09-26）
+
+- Task Source：Human 转交 [93b7ec1 的 NEEDS CHANGES](https://github.com/dccaoxy/codex-feishu-bot/pull/16#issuecomment-5846012207)。原 256 项通过未覆盖副作用出站与卡片收尾边界，不能代表取消链路完整；同一分支/PR 返工，先转 Draft。
+- R1：Owner 文件工具、`/send`、最终长结果附件和文字降级共享与来源消息/run 绑定的有效性检查；在真实 Feishu.call 队列的 SDK 上传、发送、重试前检查取消、当前 Owner、授权群、离群、关闭及 run 身份。排队中的正文/流式更新也检查。已经完成的上传无法回滚，但后续消息发送仍能阻止。
+- R2：撤回在第一个 await 前标记全部匹配回合取消、清除审批 token、结束本地回合；随后才发 interrupt。接收回调、队列动作消费和迟到 serverRequest 拒绝取消回合。中断延迟或失败不恢复授权，不向 Shared 请求自动批准或拒绝；其他有效回合不变。
+- R3：已存在/迟到的流式卡片通过仅关闭 streaming 的清理路径收尾，不发布旧结果；慢创建结束后无新回合/计时器。关闭 API 失败记录明确日志，不冒称远端已关闭，也不补发旧内容。
+- Validation：check、268 项全量测试通过，0失败/跳过；保留 PR #5 全部组合用例。新增真实 Bot/Store/Feishu.call 队列、替换 SDK transport 的确定性回归：撤回/撤权/离群前尚未上传为零、上传完成后消息为零、正常恰好一次、/send/工具/最终附件入口、发送重试撤权、中断等待/失败与旧 token/迟到工具隔离、已有/慢创建撤回/离群卡片关闭及关闭失败清理。doctor 握手/登录/7模型、无模型 ephemeral smoke 再次通过；使用无飞书凭据开发配置，不算线上连接验收。Group/Knowledge 和真实 work:check 证据沿用本 PR 上轮检查，本轮未重复该未修改部分。
+- 交付：本节取代下节关于取消链路完整性的结论。修复提交推送同一 PR 后 Draft→Ready 请求新 head 独立复审，尚无新 head PASS。不部署、不改真实配置/授权群/Shared 服务/遥测、不发送真实飞书消息、不 Merge。真实双端和群卡片验收仍未执行；Desktop 工具宿主边界继续保留。
+
+# 当前交接：Owner 私聊与授权群执行入口（2026-09-26）
+
+- Task Source：Human 明确要求自己的私聊和已授权群中自己的账号拥有相同执行能力，其他群成员保持现有权限，并授权开发。基于已合并 PR #5 的 main `2f84daf`，独立分支 `codex/owner-tool-parity`。
+- Implementation：默认关闭的 `ownerAccess` 开关；仅可信事件中的当前 Owner、新群消息、原 allowlist、明确 @ 可进入私聊 Bot 链路。每群 Owner Thread 与私聊、普通成员 GroupModel 分离；原始群消息继续落库，无第二份群 FIFO 请求。原 `/owner`、`/group-doc` 仍走原入口。Owner 复用文件/文档/命令/Shared Work 审批；Group Gateway 接受可信 Owner 群上下文，普通成员与未授权群仍拒绝。审批、工具派发、启动/steer 前重查授权。撤回取消队列或中断对应活动回合，慢卡片返回后不启动回合或遗留计时器；不撤销已发生副作用。
+- Runtime：可选继承共享服务器默认 sandbox/approval，未选择则原配置不变；外部绑定不覆写原 Desktop Thread 参数。普通 Group/Knowledge 保持独立进程与原隔离机制；版本门更新为已实测 `0.158.0-alpha.2`，可用 `codex.isolatedBinary` 独立指定。未删除版本或工具权限门。
+- Validation：check、全量 256 项测试通过（0失败/跳过），覆盖真实 Bot 撤回竞态、Owner 身份/授权撤销、审批卡隔离、原群 FIFO 与 Gateway、原 PR #5 组合用例。Group 16次、Knowledge 12次真实二进制/假 provider 隔离攻击探针通过，首次/恢复技能查询均要求空结果或不支持；原先首次 skills.list 返回不支持导致脚本解析失败，改为与原恢复断言一致，并非开放技能。doctor 握手/登录/7模型及无模型 ephemeral smoke通过；独立共享 work:check 的 start/steer/fork/interrupt/绑定恢复通过（真实模型调用，无飞书出站）。doctor 用开发配置，飞书凭据空、群功能关闭，不能称为线上飞书验收。开发中旧 fake Store 无 db 的组合测试失败已修复，最终全量复核通过。
+- Remaining / Risks：这不是复制所有 Desktop 专属工具；UI、插件及未知动态工具仍依赖目标 Thread 宿主，未增加多维表格写入能力或任意 RPC/Full 管理。Owner 活动回合沿用私聊 steer；普通成员 FIFO 不变。群内 Owner 结果对该群可见。真实飞书 Owner/普通成员对照、审批卡和 Desktop 专属工具验收尚未执行。上一轮二进制路径修复后，旧部署的 Group 版本门可能不匹配新二进制；本轮仅开发态验证修复，不能声称线上 Group/Knowledge 已恢复。
+- 交付边界：提交推送并创建 Draft→Ready PR 请求审核；Ready 不等于 PASS。未部署此分支、未改真实配置/allowlist/数据库/Shared 服务/遥测、未发送真实飞书消息、未 Merge。新入口启用需明确候选部署授权，届时只开放当前 Owner 和既有授权群。
+
 # 当前交接：PR #5 文件审批详情返工（2026-09-25）
 
 - Task Source：[c8987ee 复审 NEEDS CHANGES](https://github.com/dccaoxy/codex-feishu-bot/pull/5#issuecomment-5829284696)，R1–R3；同一分支先转 Draft，不部署、不 Merge、不扩展 Phase 3。

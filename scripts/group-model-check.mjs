@@ -39,8 +39,8 @@ try{
  const allowed=new Set([...(knowledge?[]:['group_search','group_context','group_changes','group_message']),'request_user_input','skills.list','skills.read']);
  assert.equal(names.includes('group_search'),!knowledge);assert.ok(names.every(n=>allowed.has(n)),`Unexpected tools: ${names.filter(n=>!allowed.has(n)).join(',')}`);
  const outputs=body.input.filter(x=>x.type==='function_call_output');assert.equal(outputs.length,calls.length);
- assert.deepEqual(JSON.parse(outputs[0].output).skills,[]);assert.deepEqual(JSON.parse(outputs[1].output).skills,[]);
- assert.match(outputs[2].output,/error|invalid|not found|not available|unknown|failed/i);
+ for(const x of outputs.slice(0,2)){if(x.output.startsWith('{'))assert.deepEqual(JSON.parse(x.output).skills,[]);else assert.match(x.output,/unsupported|not found|unknown/i);}
+ assert.match(outputs[2].output,/error|invalid|not found|not available|unknown|failed|unsupported/i);
  for(const [i,x] of outputs.entries()){if(calls[i].name==='group_search'&&!knowledge)assert.match(x.output,/GROUP_ALLOWED_TOOL_OK/);else if(i>=3)assert.match(x.output,/unsupported|not found|unknown/i);}
  assert.ok(!JSON.stringify(payloads).includes('PRIVATE_SENTINEL_MUST_NOT_REACH_MODEL'));
  if(!knowledge){

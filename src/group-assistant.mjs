@@ -32,13 +32,13 @@ export class GroupAssistant {
 
   }
   start() {this.queueTimer??=setInterval(()=>this.drain(),500);this.queueTimer.unref();this.drain();for(const chat of this.policy.config.allowedChatIds)if(this.store.thread(chat).state==='invalidated')this.model.invalidate?.(chat);const sync=async()=>{await Promise.allSettled(this.policy.config.allowedChatIds.map(chat=>this.history.reconcile(chat)));await this.knowledge.tick();};void sync();this.historyTimer=setInterval(()=>{void sync();},60000);this.historyTimer.unref();}
-  onMessage(data) {
+  onMessage(data, {recordOnly=false}={}) {
     const d=data.event||data,m=d.message;
     if(this.closed||m?.chat_type!=='group'||!this.policy.allowedGroup(m.chat_id)||typeof m.message_id!=='string'||typeof m.message_type!=='string'||typeof m.content!=='string'||!['user','bot','app'].includes(d.sender?.sender_type))return;
     const mentioned=this.policy.mayRespond(d);
     this.store.ingest(d,false);
     if(!this.store.stopped(m.chat_id))this.store.setSync(m.chat_id,{last_live_at:new Date().toISOString()});
-    if(!mentioned||Number(m.create_time)<this.liveSince)return;
+    if(recordOnly||!mentioned||Number(m.create_time)<this.liveSince)return;
     this.knowledge.preempt();
     const state=this.store.enqueue(d,this.policy.config.queueLimit);
     if(state==='queue_full')this.queueFull(d);

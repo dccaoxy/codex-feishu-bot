@@ -8,7 +8,7 @@ import { CodexClient } from './codex.mjs';
 // Environment-less threads remove exec/apply_patch/view_image authority. A clean
 // per-group home prevents user skills, MCP, memories and private task discovery.
 // Fail closed on other versions until the protocol isolation smoke is rerun.
-export const GROUP_CODEX_VERSION='codex-cli 0.155.0-alpha.16.3';
+export const GROUP_CODEX_VERSION='codex-cli 0.158.0-alpha.2';
 const disabled=['hooks','image_generation','memories','goals','apps','plugins','remote_plugin','recommended_plugins','tool_suggest','shell_tool','view_image','browser_use','browser_use_external','computer_use','multi_agent','multi_agent_v2','memory_tool','skill_search','skill_mcp_dependency_install','request_permissions_tool','workspace_dependencies','artifact','code_mode','standalone_web_search','sleep_tool'];
 export const GROUP_STARTUP_CONFIG='[skills]\ninclude_instructions = false\n[skills.bundled]\nenabled = false\n[cloud.skills]\nenabled = false\n[features]\nskip_host_skill_discovery = true\n'+disabled.map(x=>`${x} = false\n`).join('');
 export function groupThreadParams(cwd,tools,model) {
@@ -21,7 +21,7 @@ export class GroupModel {
   async run(question,tools,execute,signal,chat) {
     if(signal?.aborted)throw new Error('群请求已取消');
     if(!this.store||!chat||this.store.stopped(chat))throw new Error("Missing group binding");
-    if(execFileSync(this.config.codex.binary,['--version'],{encoding:'utf8',timeout:10000}).trim()!==GROUP_CODEX_VERSION) throw new Error('群模型版本未经隔离验证');
+    if(execFileSync((this.config.codex.isolatedBinary || this.config.codex.binary),['--version'],{encoding:'utf8',timeout:10000}).trim()!==GROUP_CODEX_VERSION) throw new Error('群模型版本未经隔离验证');
     const root=path.resolve(this.store.dir,'threads',createHash('sha256').update(chat).digest('hex'));
     let binding=this.store.thread(chat);
     if(binding.state==='invalidated') {
@@ -39,7 +39,7 @@ export class GroupModel {
     fs.writeFileSync(path.join(home,'config.toml'),GROUP_STARTUP_CONFIG,{mode:0o600});
     const env={PATH:process.env.PATH,HOME:root,CODEX_HOME:home,TMPDIR:root};
     for(const k of ['HTTPS_PROXY','HTTP_PROXY','ALL_PROXY','NO_PROXY','https_proxy','http_proxy','all_proxy','no_proxy']) if(process.env[k])env[k]=process.env[k];
-    const rpc=new CodexClient(this.config.codex.binary,{env,cwd});this.active.add(rpc);
+    const rpc=new CodexClient((this.config.codex.isolatedBinary || this.config.codex.binary),{env,cwd});this.active.add(rpc);
     let timer,stop,threadId,resolveDone,rejectDone,output='',calls=0;
     const done=new Promise((resolve,reject)=>{resolveDone=resolve;rejectDone=reject;}); done.catch(()=>{});
     const fail=()=>rejectDone(new Error('群模型执行失败或中断'));

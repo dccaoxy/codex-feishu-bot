@@ -161,7 +161,7 @@ test('real Bot event path registers tools and binds trusted identity, turn and c
  const start=rpc.calls.find(x=>x.method==='thread/start');assert.ok(start.params.dynamicTools.some(x=>x.name==='owner_group_send'));
  const call=async(id,tool,args={},turnId='turn')=>{await bot.serverRequest({id,method:'item/tool/call',params:{threadId:'private-thread',turnId,tool,arguments:args}});return rpc.responses.at(-1).result;};
  assert.equal((await call(1,'owner_groups')).success,true);
- assert.equal((await call(2,'owner_groups',{},'wrong')).success,false);
+ const count=rpc.responses.length;await call(2,'owner_groups',{},'wrong');assert.equal(rpc.responses.length,count);
  sendEvent('ignored','去机器人们群里告诉大家，hello','stranger');assert.equal(f.gateway.latest.get('private'),'bot1');
  sendEvent('bot2','只分析，不发送');await drain();assert.ok(rpc.calls.some(x=>x.method==='turn/steer'));
  const gs=JSON.parse((await call(3,'owner_groups')).contentItems[0].text).groups;
@@ -272,4 +272,10 @@ test('oversized individual and cumulative metadata yields bounded previews witho
  for(let i=0;i<20;i++){const response=await f.gateway.execute('owner_group_changes',{group:g.reference,after:cursor,limit:50},c);assert.ok(Buffer.byteLength(JSON.stringify(response))<=24000);const r=response.result;seen.push(...r.messages.map(m=>m.messageId));if(!r.hasMore)break;assert.ok(r.cursor>cursor);cursor=r.cursor;}
  assert.equal(new Set(seen).size,9);assert.equal(seen.length,9);
  const page=(await f.gateway.execute('owner_group_message',{group:g.reference,messageId:'metadata0'},c)).result.message;assert.ok(Buffer.byteLength(JSON.stringify(page))<=24000);assert.ok(page.limitations.some(x=>/分页/.test(x)));
+});
+test('enabled Owner group ingress shares gateway tools while member and other-group contexts remain denied',async t=>{
+ const f=setup(t);f.config.ownerAccess={enabled:true};
+ assert.equal((await directory(f,f.context('列出授权群',{chat:'a',type:'group'}))).length,2);
+ for(const options of [{chat:'a',type:'group',user:'member'},{chat:'secret',type:'group'}])await assert.rejects(directory(f,f.context('列出授权群',options)));
+ const c=f.context('列出授权群',{chat:'a',type:'group'});f.config.ownerAccess.enabled=false;await assert.rejects(directory(f,c));
 });

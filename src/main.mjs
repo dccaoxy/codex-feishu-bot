@@ -1,3 +1,4 @@
+import { OwnerAccess } from './owner-access.mjs';
 import {OwnerGroupGateway} from './owner-group-gateway.mjs';
 import { GroupAssistant } from './group-assistant.mjs';
 import fs from 'node:fs';
@@ -88,15 +89,21 @@ async function main() {
       const info = await feishu.call(() => feishu.client.request({method:'GET',url:'/open-apis/bot/v3/info'}));
       if (!info.bot?.open_id) throw new Error('无法确认机器人身份，群聊未启用');
       groups = new GroupAssistant(config,feishu,() => bot.owner,info.bot.open_id,{rpc});
+      bot.ownerAccess = new OwnerAccess(config,groups,()=>bot.owner);
       bot.setOwnerGroups(new OwnerGroupGateway(config,store,groups,feishu,()=>config.feishu.ownerOpenId||store.get('owner')||''));
     }
     await bot.recover();
     await feishu.start(data => {
-      if ((data.event || data).message?.chat_type === 'group') return groups?.onMessage(data);
+      if ((data.event || data).message?.chat_type === 'group') {
+        const ownerRequest=bot.ownerAccess?.routes(data);
+        groups?.onMessage(data,{recordOnly:ownerRequest});
+        if(ownerRequest)return bot.onMessage(data);
+        return;
+      }
       return bot.onMessage(data);
     }, data => bot.onAction(data), groups ? {
-      'im.message.recalled_v1': data => groups.onRecall(data),
-      'im.chat.member.bot.deleted_v1': data => groups.onLeave(data),
+      'im.message.recalled_v1': data => {groups.onRecall(data);const d=data.event||data;void bot.cancelOwnerGroup(d.chat_id,d.message_id).catch(e=>console.error(bot.redact(e)));},
+      'im.chat.member.bot.deleted_v1': data => {groups.onLeave(data);const d=data.event||data;void bot.cancelOwnerGroup(d.chat_id).catch(e=>console.error(bot.redact(e)));},
     } : {});
     groups?.start();
     console.log('机器人启动中。请保持电脑联网且不休眠。按 Ctrl+C 停止。');

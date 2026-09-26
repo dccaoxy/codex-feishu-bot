@@ -471,3 +471,18 @@ Owner 在授权群 @ 机器人后发送：
 除这一普通消息发送外，不提供跨群Control、编辑/删除/撤回、成员管理、@成员、群文档写入、allowlist修改。后台Knowledge、群Agent和非Owner私聊均不能调用。Group→Private的既有Owner Resource Gateway保持独立。工具升级沿用既有单聊近期历史迁移机制，旧任务保留；不是Attach群任务或迁移全部模型上下文。
 
 验证：`npm run check`、`npm test`、`npm run doctor`、`npm run smoke`（含新工具注册）、`npm run group:check`及`npm run knowledge:check`。后两项含伪造Owner群目录/发送工具攻击。真实私聊读取→来源回查→明确发送一次→只分析零发送，须在候选部署授权后另行验收；离线测试不替代此过程。
+
+
+## Owner 私聊与授权群执行入口（默认关闭）
+
+`ownerAccess.enabled=true` 将真实 Owner 在现有授权群中、启动后明确 @ 机器人的新消息交给私聊 Bot 执行链路。Owner 每个群拥有独立于普通群助手和私聊的 Thread；普通成员继续走隔离 GroupModel，不能使用 Owner 审批卡。群成员、历史消息、引用和模型参数均不能声明 Owner 身份。群内执行结果会发送到该群，因此 Owner 应仅在希望公开结果的群提出请求。
+
+Owner 路径复用私聊的命令、文件、文档、Shared Runtime Work/Attach、工具注册和人工审批；活动回合的新 Owner 消息沿用私聊 steer 语义，不是普通群助手的 FIFO。普通成员 FIFO 不变。已有 `/owner` 与 `/group-doc` 显式命令继续走原群入口，以保留受控数据库、私人摘要和文档查询能力。撤回待处理 Owner 消息取消入队，撤回当前输入或机器人离群尝试中断对应回合，不撤销已执行的操作。权限关闭或 Owner 变化后不接受新请求/审批；重启前的群输入因 live 时间校验不自动重放。
+
+`ownerAccess.inheritRuntimeDefaults=true` 让新建/升级的 Owner 任务不覆盖共享服务器的 sandbox/approval 默认值；否则沿用 `codex.sandbox` 和 `codex.approvalPolicy`。不自动授权审批。已有外部 Desktop Thread 仍通过 `/attach` 继续，不覆盖其工作目录、模型、审批或工具配置。
+
+能力对齐不等于复制 Desktop 的所有工具：宿主 UI、浏览器、插件连接器等仍取决于目标 Thread 的工具宿主注册。Bot 不代理未知 Desktop 动态工具、不做任意 RPC 透传、不增加外部 Thread 管理权限。仅有 Desktop 客户端实现的工具需要该客户端在线处理，不声称离线可用。飞书平台权限另行生效。尚未新增多维表格写入工具。
+
+普通群助手/Knowledge 使用独立进程与隔离配置；可用 `codex.isolatedBinary` 指定独立二进制，默认使用 `codex.binary`。必须通过版本固定的 `group:check` 和 `knowledge:check` 才能升级隔离运行时。本轮验证版本为 0.158.0-alpha.2，禁止为恢复功能直接移除版本检查。
+
+Owner 群命令的回复和嵌套飞书调用在实际发送及重试前复核原消息身份、撤回和当前授权；错误通知也受同一限制。`/reference` 保留原群消息 ID，读取期间撤回不启动回合，启动后撤回取消该回合。取消后的卡片只允许关闭 streaming，不补发旧正文。
