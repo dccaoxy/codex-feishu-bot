@@ -1,3 +1,13 @@
+# 当前交接：PR #17 已审核版本候选部署（2026-09-26 21:39 北京时间）
+
+- Human 明确授权部署独立复审 PASS 的 `1e6ead72b71564418cf315fb4a3b9c8e042da6c3`，不 Merge，部署后等待 Human Gate；免重复专门24KB边界人工测试。审核评论： https://github.com/dccaoxy/codex-feishu-bot/pull/17#issuecomment-5846675017 。
+- 部署：原 data/issue6-candidate；60个 src/scripts/test/package 文件逐项哈希与指定版本完全一致。旧候选尚未包含已合并PR #16，本次带入指定head的既有修复，不另开功能。配置SHA256前后相同，原2个授权群、Owner Gateway（1数据源/私人任务读取）、Knowledge、Shared连接和权限设置不变；不启用配置外的新Owner群入口。备份：data/pr17-1e6ead7-backup-20260926-213912（源码、配置、两份SQLite一致性快照与验证日志），证据索引 data/pr17-deployment.json；均不入Git。
+- 服务：部署前无running/queued用户请求或running知识任务。仅重启机器人，PID41445→89055，launchd exit0；Shared App Server PID41044保持不变，Desktop/Shared/遥测服务未改。新增日志确认“Codex 已连接”“飞书长连接已建立”；部署后截至复核stderr新增0字节，无新增error/EMFILE。
+- 验证：实际候选 npm run check、446/446全量组合测试（0失败/跳过）、doctor握手/登录/7模型、无模型ephemeral smoke及动态工具注册通过。指定版本的group:check（含持久会话恢复/16类攻击）与knowledge:check（12类攻击）通过，版本0.158.0-alpha.2，无真实模型调用。原PR #5/Owner/FIFO/Knowledge组合自动回归保留。
+- 只读真实飞书验证：两个现有授权群本地历史的人类发送者分别2/36人，当前成员API分别匹配2/36个显示名，均complete、0冲突；没有发送真实消息，不等同客户端排版或历史身份验收。未重复专门24KB人工测试。
+- 数据：重启前后Raw Messages/messages各1202条、群请求10条、群线程2条、Knowledge jobs7条/digests5条/topics1条/schedule2条，以及私人settings、发送审计、绑定逐行一致。未修改源数据库、名单或权限；正常服务后续可继续写入新消息。
+- 异常与局限：部署前已有2个Knowledge blocked任务，部署后原样保留，不把它们宣称已恢复，也不在本次重试。当前连接恢复不代表长期稳定性或客户端显示已完成人工验收。本次仅文档记录提交；运行代码固定为1e6ead7，不跟随后续文档head变化。未Merge，等待Human Gate。
+
 # 当前交接：PR #17 R1 字节预算返工（2026-09-26）
 
 - Task Source：Human 转交 [43d45c5 的 R1/P2 NEEDS CHANGES](https://github.com/dccaoxy/codex-feishu-bot/pull/17#issuecomment-5846600192)。同一分支返工，先转 Draft；不部署、不 Merge。原443项通过未覆盖50条短正文与最大姓名组合，不能证明该预算边界已覆盖。
