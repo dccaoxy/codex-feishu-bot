@@ -486,3 +486,12 @@ Owner 路径复用私聊的命令、文件、文档、Shared Runtime Work/Attach
 普通群助手/Knowledge 使用独立进程与隔离配置；可用 `codex.isolatedBinary` 指定独立二进制，默认使用 `codex.binary`。必须通过版本固定的 `group:check` 和 `knowledge:check` 才能升级隔离运行时。本轮验证版本为 0.158.0-alpha.2，禁止为恢复功能直接移除版本检查。
 
 Owner 群命令的回复和嵌套飞书调用在实际发送及重试前复核原消息身份、撤回和当前授权；错误通知也受同一限制。`/reference` 保留原群消息 ID，读取期间撤回不启动回合，启动后撤回取消该回合。取消后的卡片只允许关闭 streaming，不补发旧正文。
+
+
+## Owner 查询群发言人姓名
+
+Owner 的 `owner_group_search/message/context/changes` 在读取本地原文后，通过飞书当前群成员名单按 `open_id` 精确匹配，返回 `senderName`。稳定的 `s_` 发言人引用保留，供分页和按人检索；普通成员与 Knowledge 工具不增加姓名目录或权限。修改了工具描述，沿用既有 Owner 工具升级机制。
+
+姓名是当前群显示名，不是发言时姓名，也不是实名核验。`senderNameStatus` 区分 matched、not_found、ambiguous、not_user、partial、unavailable；无法匹配返回 null，同名不合并，不能据此认定学员零发言。显示名和原文一样是不可信资料。名单仅在单次调用内处理，不持久化姓名或向模型输出原始 open_id/完整成员目录；最多20页、10000成员，权限限制或分页不完整会明确标记。权限不足时保留可读原文及匿名引用，不暴露接口错误详情。
+
+查询前、排队实际调用前、返回后均检查当前 Owner/群授权/原请求有效性；等待名单期间被撤回或过期的原文不再返回。大页预览必要时缩短正文并保留来源 ID/游标，可逐条回查。仅读取成员，不修改群成员或发送消息。此功能不包含名单关联统计或多维表格创建。

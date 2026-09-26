@@ -1,3 +1,11 @@
+# 当前交接：Owner 群发言人姓名映射（2026-09-26）
+
+- Task Source：Human 反馈 Owner 查询只返回 s_ 匿名标识，并授权“那你来操作吧”补齐姓名映射。PR #16 已 Merge；从最新 origin/main 6f986a6 新建 codex/owner-sender-names，独立开发，不混入已结束 PR。
+- Implementation：Owner Group Gateway 的 search/message/context/changes 按本地消息原始 open_id 查询该群当前成员名单，仅返回对应显示名和稳定匿名引用；不向模型输出整份成员表或原始 ID，不持久化姓名。ordinary Group/Knowledge 工具与授权不变。工具描述更新，沿用既有 Owner 工具升级机制。未添加多维表格或学员名单关联统计。
+- 边界：当前显示名不是历史身份；同名不合并；离群/缺失、冲突、机器人、接口不可用、分页或安全限制分别标记，不能推断零发言。20页/10000成员上限，支持飞书超过 page_size 的同批成员页。队列出站及返回前重查权限；await 期间撤回/过期原文移除；超预算预览缩短正文但保留消息和游标。
+- Validation：check、443/443 全量测试（0失败/跳过）、diff check 通过，包含现有 PR #5/Owner/FIFO/Knowledge 组合回归。新增15项：准确ID匹配、分页、同名与冲突、跨群、失败和安全限制、大页/预算、取消/Owner变化/撤权/离群及等待期间目标撤回、普通成员拒绝。使用真实 Gateway/Store/Feishu 队列和模拟成员 SDK，没有发送真实飞书消息。doctor 握手/登录/7模型与真实无模型 ephemeral smoke/动态工具注册通过；无飞书凭据开发配置，不构成线上飞书验收。未重复未改动的 Group/Knowledge 进程隔离探针。
+- 交付：创建新 Draft PR 后转 Ready 请求审核；未经复审不宣称 PASS。未部署、未 Merge、未改当前候选配置/群权限/数据库/Shared Runtime/遥测。下一步审核，通过且获得部署授权后再做 Owner 姓名真实验收。
+
 # 当前交接：PR #16 迟到工具回合身份返工 R7（2026-09-26）
 
 - Task Source：Human 要求继续同一分支处理 [a64c336 的 R7/P1](https://github.com/dccaoxy/codex-feishu-bot/pull/16#issuecomment-5846383282)，不部署、不 Merge。先转 Draft。R6 固定当前 run.turn 并不足以证明请求自身属于该回合；原 314 项没有旧 turn 测试。

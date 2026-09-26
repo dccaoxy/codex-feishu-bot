@@ -279,3 +279,39 @@ test('enabled Owner group ingress shares gateway tools while member and other-gr
  for(const options of [{chat:'a',type:'group',user:'member'},{chat:'secret',type:'group'}])await assert.rejects(directory(f,f.context('列出授权群',options)));
  const c=f.context('列出授权群',{chat:'a',type:'group'});f.config.ownerAccess.enabled=false;await assert.rejects(directory(f,c));
 });
+
+function members(f,get){f.feishu.client.im.v1.chatMembers={get:async x=>({data:await get(x)})};}
+test('Owner message/search/context/changes receive current names with stable pseudonyms, scoped by group',async t=>{
+ const f=setup(t),c=f.context('读取机器人们群');await directory(f,c);
+ members(f,async x=>({items:[{member_id:'speaker',name:x.path.chat_id==='a'?'Alex':'Sam'}],has_more:false}));
+ for(const [tool,args] of [['message',{messageId:'first-a'}],['search',{}],['context',{messageId:'first-a'}],['changes',{after:0}]]){
+ const r=(await f.gateway.execute('owner_group_'+tool,{group:'机器人们',...args},c)).result,m=r.message||r.messages[0];assert.equal(m.senderName,'Alex');assert.equal(m.senderNameStatus,'matched');assert.match(m.sender,/^s_/);assert.ok(!JSON.stringify(r).includes('speaker'));assert.equal(r.senderNames.source,'current_group_members');}
+ const b=(await f.gateway.execute('owner_group_message',{group:'学员群',messageId:'first-b'},c)).result.message;assert.equal(b.senderName,'Sam');assert.equal(f.sent.length,0);
+});
+test('Owner missing/ambiguous/bot/API-failed names are explicit and never invented',async t=>{
+ const f=setup(t),c=f.context('读取机器人们群');await directory(f,c);
+ for(const [items,status] of [[[],'not_found'],[[{member_id:'speaker',name:'A'},{member_id:'speaker',name:'B'}],'ambiguous']]){members(f,async()=>({items,has_more:false}));const m=(await f.gateway.execute('owner_group_message',{group:'机器人们',messageId:'first-a'},c)).result.message;assert.equal(m.senderName,null);assert.equal(m.senderNameStatus,status);}
+ members(f,async()=>{throw Error('secret');});let m=(await f.gateway.execute('owner_group_message',{group:'机器人们',messageId:'first-a'},c)).result.message;assert.equal(m.senderNameStatus,'unavailable');
+ f.groupStore.db.prepare("UPDATE messages SET sender_type='app' WHERE chat='a'").run();m=(await f.gateway.execute('owner_group_message',{group:'机器人们',messageId:'first-a'},c)).result.message;assert.equal(m.senderNameStatus,'not_user');
+});
+for(const mode of ['revoke','owner','cancel','leave','target-recall'])test('member lookup async boundary protects '+mode,async t=>{
+ const f=setup(t);let live=true;const c=f.context('读取机器人们群',{live:()=>live});await directory(f,c);let calls=0;
+ members(f,async()=>{calls++;if(mode==='revoke')f.config.groups.allowedChatIds=[];if(mode==='owner')f.setOwner('other');if(mode==='cancel')live=false;if(mode==='leave')f.groupStore.leave('a');if(mode==='target-recall')f.groupStore.recall('a','first-a');return {items:[{member_id:'speaker',name:'Alex'}],has_more:false};});
+ const promise=f.gateway.execute('owner_group_message',{group:'机器人们',messageId:'first-a'},c);
+ if(mode==='target-recall')assert.equal((await promise).result.message,null);else await assert.rejects(promise);assert.equal(calls,1);assert.equal(f.sent.length,0);
+});
+test('ordinary members cannot invoke member directory enrichment',async t=>{
+ const f=setup(t);f.config.ownerAccess={enabled:true};let calls=0;members(f,async()=>{calls++;return {items:[],has_more:false};});await assert.rejects(f.gateway.execute('owner_group_search',{group:'机器人们'},f.context('查询',{user:'member',chat:'a',type:'group'})));assert.equal(calls,0);
+});
+test('name enrichment preserves message cursors under maximum names and UTF8 page budget',async t=>{
+ const f=setup(t),c=f.context('读取机器人们群');await directory(f,c);
+ for(let i=0;i<50;i++)f.add('a','named'+i,'正文'.repeat(90),'2026-09-23T12:00:00Z','person'+i);
+ members(f,async()=>({items:Array.from({length:50},(_,i)=>({member_id:'person'+i,name:'名'.repeat(66)})),has_more:false}));
+ let cursor=0,ids=[];
+ for(let i=0;i<20;i++){const response=await f.gateway.execute('owner_group_changes',{group:'机器人们',after:cursor,limit:50},c);assert.ok(Buffer.byteLength(JSON.stringify(response))<=24000);const r=response.result;ids.push(...r.messages.map(m=>m.messageId));if(!r.hasMore)break;assert.ok(r.cursor>cursor);cursor=r.cursor;}
+ assert.equal(ids.length,51);assert.equal(new Set(ids).size,51);
+});
+test('recalled array message is excluded after member lookup await',async t=>{
+ const f=setup(t),c=f.context('读取机器人们群');await directory(f,c);members(f,async()=>{f.groupStore.recall('a','first-a');return {items:[],has_more:false};});
+ assert.deepEqual((await f.gateway.execute('owner_group_search',{group:'机器人们'},c)).result.messages,[]);
+});
