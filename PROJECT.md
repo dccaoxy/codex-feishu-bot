@@ -1,3 +1,19 @@
+# 当前交接：PR #19 已审核候选部署（2026-09-28）
+
+- Human明确授权“部署吧”，目标为独立复审PASS的b70ab30a1e15cf40ae1de501a53fd7c70ec02271，候选仍data/issue6-candidate。部署前源码与PR #18部署清单一致，无活跃/排队用户或Knowledge运行任务。
+- 精确版本文件逐项哈希验证通过；备份data/pr19-b70ab30-backup-20260928-155235保存旧代码/配置和两份SQLite一致性快照，完整证据data/pr19-deployment.json。真实配置、launchd plist逐字节一致，2个授权群、Owner/Gateway/FIFO/Knowledge及Shared权限保留。仅机器人PID52185→56641，Shared PID743不变，未重启Desktop/Shared/遥测。
+- 实际候选check、549/549全量组合测试（0失败/跳过）、doctor Shared握手/登录/7模型、无模型ephemeral smoke/动态注册通过。Group22类攻击及持久恢复、Knowledge15类攻击隔离检查通过，二进制0.158.0-alpha.2.1，使用本地模拟provider，无真实模型或飞书写入。
+- 服务running，新日志确认Codex与飞书长连接建立；stdout新增189字节无error/EMFILE，stderr0字节。停止期间所有业务表一致，启动后仅history_sync.last_reconciled_at及SQLite自增序列随正常对账变化，其他私人/群消息/知识数据保持一致。既有2项blocked知识任务未改变。
+- 可以开始新版新建临时文档→加粗/改文字/删除段落免卡片验收；旧文档没有可信创建记录时仍确认，整份文件删除/分享/成员权限仍确认。尚未进行真人飞书编辑验收。未Merge；运行版本固定b70ab30，本次文档记录提交不自动部署，等待Human Gate。
+
+# 当前开发：机器人自建文档内容编辑免确认（2026-09-28）
+
+- Task Source：Human「在操作机器人自己生成的飞书文档的时候，可以不用我确认」。PR #18已由外部合并；从最新main c067550另开codex/created-doc-consent，不修改当前fdfd468候选。
+- Implementation：只在专用文档创建或已确认的目录docx.create实际返回成功后，用响应文档ID建立本地持久创建记录，绑定应用身份和当前Owner。名称/链接/读取返回/模型自称不构成归属证据。当前Owner的匹配自建文档，块内容插入/修改/删除及样式编辑无需确认卡；整份文件删除、分享/邀请/成员权限与其他资源仍确认。普通成员权限不变。
+- 许可：复用原宿主许可流程的可信来源、Owner、回合、10分钟时效、单次消耗、重复阻断、SDK排队与最终回传守卫；免卡片不免撤回/撤权和版本检查，创建记录/应用变化立即失效。没有模型可调用的归属登记接口。
+- Validation：check、549/549全量组合测试通过（0失败/跳过）；新增15项回归覆盖真实Bot/Store/模拟SDK创建和持久记录、Owner私聊/群免确认、外部/错Owner/错应用/坏记录不免确认、整份文件删除仍确认、排队撤回/撤权/身份变化/记录变化零传输、样式与目录创建、失败/仅读不登记。doctor实际Shared握手/登录/7模型与无模型ephemeral smoke动态注册通过。模拟飞书SDK，无真实文档写入。
+- Remaining：旧版本创建但无可信本地记录的文档暂仍确认；不自动从历史文字认领，不宣称现有全部旧文档已免确认。未部署、未重启、未修改真实配置/数据或权限，云盘/任务及7项user-only限制保持。提交新PR并Ready请求独立审核；不自动Merge，当前候选继续fdfd468。
+
 # 当前交接：PR #18 已审核候选部署（2026-09-28）
 
 - Human 明确授权部署独立复审 PASS 的 fdfd46836fe4e57f11aad554026a1d19d0da52e0，不 Merge。[复审证据](https://github.com/dccaoxy/codex-feishu-bot/pull/18#issuecomment-5863191009)。候选仍为原 data/issue6-candidate，部署前源码与PR #17记录一致，无活跃/排队用户任务或运行中Knowledge任务。
