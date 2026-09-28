@@ -1,3 +1,44 @@
+# 当前交接：PR #18 已审核候选部署（2026-09-28）
+
+- Human 明确授权部署独立复审 PASS 的 fdfd46836fe4e57f11aad554026a1d19d0da52e0，不 Merge。[复审证据](https://github.com/dccaoxy/codex-feishu-bot/pull/18#issuecomment-5863191009)。候选仍为原 data/issue6-candidate，部署前源码与PR #17记录一致，无活跃/排队用户任务或运行中Knowledge任务。
+- Deployment：实际文件清单以 data/pr18-deployment.json 为准；src/scripts/test/third_party与package文件均来自精确提交且部署后逐项SHA256校对通过。备份 data/pr18-fdfd468-backup-20260928-134943 包含原代码、配置与两份SQLite一致性快照。仅机器人重启PID1155→52185，Shared App Server PID743不变；Desktop、Shared和遥测服务未重启。真实config.local.json及launchd plist逐字节不变，原2群、Owner、Gateway、Knowledge、FIFO权限配置不变。
+- Validation：在实际候选目录执行check、534/534全量组合测试（0失败/跳过）、doctor握手/登录/7模型、无模型ephemeral smoke及动态工具注册全部通过。实际二进制0.158.0-alpha.2.1的Group22类攻击及持久恢复、Knowledge15类攻击隔离探针通过；探针使用本地模拟provider，无真实模型调用或飞书写入。
+- 服务与数据：全新日志确认Codex和飞书长连接建立，服务running；新增stdout189字节无error/EMFILE，stderr0字节。停止期间验证前后全部业务表逐行一致；启动后原消息1207条、知识和私人业务表保持一致，仅history_sync.last_reconciled_at与SQLite自动序列随正常同步更新。已有2个blocked Knowledge任务保持原状，未额外重试。完整哈希、日志与快照证据留本地，不提交凭据或数据库。
+- Human Gate：可以开始临时文档的格式修改、拒绝写入、撤回使旧确认失效、批准精确删除内容四项真实验收。此前未发送真实确认卡/写入实际文档，不能宣称真人验收已通过。云盘文件/任务tenant scopes和7项user-only接口限制仍存在，PASS和部署不等于全部飞书权限开通。未Merge；运行代码固定fdfd468，不随本次文档记录提交变化。
+
+# 当前返工：PR #18 R2 私聊撤回（2026-09-28）
+
+- Task Source：[ed4acdb 的 R2 NEEDS CHANGES](https://github.com/dccaoxy/codex-feishu-bot/pull/18#issuecomment-5862551514)。R1 授权主体已通过复审，但生产撤回入口仅处理带 ownerChannel 标记的群，私聊原消息撤回没有取消办公许可。本次同分支 Draft 返工。
+- Implementation：生产撤回入口对私聊从持久化 inbox 核对当前 Owner、消息类型、chat_id 与 message_id 后取消原消息，清除匹配回合的确认、取消 run 并请求 turn/interrupt。保留群撤回及离群整通道取消；私聊缺失/无关/非Owner来源不能取消当前回合。已发送到飞书的操作无法回滚。
+- Validation：check、534/534 全量组合测试通过（0失败/跳过），含 PR #5、Owner、FIFO、Knowledge 既有回归。新增4项生产入口回归覆盖私聊撤回后旧按钮/旧slash零删除传输、批准后SDK排队期间撤回零传输、无关/缺失/非Owner/错会话撤回不影响正常私聊确认。针对性 Owner 测试257/257通过。
+- 实际协议验证：doctor Shared App Server握手、登录、7模型及无模型ephemeral smoke/动态工具注册通过。独立开发配置无飞书凭据，未发送真实卡片/执行真实办公写入；不宣称真人UI验收完成。本次未修改隔离工具注册/模型版本，Group22/Knowledge15实际探针沿用R1记录，没有作为本轮重跑结果。
+- Delivery：README/PROJECT更新，推送同一PR后转Ready请求新head复审。未部署、未Merge、未改候选配置/数据/服务/授权群；云盘/任务tenant权限及7项user-only限制保留。等待审核和后续Human Gate。
+
+# 当前返工：PR #18 宿主级办公写授权 R1（2026-09-28）
+
+- Task Source：[476a8c7 的 NEEDS CHANGES](https://github.com/dccaoxy/codex-feishu-bot/pull/18#issuecomment-5862288637)。原506项测试未覆盖“有效Owner回合中的模型误调用”这一边界，仅提示词不能证明当前用户批准。已在同一分支先转Draft返工。
+- Implementation：全部新增办公目录非GET接口（保守包括POST查询）、sheet_write及新format_text由宿主挂起并展示完整API/参数确认卡片；无宿主许可时即使提供合法通用guard也零传输。Owner必须经真实飞书按钮事件或已持久化的当前/approve消息确认，模型无法提供可用授权字段。普通成员、历史引用、文档内容和伪造/缺失消息不会生成许可。
+- 绑定：许可捕获Owner、原message集合及可信inbox快照、原turn、API/完整参数摘要、工具请求ID与10分钟期限。参数先复制，卡片转义控制字符，超出完整展示预算拒绝，不采用摘要代替目标。相同消息/回合/参数及重复request ID最多执行一次，审批不跨重启恢复。签发、实际出站、返回RPC前均复核，出站瞬间消耗一次性许可；拒绝/撤回/撤权/换回合/原消息变化/追加要求/过期使旧授权失效。已到达飞书的操作无法回滚。
+- Validation：check及530/530全量组合测试通过（0失败/跳过）；新增24项回归覆盖文件/批量记录/日历/任务删除与邀请/成员变更零授权零传输、真实Owner按钮和slash确认、普通成员、篡改参数、重复/并行请求、原消息变化/撤回/撤权/过期、批准后排队及最终RPC交付守卫。保留PR #5、Owner、FIFO、Knowledge既有组合。
+- 协议验证：doctor实际Shared握手/登录/7模型、无模型ephemeral smoke工具注册通过；固定0.158.0-alpha.2.1 Group 22类攻击/重启恢复及Knowledge 15类攻击探针通过。隔离开发配置与模拟飞书SDK；无真实模型请求、未发送飞书确认卡片或写入真实资料，不声称真人审批UI验收通过。
+- Delivery：README/PROJECT同步，推送同一PR #18后Draft→Ready请求最新head复审。未部署、未Merge，候选配置/服务/数据/授权群不变。云盘/任务tenant权限和7项user-only限制原样保留；旧文档/本机工具沿用既有授权路径，本次不扩展该边界。
+
+# 当前补充：删除原文档内容能力（2026-09-28）
+
+- Human 反馈原文档有重复表格，机器人因没有删除工具而另建文档，要求匹配权限。只读核对现有应用tenant的docx:document、docx:document:write_only均已获批；线上候选没有office模块及batchDelete内容工具。不能据此判断具体文档协作者权限，但本次截图所示功能缺口来自未部署的新工具。
+- PR #18 已含官方 documentBlockChildren.batchDelete；本次同分支补充非负整数/左闭右开删除范围校验、明确读取版本及父块children/目标ID的操作指引，不以另建文档代替用户要求的原文档修改。删除内容不等于删除云盘文档文件。
+- 验证：check、506/506全量组合测试（0失败/跳过）及真实无模型ephemeral smoke/动态工具注册通过。补充代码提交推送同一PR #18，重新Ready请求最新head审核。不修改真实文档、应用权限或线上配置，不部署、不Merge。
+
+# 当前交接：Owner 办公工具扩展（2026-09-28）
+
+- Task Source：Human「给飞书机器人配尽量完整的工具和权限」，澄清回复「所有能给他配上的都配上」。本人私聊/已有授权 Owner 群使用扩展工具，普通群成员权限不变。基于最新 main 094de08 新分支 codex/owner-office-tools；未扩大授权群或进入新的共享运行模式。
+- Implementation：固定提取官方 lark-mcp 0.5.1 的219项接口目录，212支持应用身份、7项用户身份专用明确拒绝；通过 find/schema/call 按需加载。覆盖文档、多维表格、电子表格、文件、知识库、日历、任务、联系人只读、会议/搜索；增加单元格范围读写、权限清单分页、精确局部文字样式工具。接口数量不代表权限开通或逐项验收。
+- 保护：固定SDK目录/JSON Schema、禁止URL/请求头/Token/身份覆盖和路径注入；已有文档块编辑要求具体revision；写入不自动重试；结果预算与截断说明；排队出站/返回前验证原Owner、回合、撤回/撤权。旧机器人自有任务通过既有工具版本升级路径加载新工具。普通Group/Knowledge不注册办公工具。
+- Runtime：本机Desktop二进制已为0.158.0-alpha.2.1，原隔离检查因固定0.158.0-alpha.2而拒绝。先在独立临时探针验证新版，再将本开发分支准确版本固定更新至0.158.0-alpha.2.1；没有移除版本门禁。当前候选仍为旧代码且未配置独立二进制，普通群/Knowledge后续新启动可能被原版本门禁拒绝，不能把此开发结果当成线上恢复。
+- Validation：check通过；505/505全量测试（0失败/跳过），保留PR #5/Owner Gateway/FIFO/Knowledge组合；随后样式键校验微调的6项文档测试通过。doctor真实Shared握手/登录/7模型通过，无模型ephemeral smoke及全部Owner动态工具注册通过。开发配置不含飞书凭据。新版实际group探针22类调用及持久会话重启恢复通过，Knowledge15类通过，新增办公写入/样式越权请求均被拒绝；无真实模型调用。目录生成器重建逐字节一致，未新增生产依赖。
+- 真实只读验证：使用现有应用身份查询权限，知识库列表成功；日历page_size=1被字段校验拒绝，使用默认分页成功（不是权限缺失）。云盘列表报99991672，要求tenant drive:drive / drive:drive:readonly / space:document:retrieve任一；任务清单要求tenant task:tasklist:read / task:tasklist:write任一。已有user grants不能替代用户OAuth或tenant grants。未发送消息、未写飞书资料、未改应用权限。
+- Remaining：需要管理员补充所需应用身份权限并使应用版本生效，以及审核后候选部署/真实写入验收。未接入用户OAuth、通用素材二进制上传、人员写入/企业管理、群控制扩权或任意API代理。全部接口仍受飞书资源权限约束；不宣称已经具备所有权限。开发代码cfb6a95已提交推送；[PR #18](https://github.com/dccaoxy/codex-feishu-bot/pull/18)已创建Draft并转Ready请求审核，尚未取得复审结论。未部署、未Merge、未修改现有候选配置/数据/Shared服务/遥测。
+
 # 当前交接：PR #17 已审核版本候选部署（2026-09-26 21:39 北京时间）
 
 - Human 明确授权部署独立复审 PASS 的 `1e6ead72b71564418cf315fb4a3b9c8e042da6c3`，不 Merge，部署后等待 Human Gate；免重复专门24KB边界人工测试。审核评论： https://github.com/dccaoxy/codex-feishu-bot/pull/17#issuecomment-5846675017 。
