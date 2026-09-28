@@ -6,7 +6,7 @@
 - Runtime：本机Desktop二进制已为0.158.0-alpha.2.1，原隔离检查因固定0.158.0-alpha.2而拒绝。先在独立临时探针验证新版，再将本开发分支准确版本固定更新至0.158.0-alpha.2.1；没有移除版本门禁。当前候选仍为旧代码且未配置独立二进制，普通群/Knowledge后续新启动可能被原版本门禁拒绝，不能把此开发结果当成线上恢复。
 - Validation：check通过；505/505全量测试（0失败/跳过），保留PR #5/Owner Gateway/FIFO/Knowledge组合；随后样式键校验微调的6项文档测试通过。doctor真实Shared握手/登录/7模型通过，无模型ephemeral smoke及全部Owner动态工具注册通过。开发配置不含飞书凭据。新版实际group探针22类调用及持久会话重启恢复通过，Knowledge15类通过，新增办公写入/样式越权请求均被拒绝；无真实模型调用。目录生成器重建逐字节一致，未新增生产依赖。
 - 真实只读验证：使用现有应用身份查询权限，知识库列表成功；日历page_size=1被字段校验拒绝，使用默认分页成功（不是权限缺失）。云盘列表报99991672，要求tenant drive:drive / drive:drive:readonly / space:document:retrieve任一；任务清单要求tenant task:tasklist:read / task:tasklist:write任一。已有user grants不能替代用户OAuth或tenant grants。未发送消息、未写飞书资料、未改应用权限。
-- Remaining：需要管理员补充所需应用身份权限并使应用版本生效，以及审核后候选部署/真实写入验收。未接入用户OAuth、通用素材二进制上传、人员写入/企业管理、群控制扩权或任意API代理。全部接口仍受飞书资源权限约束；不宣称已经具备所有权限。开发代码已完成，创建Draft PR后转Ready请求审核；未部署、未Merge、未修改现有候选配置/数据/Shared服务/遥测。
+- Remaining：需要管理员补充所需应用身份权限并使应用版本生效，以及审核后候选部署/真实写入验收。未接入用户OAuth、通用素材二进制上传、人员写入/企业管理、群控制扩权或任意API代理。全部接口仍受飞书资源权限约束；不宣称已经具备所有权限。开发代码cfb6a95已提交推送；[PR #18](https://github.com/dccaoxy/codex-feishu-bot/pull/18)已创建Draft并转Ready请求审核，尚未取得复审结论。未部署、未Merge、未修改现有候选配置/数据/Shared服务/遥测。
 
 # 当前交接：PR #17 已审核版本候选部署（2026-09-26 21:39 北京时间）
 
