@@ -2,7 +2,7 @@ import { Office } from './office.mjs';
 import { ThreadController } from './thread-controller.mjs';
 import { externalPermission } from './config.mjs';
 import { OWNER_GROUP_TOOLS, OWNER_GROUP_INSTRUCTIONS } from './owner-group-gateway.mjs';
-import { Documents } from './documents.mjs';
+import { Documents, documentId } from './documents.mjs';
 import { RepositoryApproval, REPOSITORY_TOOLS } from './repository.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -763,7 +763,7 @@ ${this.ownerGroups?OWNER_GROUP_INSTRUCTIONS:''}` };
         let result, success = true, completionGuard=guard;
         try {
           guard();
-          const a = structuredClone(p.arguments || {});
+          const a = structuredClone(p.arguments || {}), creationApp=this.config.feishu.appId;
           if (p.tool.startsWith('owner_group')) {
             if(!this.ownerGroups||p.turnId!==run.turn)throw Error('群资料或操作不可用');
             try { result=await this.ownerGroups.execute(p.tool,a,run.groupContext); }
@@ -779,11 +779,13 @@ ${this.ownerGroups?OWNER_GROUP_INSTRUCTIONS:''}` };
               const permit=await this.requestOfficeApproval(run,m.id,proposal,officeGuard);
               completionGuard=()=>{officeGuard();permit.check();};return permit;
             });
+            if(p.tool==='feishu_office_call' && a.api==='docx.v1.document.create')this.recordCreatedDocument(result?.data?.document?.document_id,run,completionGuard,creationApp);
           }
           else if (p.tool.startsWith('feishu_doc_')) {
             let permit;
             if(p.tool==='feishu_doc_format_text'){permit=await this.requestOfficeApproval(run,m.id,{api:p.tool,payload:a},guard);completionGuard=()=>{guard();permit.check();};}
             result=await this.documents.execute(p.tool,a,guard,permit);
+            if(p.tool==='feishu_doc_create')this.recordCreatedDocument(result?.documentId,run,guard,creationApp);
           }
           else if (p.tool === 'aegpc_repository_approval') result = await this.repositoryApproval.execute(a, {thread_id: run.thread},guard);
           else if (p.tool === 'feishu_send_file') result = await this.sendFile(run.chat, a.path,guard);
@@ -874,6 +876,22 @@ ${this.ownerGroups?OWNER_GROUP_INSTRUCTIONS:''}` };
     const saved=JSON.parse(row.payload);
     return saved.kind==='message'&&saved.user===this.owner&&saved.content?.text?.trim()===text?this.owner:undefined;
   }
+  recordCreatedDocument(id,run,guard,app) {
+    guard();
+    if(!app || app!==this.config.feishu.appId || !this.owner || run.officeOwner!==this.owner || !id)return;
+    if(documentId(id)!==id)return;
+    this.store.set(`createdDoc:${id}`,JSON.stringify({app:this.config.feishu.appId,owner:this.owner}));
+  }
+  createdDocumentConsent(proposal) {
+    const contentApis=new Set(['docx.v1.documentBlock.patch','docx.v1.documentBlock.batchUpdate',
+      'docx.v1.documentBlockChildren.create','docx.v1.documentBlockChildren.batchDelete','docx.v1.documentBlockDescendant.create']);
+    let id;
+    if(proposal.api==='feishu_doc_format_text')id=documentId(proposal.payload.documentId);
+    else if(contentApis.has(proposal.api))id=proposal.payload?.path?.document_id;
+    if(!id || !this.owner || !this.config.feishu.appId)return null;
+    const expected=JSON.stringify({app:this.config.feishu.appId,owner:this.owner});
+    return this.store.get(`createdDoc:${id}`)===expected?{id,expected,app:this.config.feishu.appId}:null;
+  }
   async requestOfficeApproval(run,requestId,proposal,guard) {
     guard();
     const owner=this.owner,turn=run.turn,ids=[...(run.sourceIds||[])].sort();
@@ -889,15 +907,20 @@ ${this.ownerGroups?OWNER_GROUP_INSTRUCTIONS:''}` };
       });
     };
     const original=JSON.stringify(sources()),snapshot=JSON.stringify(proposal);
-    if(Buffer.byteLength(snapshot)>8000)throw Error('操作详情过长，不能完整展示确认；请拆小后重试');
+    const createdConsent=this.createdDocumentConsent(proposal);
+    if(!createdConsent && Buffer.byteLength(snapshot)>8000)throw Error('操作详情过长，不能完整展示确认；请拆小后重试');
     const digest=createHash('sha256').update(snapshot).digest('hex');
     const key=JSON.stringify([turn,ids,digest]);
     const seen=run.officeWrites??=new Set();
     if(seen.has(key)||seen.has('request:'+requestId))throw Error('该办公请求已处理或等待确认，不能重复执行');
     seen.add(key);seen.add('request:'+requestId);
     const expires=Date.now()+10*60*1000;
-    const check=()=>{guard();if(this.closed||owner!==this.owner||run.turn!==turn||this.runs.get(run.thread)!==run||run.ending||Date.now()>expires||JSON.stringify(sources())!==original)throw Error('办公操作授权已失效');};
+    const check=()=>{guard();if(createdConsent && (this.config.feishu.appId!==createdConsent.app || this.store.get(`createdDoc:${createdConsent.id}`)!==createdConsent.expected))throw Error('机器人文档创建记录已失效');if(this.closed||owner!==this.owner||run.turn!==turn||this.runs.get(run.thread)!==run||run.ending||Date.now()>expires||JSON.stringify(sources())!==original)throw Error('办公操作授权已失效');};
     check();
+    if(createdConsent){
+      let used=false;
+      return {check,consume:()=>{check();if(used)throw Error('办公操作授权已使用');used=true;}};
+    }
     const token=randomBytes(16).toString('hex');
     let resolve,reject;
     const pending=new Promise((r,j)=>{resolve=r;reject=j;});
