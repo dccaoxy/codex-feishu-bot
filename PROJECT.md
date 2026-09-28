@@ -1,3 +1,11 @@
+# 当前交接：PR #18 已审核候选部署（2026-09-28）
+
+- Human 明确授权部署独立复审 PASS 的 fdfd46836fe4e57f11aad554026a1d19d0da52e0，不 Merge。[复审证据](https://github.com/dccaoxy/codex-feishu-bot/pull/18#issuecomment-5863191009)。候选仍为原 data/issue6-candidate，部署前源码与PR #17记录一致，无活跃/排队用户任务或运行中Knowledge任务。
+- Deployment：实际文件清单以 data/pr18-deployment.json 为准；src/scripts/test/third_party与package文件均来自精确提交且部署后逐项SHA256校对通过。备份 data/pr18-fdfd468-backup-20260928-134943 包含原代码、配置与两份SQLite一致性快照。仅机器人重启PID1155→52185，Shared App Server PID743不变；Desktop、Shared和遥测服务未重启。真实config.local.json及launchd plist逐字节不变，原2群、Owner、Gateway、Knowledge、FIFO权限配置不变。
+- Validation：在实际候选目录执行check、534/534全量组合测试（0失败/跳过）、doctor握手/登录/7模型、无模型ephemeral smoke及动态工具注册全部通过。实际二进制0.158.0-alpha.2.1的Group22类攻击及持久恢复、Knowledge15类攻击隔离探针通过；探针使用本地模拟provider，无真实模型调用或飞书写入。
+- 服务与数据：全新日志确认Codex和飞书长连接建立，服务running；新增stdout189字节无error/EMFILE，stderr0字节。停止期间验证前后全部业务表逐行一致；启动后原消息1207条、知识和私人业务表保持一致，仅history_sync.last_reconciled_at与SQLite自动序列随正常同步更新。已有2个blocked Knowledge任务保持原状，未额外重试。完整哈希、日志与快照证据留本地，不提交凭据或数据库。
+- Human Gate：可以开始临时文档的格式修改、拒绝写入、撤回使旧确认失效、批准精确删除内容四项真实验收。此前未发送真实确认卡/写入实际文档，不能宣称真人验收已通过。云盘文件/任务tenant scopes和7项user-only接口限制仍存在，PASS和部署不等于全部飞书权限开通。未Merge；运行代码固定fdfd468，不随本次文档记录提交变化。
+
 # 当前返工：PR #18 R2 私聊撤回（2026-09-28）
 
 - Task Source：[ed4acdb 的 R2 NEEDS CHANGES](https://github.com/dccaoxy/codex-feishu-bot/pull/18#issuecomment-5862551514)。R1 授权主体已通过复审，但生产撤回入口仅处理带 ownerChannel 标记的群，私聊原消息撤回没有取消办公许可。本次同分支 Draft 返工。
