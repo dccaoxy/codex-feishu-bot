@@ -149,7 +149,15 @@ export class Bot {
     return { toast: { type: 'info', content: '已收到，正在处理。' } };
   }
   async cancelOwnerGroup(chat, messageId) {
-    if(!this.store.get(`ownerChannel:${chat}`))return;
+    // Group revocation may cancel the whole channel. Private recall must name a
+    // persisted message from the current Owner, never an arbitrary chat/run.
+    if(!this.store.get(`ownerChannel:${chat}`)){
+      if(!this.owner || typeof messageId!=='string' || !messageId)return;
+      const row=this.store.db.prepare('SELECT payload FROM inbox WHERE chat=? AND id=?').get(chat,messageId);
+      let source;try{source=JSON.parse(row?.payload);}catch{return;}
+      if(source?.kind!=='message' || source.user!==this.owner || source.message?.chat_type!=='p2p' ||
+        source.message.chat_id!==chat || source.message.message_id!==messageId)return;
+    }
     if(messageId)this.store.db.prepare("UPDATE inbox SET state='cancelled' WHERE chat=? AND id=?").run(chat,messageId);
     for(const row of this.store.pending())if(row.chat===chat && (!messageId || row.id===messageId))this.store.mark(row.id,'cancelled');
     const interruptions=[];

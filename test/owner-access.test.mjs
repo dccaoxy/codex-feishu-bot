@@ -239,3 +239,40 @@ test('office consent is rechecked at final RPC delivery after tool completion',a
  s.bot.office.execute=async(name,args,guard,authorize)=>{const permit=await authorize({api:'fixture.write',payload:{target:'x'}});permit.consume();s.run.sourceIds.add('new-message');return {private:'must-not-deliver'};};
  const p=await officePending(s);await confirmOffice(s,p.token);await p.promise;assert.equal(responses.length,0);
 });
+
+function privateOfficeFixture(t){
+ const s=officeFixture(t);s.store.set('ownerChannel:group','');s.run.chat='private';
+ s.store.db.prepare("DELETE FROM inbox WHERE id='m1'").run();
+ s.event={...s.event,message:{...s.event.message,chat_type:'p2p',chat_id:'private',mentions:[],content:JSON.stringify({text:'delete exactTarget'})}};
+ s.bot.onMessage(s.event);s.store.mark('m1','done');
+ return s;
+}
+async function privateConfirm(s,token){
+ s.bot.onAction({operator:{open_id:'owner'},context:{open_chat_id:'private'},action:{value:{token,decision:'accept'}}});
+ await s.bot.drain('private');
+}
+for(const method of ['button','slash'])test(`production recall invalidates private office consent before ${method}`,async t=>{
+ const s=privateOfficeFixture(t),p=await officePending(s),interrupts=[];s.bot.rpc.request=async(...a)=>interrupts.push(a);
+ await s.bot.cancelOwnerGroup('private','m1');
+ assert.equal(s.store.db.prepare("SELECT state FROM inbox WHERE id='m1'").get().state,'cancelled');
+ assert.equal(s.bot.prompts.has(p.token),false);assert.equal(s.run.ownerCancelled,true);
+ if(method==='button')await privateConfirm(s,p.token);
+ else{s.bot.onMessage({...s.event,message:{...s.event.message,message_id:'confirm',content:JSON.stringify({text:'/approve '+p.token})}});await s.bot.drain('private');}
+ await p.promise;await s.run.finishPromise;assert.equal(s.writes.length,0);
+ assert.ok(interrupts.some(([m])=>m==='turn/interrupt'));
+});
+test('private recall after approval prevents queued SDK write',async t=>{
+ const s=privateOfficeFixture(t);let release,entered;const queued=new Promise(r=>entered=r);
+ s.bot.office.feishu.call=async(fn,retry,g)=>{entered();await new Promise(r=>release=r);g();return fn();};
+ const p=await officePending(s);await privateConfirm(s,p.token);await queued;
+ await s.bot.cancelOwnerGroup('private','m1');release();await p.promise;await s.run.finishPromise;assert.equal(s.writes.length,0);
+});
+test('unrelated private recall and untrusted recall leave pending consent intact',async t=>{
+ const s=privateOfficeFixture(t),p=await officePending(s);
+ s.bot.onMessage({...s.event,message:{...s.event.message,message_id:'unrelated'}});s.store.mark('unrelated','done');
+ for(const id of [undefined,'missing','unrelated'])await s.bot.cancelOwnerGroup('private',id);
+ s.store.enqueue('foreign','private',{kind:'message',user:'member',message:{...s.event.message,message_id:'foreign'}});s.store.mark('foreign','done');
+ await s.bot.cancelOwnerGroup('private','foreign');await s.bot.cancelOwnerGroup('other','m1');
+ assert.equal(s.run.ownerCancelled,undefined);assert.equal(s.bot.prompts.has(p.token),true);
+ await privateConfirm(s,p.token);await p.promise;assert.equal(s.writes.length,1);
+});

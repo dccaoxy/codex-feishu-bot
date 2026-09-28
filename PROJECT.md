@@ -1,3 +1,11 @@
+# 当前返工：PR #18 R2 私聊撤回（2026-09-28）
+
+- Task Source：[ed4acdb 的 R2 NEEDS CHANGES](https://github.com/dccaoxy/codex-feishu-bot/pull/18#issuecomment-5862551514)。R1 授权主体已通过复审，但生产撤回入口仅处理带 ownerChannel 标记的群，私聊原消息撤回没有取消办公许可。本次同分支 Draft 返工。
+- Implementation：生产撤回入口对私聊从持久化 inbox 核对当前 Owner、消息类型、chat_id 与 message_id 后取消原消息，清除匹配回合的确认、取消 run 并请求 turn/interrupt。保留群撤回及离群整通道取消；私聊缺失/无关/非Owner来源不能取消当前回合。已发送到飞书的操作无法回滚。
+- Validation：check、534/534 全量组合测试通过（0失败/跳过），含 PR #5、Owner、FIFO、Knowledge 既有回归。新增4项生产入口回归覆盖私聊撤回后旧按钮/旧slash零删除传输、批准后SDK排队期间撤回零传输、无关/缺失/非Owner/错会话撤回不影响正常私聊确认。针对性 Owner 测试257/257通过。
+- 实际协议验证：doctor Shared App Server握手、登录、7模型及无模型ephemeral smoke/动态工具注册通过。独立开发配置无飞书凭据，未发送真实卡片/执行真实办公写入；不宣称真人UI验收完成。本次未修改隔离工具注册/模型版本，Group22/Knowledge15实际探针沿用R1记录，没有作为本轮重跑结果。
+- Delivery：README/PROJECT更新，推送同一PR后转Ready请求新head复审。未部署、未Merge、未改候选配置/数据/服务/授权群；云盘/任务tenant权限及7项user-only限制保留。等待审核和后续Human Gate。
+
 # 当前返工：PR #18 宿主级办公写授权 R1（2026-09-28）
 
 - Task Source：[476a8c7 的 NEEDS CHANGES](https://github.com/dccaoxy/codex-feishu-bot/pull/18#issuecomment-5862288637)。原506项测试未覆盖“有效Owner回合中的模型误调用”这一边界，仅提示词不能证明当前用户批准。已在同一分支先转Draft返工。
