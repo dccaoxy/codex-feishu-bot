@@ -518,3 +518,5 @@ Task Source：Human 要求为本人私聊及已有授权群里的本人账号补
 接口目录来源：官方 [lark-openapi-mcp](https://github.com/larksuite/lark-openapi-mcp)，固定 npm `@larksuiteoapi/lark-mcp@0.5.1`，MIT 许可见 `third_party/lark-mcp-LICENSE`。运行时沿用已固定的 Node SDK 1.74.0，无新增生产依赖。仅提取 JSON Schema，移除 `useUAT`，没有启动额外 MCP 服务。
 
 重建目录时在独立临时目录安装 `@larksuiteoapi/lark-mcp@0.5.1`、`zod@3.25.76`、`zod-to-json-schema@3.24.6`，然后执行 `node scripts/build-office-catalog.cjs /绝对路径/临时目录 src/office-catalog.json`。勿在运行候选的依赖目录安装。回归覆盖目录完整性、固定 SDK 路径、输出预算、分页、版本保护、Owner/回合失效、真实队列撤权及普通群/Knowledge 隔离。
+
+删除原文档中的段落/表格使用 `docx.v1.documentBlockChildren.batchDelete`，与删除整个云盘文件不同。先读取具体版本及父块的 children 顺序，核对待删块ID；传入非负整数 start_index、严格更大的 end_index（左闭右开）及具体 document_revision_id。删除后回读确认；版本冲突或结果不确定先重新核对，不自动重试，不以另建文档代替修改原文档。应用编辑scope已具备也不保证每份目标文档的协作者权限。

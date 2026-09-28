@@ -46,3 +46,10 @@ test('sheet reads and writes use only fixed routes, exact range and no write ret
 });
 test('the generated tenant executor never accepts identity overrides',()=>{for(const t of OFFICE_CATALOG)assert.equal(t.schema.properties?.useUAT,undefined);});
 test('permission listing is compact, paginated, and separates granted identity from user login',async()=>{const {o,f}=setup();f.client.application={scope:{list:async()=>({scopes:Array.from({length:51},(_,i)=>({scope_name:'scope'+i,scope_type:i%2?'tenant':'user',grant_status:1,ignored:'hidden'}))})}};const a=await o.execute('feishu_office_permissions',{},guard),b=await o.execute('feishu_office_permissions',{offset:a.nextOffset},guard);assert.equal(a.scopes.length,50);assert.equal(b.scopes.length,1);assert.equal(b.nextOffset,null);assert.equal(a.scopes[0].identity,'user');assert.equal(a.scopes[0].ignored,undefined);});
+test('delete content requires an exact revision and valid integer half-open range',async()=>{
+ const {o,f,calls}=setup();f.client.docx={v1:{documentBlockChildren:{batchDelete:async p=>{calls.push(p);return {document_revision_id:8};}}}};
+ const payload={path:{document_id:'doc',block_id:'parent'},params:{document_revision_id:7},data:{start_index:1,end_index:2}};
+ for(const data of [{start_index:-1,end_index:2},{start_index:1.5,end_index:2},{start_index:2,end_index:2},{start_index:3,end_index:2},{start_index:0,end_index:Infinity}])await assert.rejects(o.execute('feishu_office_call',{api:'docx.v1.documentBlockChildren.batchDelete',payload:{...payload,data}},guard));
+ await assert.rejects(o.execute('feishu_office_call',{api:'docx.v1.documentBlockChildren.batchDelete',payload:{...payload,params:{document_revision_id:-1}}},guard));assert.equal(calls.length,0);
+ const r=await o.execute('feishu_office_call',{api:'docx.v1.documentBlockChildren.batchDelete',payload},guard);assert.equal(calls[0].retry,false);assert.deepEqual(calls[1],payload);assert.equal(r.data.document_revision_id,8);
+});

@@ -27,6 +27,10 @@ export function validateOffice(t,payload){
  if(t.name.startsWith('docx.')&&t.method!=='GET'&&/patch|batchUpdate|batchDelete|Children.create|Descendant.create/.test(t.name)){
   if(!Number.isInteger(payload.params?.document_revision_id)||payload.params.document_revision_id<0)throw Error('编辑已有文档必须指定读取时的非负document_revision_id');
  }
+ if(t.name==='docx.v1.documentBlockChildren.batchDelete'){
+  const {start_index:start,end_index:end}=payload.data;
+  if(!Number.isSafeInteger(start)||!Number.isSafeInteger(end)||start<0||end<=start)throw Error('删除范围必须是非负整数起点和更大的整数终点（左闭右开）');
+ }
  return structuredClone(payload);
 }
 function bounded(data){const text=JSON.stringify(data??null);return Buffer.byteLength(text)<=22000?{data,untrustedData:true}:{truncated:true,preview:text.slice(0,5000),note:'接口结果超过输出预算；预览不是完整结果。请缩小page_size/范围或按对象ID读取；写入不要重试。',untrustedData:true};}
