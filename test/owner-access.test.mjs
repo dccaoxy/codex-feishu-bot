@@ -150,15 +150,15 @@ test('Documents explicit guard fences queued SDK without command or tool async c
 });
 const localTools=['feishu_thread_read','feishu_threads_search','owner_groups',...['status','message','search','context','changes','daily_digest','topics','topic_read','send'].map(n=>'owner_group_'+n),'aegpc_repository_approval',...['create','read','append','update_text','format_text','permissions'].map(n=>'feishu_doc_'+n),'feishu_send_file',...['find','schema','call','permissions','sheet_read','sheet_write'].map(n=>'feishu_office_'+n)];
 for(const tool of localTools)for(const turnId of ['old-turn','',undefined,42])test(`${tool} rejects invalid request turn ${String(turnId)}`,async t=>{
- const {bot,event}=setup(t);bot.onMessage(event);toolRun(bot);let calls=0;const call=async()=>{calls++;return {};};bot.history.read=call;bot.history.search=call;bot.ownerGroups={execute:call};bot.repositoryApproval.execute=call;bot.documents.execute=call;bot.office.execute=call;bot.sendFile=call;bot.rpc.respond=call;bot.rpc.reject=call;
+ const {bot,event}=setup(t);bot.onMessage(event);toolRun(bot);let calls=0;const call=async()=>{calls++;return {};};bot.history.read=call;bot.history.search=call;bot.ownerGroups={execute:call};bot.repositoryApproval.execute=call;bot.documents.execute=call;bot.office.execute=call;bot.requestOfficeApproval=async()=>({check(){},consume(){}});bot.sendFile=call;bot.rpc.respond=call;bot.rpc.reject=call;
  await bot.serverRequest({id:51,method:'item/tool/call',params:{threadId:'t',turnId,tool,arguments:{}}});assert.equal(calls,0);
 });
 for(const tool of localTools)test(`${tool} result discarded if turn switches during await`,async t=>{
- const {bot,event}=setup(t);bot.onMessage(event);const run=toolRun(bot);let opened,release;const opening=new Promise(r=>{opened=r;});const call=()=>{opened();return new Promise(r=>{release=r;});};bot.history.read=call;bot.history.search=call;bot.ownerGroups={execute:call};bot.repositoryApproval.execute=call;bot.documents.execute=call;bot.office.execute=call;bot.sendFile=call;const responses=[];bot.rpc.respond=(...a)=>responses.push(a);
+ const {bot,event}=setup(t);bot.onMessage(event);const run=toolRun(bot);let opened,release;const opening=new Promise(r=>{opened=r;});const call=()=>{opened();return new Promise(r=>{release=r;});};bot.history.read=call;bot.history.search=call;bot.ownerGroups={execute:call};bot.repositoryApproval.execute=call;bot.documents.execute=call;bot.office.execute=call;bot.requestOfficeApproval=async()=>({check(){},consume(){}});bot.sendFile=call;const responses=[];bot.rpc.respond=(...a)=>responses.push(a);
  const pending=toolCall(bot,tool);await opening;run.turn='next-turn';release({text:'synthetic'});await pending;assert.deepEqual(responses,[]);
 });
 for(const tool of localTools)test(`${tool} current turn executes and responds once`,async t=>{
- const {bot,event}=setup(t);bot.onMessage(event);toolRun(bot);let calls=0;const call=async()=>{calls++;return {value:'synthetic'};};bot.history.read=call;bot.history.search=call;bot.ownerGroups={execute:call};bot.repositoryApproval.execute=call;bot.documents.execute=call;bot.office.execute=call;bot.sendFile=call;const responses=[];bot.rpc.respond=(...a)=>responses.push(a);await toolCall(bot,tool);assert.equal(calls,1);assert.equal(responses.length,1);assert.equal(responses[0][1].success,true);
+ const {bot,event}=setup(t);bot.onMessage(event);toolRun(bot);let calls=0;const call=async()=>{calls++;return {value:'synthetic'};};bot.history.read=call;bot.history.search=call;bot.ownerGroups={execute:call};bot.repositoryApproval.execute=call;bot.documents.execute=call;bot.office.execute=call;bot.requestOfficeApproval=async()=>({check(){},consume(){}});bot.sendFile=call;const responses=[];bot.rpc.respond=(...a)=>responses.push(a);await toolCall(bot,tool);assert.equal(calls,1);assert.equal(responses.length,1);assert.equal(responses[0][1].success,true);
 });
 for(const stage of ['queue','response'])test(`office tools invalidate captured Owner identity at ${stage}`,async t=>{
  const {bot,event,config}=setup(t);bot.onMessage(event);const run=toolRun(bot);let validOwner=bot.owner,network=0;const responses=[];bot.rpc.respond=(...a)=>responses.push(a);
@@ -166,8 +166,76 @@ for(const stage of ['queue','response'])test(`office tools invalidate captured O
  assert.equal(run.officeOwner,validOwner);await toolCall(bot,'feishu_office_call',{api:'drive.v1.file.list',payload:{}});assert.equal(network,stage==='queue'?0:1);assert.ok(!JSON.stringify(responses).includes('must-not-return'));
 });
 for(const cancel of ['revoke','recall'])test(`queued office mutation is blocked by real Feishu queue after ${cancel}`,async t=>{
- const {bot,event,config,groups}=setup(t);bot.onMessage(event);toolRun(bot);const f=new Feishu(config,()=>{});bot.office.feishu=f;let release;f.queue=new Promise(r=>{release=r;});let calls=0;f.client={request:async()=>{calls++;return {data:{}};}};bot.rpc.respond=()=>{};bot.rpc.request=async()=>{};
+ const {bot,event,config,groups}=setup(t);bot.onMessage(event);toolRun(bot);const f=new Feishu(config,()=>{});bot.office.feishu=f;bot.requestOfficeApproval=async()=>({check(){},consume(){}});let release;f.queue=new Promise(r=>{release=r;});let calls=0;f.client={request:async()=>{calls++;return {data:{}};}};bot.rpc.respond=()=>{};bot.rpc.request=async()=>{};
  const pending=toolCall(bot,'feishu_office_sheet_write',{spreadsheetToken:'sheet',range:'tab!A1:A1',values:[['fixture']]});await new Promise(r=>setTimeout(r,5));
  if(cancel==='revoke')groups.policy.allowedGroup=()=>false;else await bot.cancelOwnerGroup('group','m1');
  release();await pending;assert.equal(calls,0);
+});
+function officeFixture(t){
+ const s=setup(t);s.bot.onMessage(s.event);s.store.mark('m1','done');const run=toolRun(s.bot),sent=[],writes=[];
+ s.bot.feishu.interactive=async(chat,title,text,buttons)=>{sent.push({chat,title,text,buttons});return {message_id:'approval-card'};};s.bot.feishu.replaceInteractive=async()=>{};s.bot.feishu.text=async()=>{};
+ s.bot.office.feishu={client:{drive:{v1:{file:{delete:async payload=>{writes.push(payload);return {deleted:true};}}}}},call:async(fn,retry,g)=>{g();return fn();}};
+ s.bot.rpc.respond=()=>{};s.bot.rpc.request=async()=>{};
+ return {...s,run,sent,writes};
+}
+const deletion=()=>({api:'drive.v1.file.delete',payload:{params:{type:'docx'},path:{file_token:'exactTarget'}}});
+async function officePending(s,id=41,args=deletion()){
+ const promise=s.bot.serverRequest({id,method:'item/tool/call',params:{threadId:'t',turnId:'turn',tool:'feishu_office_call',arguments:args}});
+ await new Promise(r=>setImmediate(r));return {promise,token:s.sent.at(-1)?.buttons[0].value.token};
+}
+async function confirmOffice(s,token,user='owner',decision='accept'){
+ const reply=s.bot.onAction({operator:{open_id:user},context:{open_chat_id:'group'},action:{value:{token,decision}}});
+ if(reply.toast.type==='info')await s.bot.drain('group');return reply;
+}
+test('history-induced deletion proposal requires real Owner callback; exact confirmed operation runs once',async t=>{
+ const s=officeFixture(t),p=await officePending(s);assert.equal(s.writes.length,0);assert.match(s.sent[0].text,/drive.v1.file.delete/);assert.match(s.sent[0].text,/exactTarget/);assert.match(s.sent[0].text,/m1/);
+ assert.equal((await confirmOffice(s,p.token,'member')).toast.type,'error');assert.equal(s.writes.length,0);
+ await assert.rejects(s.bot.action('group',{token:p.token,decision:'accept'}),/原Owner/);assert.equal(s.writes.length,0);
+ await confirmOffice(s,p.token);await p.promise;assert.equal(s.writes.length,1);assert.equal(s.writes[0].path.file_token,'exactTarget');
+ await confirmOffice(s,p.token);await officePending(s,42);assert.equal(s.writes.length,1);assert.equal(s.sent.length,1);
+});
+test('changing caller payload after displaying proposal cannot change approved operation',async t=>{
+ const s=officeFixture(t),args=deletion(),p=await officePending(s,41,args);args.api='task.v2.task.delete';args.payload.path.file_token='changed';
+ await confirmOffice(s,p.token);await p.promise;assert.equal(s.writes[0].path.file_token,'exactTarget');
+ const changed=await officePending(s,43,{...deletion(),payload:{params:{type:'docx'},path:{file_token:'otherTarget'}}});assert.equal(s.writes.length,1);assert.equal(s.sent.length,2);
+ await confirmOffice(s,p.token);assert.equal(s.writes.length,1);await confirmOffice(s,changed.token,'owner','decline');await changed.promise;assert.equal(s.writes.length,1);
+});
+for(const reason of ['recall','revoke','owner','turn','steer','ended','sourceChanged','expired'])test(`office consent invalid after ${reason}`,async t=>{
+ const s=officeFixture(t),p=await officePending(s);
+ if(reason==='recall')await s.bot.cancelOwnerGroup('group','m1');
+ if(reason==='revoke')s.config.ownerAccess.enabled=false;
+ if(reason==='owner')s.bot.owner='someoneElse';
+ if(reason==='turn')s.run.turn='later';
+ if(reason==='steer')s.run.sourceIds.add('later-message');
+ if(reason==='ended')s.run.ending=true;
+ if(reason==='sourceChanged')s.store.db.prepare("UPDATE inbox SET payload='{}' WHERE id='m1'").run();
+ if(reason==='expired'){const old=Date.now;Date.now=()=>old()+11*60*1000;t.after(()=>{Date.now=old;});}
+ await confirmOffice(s,p.token);for(const token of [...s.bot.prompts.keys()])s.bot.clearPrompt(token);await p.promise;assert.equal(s.writes.length,0);
+});
+test('approved queued office write is blocked when authorization is revoked before transport',async t=>{
+ const s=officeFixture(t);let release,queued;const entered=new Promise(r=>queued=r);s.bot.office.feishu.call=async(fn,retry,g)=>{queued();await new Promise(r=>release=r);g();return fn();};
+ const p=await officePending(s);await confirmOffice(s,p.token);await entered;s.config.ownerAccess.enabled=false;release();await p.promise;assert.equal(s.writes.length,0);
+});
+test('office confirmation fails closed without trusted source message and on oversized review payload',async t=>{
+ const s=officeFixture(t);s.run.sourceIds.clear();const p=await officePending(s);await p.promise;assert.equal(s.sent.length,0);assert.equal(s.writes.length,0);
+ s.run.sourceIds.add('m1');await assert.rejects(s.bot.requestOfficeApproval(s.run,55,{api:'write',payload:'x'.repeat(9000)},()=>{}),/过长/);assert.equal(s.sent.length,0);
+});
+test('a parallel duplicate tool call cannot create a second permit',async t=>{const s=officeFixture(t),p=await officePending(s);const duplicate=await officePending(s,42);await duplicate.promise;assert.equal(s.sent.length,1);assert.equal(s.writes.length,0);await confirmOffice(s,p.token);await p.promise;assert.equal(s.writes.length,1);});
+test('trusted current slash confirmation works, quoted or synthetic confirmation cannot',async t=>{
+ const s=officeFixture(t),p=await officePending(s);await assert.rejects(s.bot.command('group','/approve '+p.token,'fake',{user:'owner',message:{message_id:'fake'}}),/原Owner/);assert.equal(s.writes.length,0);
+ const message={...s.event.message,message_id:'approval-message',content:JSON.stringify({text:'@_user_1 /approve '+p.token})};s.bot.onMessage({...s.event,message});await s.bot.drain('group');await p.promise;assert.equal(s.writes.length,1);
+});
+test('private Owner office confirmation is scoped to its source message and account',async t=>{
+ const s=officeFixture(t);s.store.set('ownerChannel:group','');s.bot.ownerAccess=null;
+ s.store.db.prepare('UPDATE inbox SET payload=? WHERE id=?').run(JSON.stringify({kind:'message',user:'owner',message:{...s.event.message,chat_type:'p2p'},content:{text:'only read'}}),'m1');
+ const p=await officePending(s);assert.equal(s.writes.length,0);await confirmOffice(s,p.token,'member');assert.equal(s.writes.length,0);await confirmOffice(s,p.token);await p.promise;assert.equal(s.writes.length,1);
+});
+test('approval of markup-containing payload displays escaped full JSON and never executes before confirmation',async t=>{
+ const s=officeFixture(t),pending=s.bot.requestOfficeApproval(s.run,55,{api:'fixture.write',payload:{text:'```\n[spoof](https://example.com) <b>'}},()=>{});await new Promise(r=>setImmediate(r));
+ assert.match(s.sent[0].text,/\\u0060/);assert.match(s.sent[0].text,/\\u003c/);const token=s.sent[0].buttons[0].value.token;const denied=assert.rejects(pending);await confirmOffice(s,token,'owner','decline');await denied;
+});
+test('office consent is rechecked at final RPC delivery after tool completion',async t=>{
+ const s=officeFixture(t),responses=[];s.bot.rpc.respond=(...args)=>responses.push(args);
+ s.bot.office.execute=async(name,args,guard,authorize)=>{const permit=await authorize({api:'fixture.write',payload:{target:'x'}});permit.consume();s.run.sourceIds.add('new-message');return {private:'must-not-deliver'};};
+ const p=await officePending(s);await confirmOffice(s,p.token);await p.promise;assert.equal(responses.length,0);
 });

@@ -39,7 +39,7 @@ export class Documents {
   async insert(id,parent,data,guard) {
     return this.api(()=>this.feishu.client.docx.documentBlockDescendant.create({path:{document_id:id,block_id:parent || id},params:{document_revision_id:-1},data}),true,guard);
   }
-  async execute(name,a,guard=()=>{}) {
+  async execute(name,a,guard=()=>{},permit) {
     guard();
     if (name==='feishu_doc_create') {
       if (typeof a.title!=='string' || !a.title.trim() || a.title.length>200) throw new Error('文档标题须为 1–200 字');
@@ -69,6 +69,8 @@ export class Documents {
       return {documentId:id,revisionId:r.document_revision_id,insertedBlocks:converted.descendants.length};
     }
     if(name==='feishu_doc_format_text') {
+      if(typeof permit?.consume!=='function'||typeof permit?.check!=='function')throw Error('文字样式写入缺少宿主确认');
+      const originalGuard=guard;guard=()=>{originalGuard();permit.check();};guard();
       const keys={bold:'bold',italic:'italic',underline:'underline',strikethrough:'strikethrough',textColor:'text_color',backgroundColor:'background_color'};
       if(typeof a.matchText!=='string'||!a.matchText||a.matchText.length>200||a.matchText.includes('\ufffc')||!Number.isInteger(a.revisionId)||a.revisionId<0||!a.style||Array.isArray(a.style)||!Object.keys(a.style).length)throw Error('样式参数无效');
       const style={};for(const [key,value] of Object.entries(a.style)){if(!Object.hasOwn(keys,key)||(['textColor','backgroundColor'].includes(key)?!Number.isInteger(value)||value<1||value>(key==='textColor'?7:15):typeof value!=='boolean'))throw Error('样式参数无效');style[keys[key]]=value;}
@@ -89,7 +91,7 @@ export class Documents {
         for(let i=0;i<points.length-1;i++){const start=points[i],end=points[i+1],hit=ranges.some(([a,b])=>offset+start>=a&&offset+end<=b);elements.push({...e,text_run:{...e.text_run,content:content.slice(start,end),...(hit?{text_element_style:{...e.text_run.text_element_style,...style}}:{})}});}
         offset+=content.length;
       }
-      const r=await this.api(()=>this.feishu.client.docx.documentBlock.patch({path:blockPath,params,data:{update_text_elements:{elements}}}),true,guard);
+      const r=await this.api(()=>{permit.consume();return this.feishu.client.docx.documentBlock.patch({path:blockPath,params,data:{update_text_elements:{elements}}});},true,guard);
       return {documentId:id,blockId:a.blockId,revisionId:r.document_revision_id,matched:ranges.length};
     }
     if(name==='feishu_doc_update_text') {

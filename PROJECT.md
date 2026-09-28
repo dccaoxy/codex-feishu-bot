@@ -1,3 +1,12 @@
+# 当前返工：PR #18 宿主级办公写授权 R1（2026-09-28）
+
+- Task Source：[476a8c7 的 NEEDS CHANGES](https://github.com/dccaoxy/codex-feishu-bot/pull/18#issuecomment-5862288637)。原506项测试未覆盖“有效Owner回合中的模型误调用”这一边界，仅提示词不能证明当前用户批准。已在同一分支先转Draft返工。
+- Implementation：全部新增办公目录非GET接口（保守包括POST查询）、sheet_write及新format_text由宿主挂起并展示完整API/参数确认卡片；无宿主许可时即使提供合法通用guard也零传输。Owner必须经真实飞书按钮事件或已持久化的当前/approve消息确认，模型无法提供可用授权字段。普通成员、历史引用、文档内容和伪造/缺失消息不会生成许可。
+- 绑定：许可捕获Owner、原message集合及可信inbox快照、原turn、API/完整参数摘要、工具请求ID与10分钟期限。参数先复制，卡片转义控制字符，超出完整展示预算拒绝，不采用摘要代替目标。相同消息/回合/参数及重复request ID最多执行一次，审批不跨重启恢复。签发、实际出站、返回RPC前均复核，出站瞬间消耗一次性许可；拒绝/撤回/撤权/换回合/原消息变化/追加要求/过期使旧授权失效。已到达飞书的操作无法回滚。
+- Validation：check及530/530全量组合测试通过（0失败/跳过）；新增24项回归覆盖文件/批量记录/日历/任务删除与邀请/成员变更零授权零传输、真实Owner按钮和slash确认、普通成员、篡改参数、重复/并行请求、原消息变化/撤回/撤权/过期、批准后排队及最终RPC交付守卫。保留PR #5、Owner、FIFO、Knowledge既有组合。
+- 协议验证：doctor实际Shared握手/登录/7模型、无模型ephemeral smoke工具注册通过；固定0.158.0-alpha.2.1 Group 22类攻击/重启恢复及Knowledge 15类攻击探针通过。隔离开发配置与模拟飞书SDK；无真实模型请求、未发送飞书确认卡片或写入真实资料，不声称真人审批UI验收通过。
+- Delivery：README/PROJECT同步，推送同一PR #18后Draft→Ready请求最新head复审。未部署、未Merge，候选配置/服务/数据/授权群不变。云盘/任务tenant权限和7项user-only限制原样保留；旧文档/本机工具沿用既有授权路径，本次不扩展该边界。
+
 # 当前补充：删除原文档内容能力（2026-09-28）
 
 - Human 反馈原文档有重复表格，机器人因没有删除工具而另建文档，要求匹配权限。只读核对现有应用tenant的docx:document、docx:document:write_only均已获批；线上候选没有office模块及batchDelete内容工具。不能据此判断具体文档协作者权限，但本次截图所示功能缺口来自未部署的新工具。
