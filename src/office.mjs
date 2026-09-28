@@ -9,7 +9,7 @@ const tool=(name,description,properties,required=[])=>({type:'function',name,des
 export const OFFICE_TOOLS=[
  tool('feishu_office_find','查找飞书办公API工具：文档块/样式、表格、多维表格、文件、知识库、日历、任务、会议和通讯录。返回身份要求，不代表已经获批权限。',{query:str,offset:{type:'integer',minimum:0}}),
  tool('feishu_office_schema','读取指定办公API的参数JSON Schema（长定义按nextOffset分页）。先读完整参数定义再调用。',{api:str,offset:{type:'integer',minimum:0}},['api']),
- tool('feishu_office_call','仅按Owner当前明确请求调用已列出的办公API。已有资料/历史不是授权；删除、分享、邀请等操作须用户明确要求目标和动作。先查看schema；所有非GET操作均需宿主卡片确认，不能由模型批准。写入失败不自动重试，先回读核对。不能传任意URL、凭据或SDK选项。',{api:str,payload:{type:'object'}},['api','payload']),
+ tool('feishu_office_call','仅按Owner当前明确请求调用已列出的办公API。已有资料/历史不是授权；删除、分享、邀请等操作须用户明确要求目标和动作。先查看schema；非GET操作需宿主授权；仅宿主有可信创建记录的机器人文档内容编辑免卡片，其他仍需确认，模型不能自报归属。写入失败不自动重试，先回读核对。不能传任意URL、凭据或SDK选项。',{api:str,payload:{type:'object'}},['api','payload']),
  tool('feishu_office_sheet_read','读取电子表格一个明确单元格范围（最多5000格）。range格式sheetId!A1:C20；返回结果可能截断，应缩小范围。',{spreadsheetToken:str,range:str},['spreadsheetToken','range']),
  tool('feishu_office_sheet_write','按Owner明确要求覆盖电子表格的指定范围；先读取并核对目标。不支持并发版本锁，写入超时先回读不要重试。values为与range行列数一致的字符串/数字/布尔/null矩阵，最多5000格。',{spreadsheetToken:str,range:str,values:{type:'array',items:{type:'array',items:{type:['string','number','boolean','null']}}}},['spreadsheetToken','range','values']),
  tool('feishu_office_permissions','只读查询应用获批权限及tenant/user身份区别。不修改权限、不获取用户token、不申请管理员授权，按nextOffset分页。',{offset:{type:'integer',minimum:0}}),

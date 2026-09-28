@@ -276,3 +276,65 @@ test('unrelated private recall and untrusted recall leave pending consent intact
  assert.equal(s.run.ownerCancelled,undefined);assert.equal(s.bot.prompts.has(p.token),true);
  await privateConfirm(s,p.token);await p.promise;assert.equal(s.writes.length,1);
 });
+
+async function createdOfficeFixture(t,kind='group'){
+ const s=kind==='private'?privateOfficeFixture(t):officeFixture(t);s.config.feishu.appId='app1';
+ const f={call:async(fn,retry,g)=>{g();return fn();},client:{docx:{document:{
+ convert:async()=>({blocks:[{block_id:'b',block_type:2,text:{elements:[]}}],first_level_block_ids:['b']}),
+ create:async()=>({document:{document_id:'created1'}})},documentBlockDescendant:{create:async()=>({})}},drive:{permissionMember:{create:async()=>({})}}}};
+ s.bot.documents.feishu=f;
+ await s.bot.serverRequest({id:100,method:'item/tool/call',params:{threadId:'t',turnId:'turn',tool:'feishu_doc_create',arguments:{title:'fixture',content:'text'}}});
+ assert.ok(s.store.get('createdDoc:created1'));
+ s.bot.office.feishu.client.docx={v1:{documentBlockChildren:{batchDelete:async a=>{s.writes.push(a);return {};}}}};
+ return s;
+}
+const deleteContent=(id='created1')=>({api:'docx.v1.documentBlockChildren.batchDelete',payload:{path:{document_id:id,block_id:'b'},params:{document_revision_id:1},data:{start_index:0,end_index:1}}});
+for(const kind of ['group','private'])test(`recorded bot document content edits need no card in ${kind}`,async t=>{
+ const s=await createdOfficeFixture(t,kind),p=await officePending(s,101,deleteContent());await p.promise;
+ assert.equal(s.sent.length,0);assert.equal(s.writes.length,1);
+ const again=await officePending(s,102,deleteContent());await again.promise;assert.equal(s.writes.length,1);
+ const reopened=new Store(s.config.codex.cwd);assert.equal(reopened.get('createdDoc:created1'),s.store.get('createdDoc:created1'));reopened.close();
+});
+for(const reason of ['unknown','wrongOwner','wrongApp','malformed'])test(`document content consent still prompts for ${reason}`,async t=>{
+ const s=await createdOfficeFixture(t);
+ if(reason==='wrongOwner')s.store.set('createdDoc:created1',JSON.stringify({app:'app1',owner:'someone'}));
+ if(reason==='wrongApp')s.config.feishu.appId='app2';
+ if(reason==='malformed')s.store.set('createdDoc:created1','{}');
+ const p=await officePending(s,101,deleteContent(reason==='unknown'?'external1':'created1'));
+ assert.equal(s.sent.length,1);assert.equal(s.writes.length,0);await confirmOffice(s,p.token,'owner','decline');await p.promise;
+});
+test('whole file deletion remains confirmed for a recorded bot document',async t=>{
+ const s=await createdOfficeFixture(t),a=deletion();a.payload.path.file_token='created1';const p=await officePending(s,101,a);
+ assert.equal(s.sent.length,1);assert.equal(s.writes.length,0);await confirmOffice(s,p.token,'owner','decline');await p.promise;
+ for(const api of ['drive.v1.permissionMember.create','drive.v1.permissionPublic.patch','task.v2.task.delete','docx.v1.document.create'])assert.equal(s.bot.createdDocumentConsent({api,payload:{path:{document_id:'created1',token:'created1'}}}),null);
+});
+for(const reason of ['recall','revoke','owner','app','record'])test(`automatic content permit cancels before queued transport on ${reason}`,async t=>{
+ const s=await createdOfficeFixture(t);let release,enter;const entered=new Promise(r=>enter=r);
+ s.bot.office.feishu.call=async(fn,retry,g)=>{enter();await new Promise(r=>release=r);g();return fn();};
+ const p=await officePending(s,101,deleteContent());await entered;
+ if(reason==='recall')await s.bot.cancelOwnerGroup('group','m1');
+ if(reason==='revoke')s.config.ownerAccess.enabled=false;
+ if(reason==='owner')s.bot.owner='other';
+ if(reason==='app')s.config.feishu.appId='other';
+ if(reason==='record')s.store.set('createdDoc:created1','');
+ release();await p.promise;await s.run.finishPromise;assert.equal(s.writes.length,0);assert.equal(s.sent.length,0);
+});
+test('style tool on recorded document edits directly and preserves host permit',async t=>{
+ const s=await createdOfficeFixture(t);s.bot.documents.feishu.client.docx.document.get=async()=>({document:{revision_id:1}});
+ s.bot.documents.feishu.client.docx.documentBlock={get:async()=>({block:{text:{elements:[{text_run:{content:'name'}}]}}}),patch:async a=>{s.writes.push(a);return {};}};
+ await s.bot.serverRequest({id:101,method:'item/tool/call',params:{threadId:'t',turnId:'turn',tool:'feishu_doc_format_text',arguments:{documentId:'created1',blockId:'b',revisionId:1,matchText:'name',style:{bold:true}}}});
+ assert.equal(s.sent.length,0);assert.equal(s.writes.length,1);
+});
+test('approved catalog document creation records API result, not a caller supplied ID',async t=>{
+ const s=officeFixture(t);s.config.feishu.appId='app1';s.bot.office.feishu.client.docx={v1:{document:{create:async()=>({document:{document_id:'catalogCreated'}})}}};
+ const p=await officePending(s,100,{api:'docx.v1.document.create',payload:{data:{title:'external1'}}});await confirmOffice(s,p.token);await p.promise;
+ assert.ok(s.store.get('createdDoc:catalogCreated'));assert.equal(s.store.get('createdDoc:external1'),undefined);
+});
+
+test('failed or merely read catalog document never becomes bot-created',async t=>{
+ const s=officeFixture(t);s.config.feishu.appId='app1';s.bot.office.feishu.client.docx={v1:{document:{create:async()=>{throw Error('failed');},get:async()=>({document:{document_id:'external1'}})}}};
+ const p=await officePending(s,100,{api:'docx.v1.document.create',payload:{data:{title:'external1'}}});await confirmOffice(s,p.token);await p.promise;
+ const read=await officePending(s,101,{api:'docx.v1.document.get',payload:{path:{document_id:'external1'}}});await read.promise;
+ assert.equal(s.store.get('createdDoc:external1'),undefined);
+ assert.equal(s.bot.createdDocumentConsent(deleteContent('external1')),null);
+});
