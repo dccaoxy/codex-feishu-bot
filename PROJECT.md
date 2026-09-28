@@ -1,3 +1,11 @@
+# 当前交接：PR #19 已审核候选部署（2026-09-28）
+
+- Human明确授权“部署吧”，目标为独立复审PASS的b70ab30a1e15cf40ae1de501a53fd7c70ec02271，候选仍data/issue6-candidate。部署前源码与PR #18部署清单一致，无活跃/排队用户或Knowledge运行任务。
+- 精确版本文件逐项哈希验证通过；备份data/pr19-b70ab30-backup-20260928-155235保存旧代码/配置和两份SQLite一致性快照，完整证据data/pr19-deployment.json。真实配置、launchd plist逐字节一致，2个授权群、Owner/Gateway/FIFO/Knowledge及Shared权限保留。仅机器人PID52185→56641，Shared PID743不变，未重启Desktop/Shared/遥测。
+- 实际候选check、549/549全量组合测试（0失败/跳过）、doctor Shared握手/登录/7模型、无模型ephemeral smoke/动态注册通过。Group22类攻击及持久恢复、Knowledge15类攻击隔离检查通过，二进制0.158.0-alpha.2.1，使用本地模拟provider，无真实模型或飞书写入。
+- 服务running，新日志确认Codex与飞书长连接建立；stdout新增189字节无error/EMFILE，stderr0字节。停止期间所有业务表一致，启动后仅history_sync.last_reconciled_at及SQLite自增序列随正常对账变化，其他私人/群消息/知识数据保持一致。既有2项blocked知识任务未改变。
+- 可以开始新版新建临时文档→加粗/改文字/删除段落免卡片验收；旧文档没有可信创建记录时仍确认，整份文件删除/分享/成员权限仍确认。尚未进行真人飞书编辑验收。未Merge；运行版本固定b70ab30，本次文档记录提交不自动部署，等待Human Gate。
+
 # 当前开发：机器人自建文档内容编辑免确认（2026-09-28）
 
 - Task Source：Human「在操作机器人自己生成的飞书文档的时候，可以不用我确认」。PR #18已由外部合并；从最新main c067550另开codex/created-doc-consent，不修改当前fdfd468候选。
