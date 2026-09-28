@@ -19,7 +19,7 @@ test('member cannot use an owner approval card',t=>{const {bot,store}=setup(t);b
 test('revocation prevents late approvals and late tools',async t=>{const {bot,store,event,groups}=setup(t);bot.onMessage(event);groups.closed=true;await assert.rejects(()=>bot.action('group',{token:'p'}));let called=false;bot.rpc.respond=()=>{called=true;};bot.runs.set('t',{chat:'group'});await bot.serverRequest({id:1,method:'item/tool/call',params:{threadId:'t',tool:'feishu_send_file'}});assert.equal(called,false);});
 test('runtime inheritance omits overrides only when selected',t=>{const {bot,config}=setup(t);assert.equal(bot.threadOptions().sandbox,'workspace-write');config.ownerAccess.inheritRuntimeDefaults=true;assert.equal(Object.hasOwn(bot.threadOptions(),'sandbox'),false);assert.equal(Object.hasOwn(bot.threadOptions(),'approvalPolicy'),false);});
 test('recall removes queued owner input without starting a turn',async t=>{const {bot,store,event}=setup(t);bot.onMessage(event);await bot.cancelOwnerGroup('group','m1');assert.equal(store.pending().length,0);});
-test('recall interrupts only the matching active owner group run',async t=>{const {bot,event}=setup(t);bot.onMessage(event);const calls=[];bot.rpc.request=async(m,p)=>{calls.push([m,p]);};bot.endRun=r=>{r.ending=true;};const r={chat:'group',thread:'t',turn:'turn',sourceIds:new Set(['m1'])};bot.runs.set('t',r);await bot.cancelOwnerGroup('group','other');assert.equal(calls.length,0);await bot.cancelOwnerGroup('group','m1');assert.deepEqual(calls,[['turn/interrupt',{threadId:'t',turnId:'turn'}]]);assert.equal(r.ownerCancelled,true);});
+test('recall interrupts only the matching active owner group run',async t=>{const {bot,event}=setup(t);bot.onMessage(event);const calls=[];bot.rpc.request=async(m,p)=>{calls.push([m,p]);};bot.endRun=r=>{r.ending=true;};const r={officeOwner:bot.owner,chat:'group',thread:'t',turn:'turn',sourceIds:new Set(['m1'])};bot.runs.set('t',r);await bot.cancelOwnerGroup('group','other');assert.equal(calls.length,0);await bot.cancelOwnerGroup('group','m1');assert.deepEqual(calls,[['turn/interrupt',{threadId:'t',turnId:'turn'}]]);assert.equal(r.ownerCancelled,true);});
 test('owner group and private chats keep separate thread bindings',t=>{const {store}=setup(t);store.updateChat('private',{thread:'private-thread'});store.updateChat('group',{thread:'owner-group-thread'});assert.equal(store.chat('private').thread,'private-thread');assert.equal(store.chat('group').thread,'owner-group-thread');});
 test('recall during slow card creation starts no turn and leaves no timer',async t=>{
  const {bot,store,event,config}=setup(t);bot.onMessage(event);bot.available=true;config.streamIntervalMs=60000;
@@ -58,14 +58,14 @@ test('upload completed but queued message remains fenced, normal file sends exac
 test('interrupt wait immediately invalidates old approval and closes existing card',async t=>{
  const {bot,event}=setup(t);bot.onMessage(event);const decisions=[],finished=[];let release;
  bot.rpc.request=()=>new Promise(r=>{release=r;});bot.rpc.respond=(...a)=>decisions.push(a);bot.feishu.finish=async(...a)=>finished.push(a);
- const r={chat:'group',thread:'t',turn:'turn',sourceIds:new Set(['m1']),card:'existing',sequence:0,flush:Promise.resolve()};bot.runs.set('t',r);
+ const r={officeOwner:bot.owner,chat:'group',thread:'t',turn:'turn',sourceIds:new Set(['m1']),card:'existing',sequence:0,flush:Promise.resolve()};bot.runs.set('t',r);
  bot.prompts.set('token',{chat:'group',thread:'t',turn:'turn',id:3,expires:Date.now()+10000,method:'item/commandExecution/requestApproval'});
  const cancelled=bot.cancelOwnerGroup('group','m1');await assert.rejects(bot.action('group',{token:'token',decision:'accept'}));assert.equal(bot.prompts.has('token'),false);assert.deepEqual(decisions,[]);release();await cancelled;await r.finishPromise;assert.equal(finished[0][0],'existing');
 });
 for(const entry of ['command','tool','final'])test(`actual ${entry} entry cannot send queued files after revoke`,async t=>{
  const {bot,config,event}=setup(t);bot.onMessage(event);bot.available=true;const f=new Feishu(config,()=>{});bot.feishu=f;fs.writeFileSync(path.join(config.codex.cwd,'test.txt'),'synthetic');let release;f.queue=new Promise(r=>{release=r;});const calls=[];
  f.client={im:{v1:{file:{create:async()=>{calls.push('upload');return {data:{file_key:'f'}};}},message:{create:async()=>{calls.push('send');return {};}}}}};
- const r={chat:'group',thread:'t',turn:'turn',sourceIds:new Set(['m1']),messages:new Map([['x',{text:'x'.repeat(11000)}]]),card:'card',sequence:0,flush:Promise.resolve()};bot.runs.set('t',r);bot.rpc.respond=()=>{};f.update=async()=>{};f.finish=async()=>{};
+ const r={officeOwner:bot.owner,chat:'group',thread:'t',turn:'turn',sourceIds:new Set(['m1']),messages:new Map([['x',{text:'x'.repeat(11000)}]]),card:'card',sequence:0,flush:Promise.resolve()};bot.runs.set('t',r);bot.rpc.respond=()=>{};f.update=async()=>{};f.finish=async()=>{};
  const pending=entry==='command'?bot.command('group','/send test.txt','m1'):entry==='tool'?bot.serverRequest({id:1,method:'item/tool/call',params:{threadId:'t',turnId:'turn',tool:'feishu_send_file',arguments:{path:'test.txt'}}}):bot.finishRun(r,'completed');
  const settled=pending.catch(()=>{});await new Promise(resolve=>setImmediate(resolve));config.ownerAccess.enabled=false;release();await settled;assert.deepEqual(calls,[]);
 });
@@ -80,7 +80,7 @@ test('send retry rechecks authorization before invoking transport again',async t
 });
 test('failed interrupt cannot restore old approval or tool authority and leaves other run intact',async t=>{
  const {bot,event}=setup(t);bot.onMessage(event);bot.available=true;const decisions=[];bot.rpc.respond=(...a)=>decisions.push(a);bot.rpc.request=async()=>{throw Error('interrupt timeout');};
- const r={chat:'group',thread:'t',turn:'turn',sourceIds:new Set(['m1']),sequence:0,flush:Promise.resolve()};bot.runs.set('t',r);bot.runs.set('other',{chat:'private',thread:'other'});
+ const r={officeOwner:bot.owner,chat:'group',thread:'t',turn:'turn',sourceIds:new Set(['m1']),sequence:0,flush:Promise.resolve()};bot.runs.set('t',r);bot.runs.set('other',{chat:'private',thread:'other'});
  bot.prompts.set('token',{chat:'group',thread:'t',id:1,expires:Date.now()+10000});bot.prompts.set('other-token',{chat:'private',thread:'other',id:2,expires:Date.now()+10000});await bot.cancelOwnerGroup('group','m1');
  assert.notEqual(bot.onAction({operator:{open_id:'owner'},context:{open_chat_id:'group'},action:{value:{token:'token',decision:'accept'}}}).toast.content,'已收到，正在处理。');await assert.rejects(bot.action('group',{token:'token',decision:'accept'}));
  await bot.serverRequest({id:3,method:'item/tool/call',params:{threadId:'t',tool:'feishu_send_file',arguments:{path:'test.txt'}}});await r.finishPromise;assert.deepEqual(decisions,[]);assert.ok(bot.prompts.has('other-token'));assert.ok(bot.runs.has('other'));
@@ -121,7 +121,7 @@ test('concurrent command guards stay isolated and cleanup can close a cancelled 
  config.ownerAccess.enabled=false;release();await Promise.all([owner,privateWork]);assert.deepEqual(sent,['private']);await f.effects.run(()=>{throw Error('cancelled');},()=>f.finish('card',1,'已停止'));assert.deepEqual(closed,['card']);
 });
 import {Documents} from '../src/documents.mjs';
-function toolRun(bot){const r={chat:'group',thread:'t',turn:'turn',sourceIds:new Set(['m1']),flush:Promise.resolve(),sequence:0};bot.runs.set('t',r);bot.available=true;return r;}
+function toolRun(bot){const r={officeOwner:bot.owner,chat:'group',thread:'t',turn:'turn',sourceIds:new Set(['m1']),flush:Promise.resolve(),sequence:0};bot.runs.set('t',r);bot.available=true;return r;}
 function toolCall(bot,tool,args={}){return bot.serverRequest({id:41,method:'item/tool/call',params:{threadId:'t',turnId:'turn',tool,arguments:args}});}
 for(const tool of ['feishu_thread_read','feishu_threads_search','owner_groups','aegpc_repository_approval'])for(const reason of ['recall','revoke','leave'])test(`${tool} await result discarded after ${reason}`,async t=>{
  const {bot,config,event,groups}=setup(t);bot.onMessage(event);toolRun(bot);let opened,release;const opening=new Promise(r=>{opened=r;});const read=()=>{opened();return new Promise(r=>{release=r;});};bot.history.read=read;bot.history.search=read;bot.ownerGroups={execute:read};bot.repositoryApproval.execute=read;bot.rpc.request=async()=>{};const responses=[];bot.rpc.respond=(...a)=>responses.push(a);
@@ -148,15 +148,26 @@ test('Documents explicit guard fences queued SDK without command or tool async c
  const {bot,config,event}=setup(t);bot.onMessage(event);const run=toolRun(bot),f=new Feishu(config,()=>{}),docs=new Documents(f,()=>bot.owner);let release;f.queue=new Promise(r=>{release=r;});let writes=0;f.client={docx:{documentBlock:{patch:async()=>{writes++;return {};}}}};
  const pending=docs.execute('feishu_doc_update_text',{documentId:'doc1',blockId:'block1',text:'synthetic',revisionId:1},bot.ownerEffectGuard('group',run));const rejected=assert.rejects(pending);config.ownerAccess.enabled=false;release();await rejected;assert.equal(writes,0);
 });
-const localTools=['feishu_thread_read','feishu_threads_search','owner_groups',...['status','message','search','context','changes','daily_digest','topics','topic_read','send'].map(n=>'owner_group_'+n),'aegpc_repository_approval',...['create','read','append','update_text','permissions'].map(n=>'feishu_doc_'+n),'feishu_send_file'];
+const localTools=['feishu_thread_read','feishu_threads_search','owner_groups',...['status','message','search','context','changes','daily_digest','topics','topic_read','send'].map(n=>'owner_group_'+n),'aegpc_repository_approval',...['create','read','append','update_text','format_text','permissions'].map(n=>'feishu_doc_'+n),'feishu_send_file',...['find','schema','call','permissions','sheet_read','sheet_write'].map(n=>'feishu_office_'+n)];
 for(const tool of localTools)for(const turnId of ['old-turn','',undefined,42])test(`${tool} rejects invalid request turn ${String(turnId)}`,async t=>{
- const {bot,event}=setup(t);bot.onMessage(event);toolRun(bot);let calls=0;const call=async()=>{calls++;return {};};bot.history.read=call;bot.history.search=call;bot.ownerGroups={execute:call};bot.repositoryApproval.execute=call;bot.documents.execute=call;bot.sendFile=call;bot.rpc.respond=call;bot.rpc.reject=call;
+ const {bot,event}=setup(t);bot.onMessage(event);toolRun(bot);let calls=0;const call=async()=>{calls++;return {};};bot.history.read=call;bot.history.search=call;bot.ownerGroups={execute:call};bot.repositoryApproval.execute=call;bot.documents.execute=call;bot.office.execute=call;bot.sendFile=call;bot.rpc.respond=call;bot.rpc.reject=call;
  await bot.serverRequest({id:51,method:'item/tool/call',params:{threadId:'t',turnId,tool,arguments:{}}});assert.equal(calls,0);
 });
 for(const tool of localTools)test(`${tool} result discarded if turn switches during await`,async t=>{
- const {bot,event}=setup(t);bot.onMessage(event);const run=toolRun(bot);let opened,release;const opening=new Promise(r=>{opened=r;});const call=()=>{opened();return new Promise(r=>{release=r;});};bot.history.read=call;bot.history.search=call;bot.ownerGroups={execute:call};bot.repositoryApproval.execute=call;bot.documents.execute=call;bot.sendFile=call;const responses=[];bot.rpc.respond=(...a)=>responses.push(a);
+ const {bot,event}=setup(t);bot.onMessage(event);const run=toolRun(bot);let opened,release;const opening=new Promise(r=>{opened=r;});const call=()=>{opened();return new Promise(r=>{release=r;});};bot.history.read=call;bot.history.search=call;bot.ownerGroups={execute:call};bot.repositoryApproval.execute=call;bot.documents.execute=call;bot.office.execute=call;bot.sendFile=call;const responses=[];bot.rpc.respond=(...a)=>responses.push(a);
  const pending=toolCall(bot,tool);await opening;run.turn='next-turn';release({text:'synthetic'});await pending;assert.deepEqual(responses,[]);
 });
 for(const tool of localTools)test(`${tool} current turn executes and responds once`,async t=>{
- const {bot,event}=setup(t);bot.onMessage(event);toolRun(bot);let calls=0;const call=async()=>{calls++;return {value:'synthetic'};};bot.history.read=call;bot.history.search=call;bot.ownerGroups={execute:call};bot.repositoryApproval.execute=call;bot.documents.execute=call;bot.sendFile=call;const responses=[];bot.rpc.respond=(...a)=>responses.push(a);await toolCall(bot,tool);assert.equal(calls,1);assert.equal(responses.length,1);assert.equal(responses[0][1].success,true);
+ const {bot,event}=setup(t);bot.onMessage(event);toolRun(bot);let calls=0;const call=async()=>{calls++;return {value:'synthetic'};};bot.history.read=call;bot.history.search=call;bot.ownerGroups={execute:call};bot.repositoryApproval.execute=call;bot.documents.execute=call;bot.office.execute=call;bot.sendFile=call;const responses=[];bot.rpc.respond=(...a)=>responses.push(a);await toolCall(bot,tool);assert.equal(calls,1);assert.equal(responses.length,1);assert.equal(responses[0][1].success,true);
+});
+for(const stage of ['queue','response'])test(`office tools invalidate captured Owner identity at ${stage}`,async t=>{
+ const {bot,event,config}=setup(t);bot.onMessage(event);const run=toolRun(bot);let validOwner=bot.owner,network=0;const responses=[];bot.rpc.respond=(...a)=>responses.push(a);
+ bot.office.feishu={client:{drive:{v1:{file:{list:async()=>{network++;if(stage==='response')bot.owner='changed';return {private:'must-not-return'};}}}}},call:async(fn,retry,g)=>{if(stage==='queue')bot.owner='changed';g();return fn();}};
+ assert.equal(run.officeOwner,validOwner);await toolCall(bot,'feishu_office_call',{api:'drive.v1.file.list',payload:{}});assert.equal(network,stage==='queue'?0:1);assert.ok(!JSON.stringify(responses).includes('must-not-return'));
+});
+for(const cancel of ['revoke','recall'])test(`queued office mutation is blocked by real Feishu queue after ${cancel}`,async t=>{
+ const {bot,event,config,groups}=setup(t);bot.onMessage(event);toolRun(bot);const f=new Feishu(config,()=>{});bot.office.feishu=f;let release;f.queue=new Promise(r=>{release=r;});let calls=0;f.client={request:async()=>{calls++;return {data:{}};}};bot.rpc.respond=()=>{};bot.rpc.request=async()=>{};
+ const pending=toolCall(bot,'feishu_office_sheet_write',{spreadsheetToken:'sheet',range:'tab!A1:A1',values:[['fixture']]});await new Promise(r=>setTimeout(r,5));
+ if(cancel==='revoke')groups.policy.allowedGroup=()=>false;else await bot.cancelOwnerGroup('group','m1');
+ release();await pending;assert.equal(calls,0);
 });

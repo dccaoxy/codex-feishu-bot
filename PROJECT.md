@@ -1,3 +1,13 @@
+# 当前交接：Owner 办公工具扩展（2026-09-28）
+
+- Task Source：Human「给飞书机器人配尽量完整的工具和权限」，澄清回复「所有能给他配上的都配上」。本人私聊/已有授权 Owner 群使用扩展工具，普通群成员权限不变。基于最新 main 094de08 新分支 codex/owner-office-tools；未扩大授权群或进入新的共享运行模式。
+- Implementation：固定提取官方 lark-mcp 0.5.1 的219项接口目录，212支持应用身份、7项用户身份专用明确拒绝；通过 find/schema/call 按需加载。覆盖文档、多维表格、电子表格、文件、知识库、日历、任务、联系人只读、会议/搜索；增加单元格范围读写、权限清单分页、精确局部文字样式工具。接口数量不代表权限开通或逐项验收。
+- 保护：固定SDK目录/JSON Schema、禁止URL/请求头/Token/身份覆盖和路径注入；已有文档块编辑要求具体revision；写入不自动重试；结果预算与截断说明；排队出站/返回前验证原Owner、回合、撤回/撤权。旧机器人自有任务通过既有工具版本升级路径加载新工具。普通Group/Knowledge不注册办公工具。
+- Runtime：本机Desktop二进制已为0.158.0-alpha.2.1，原隔离检查因固定0.158.0-alpha.2而拒绝。先在独立临时探针验证新版，再将本开发分支准确版本固定更新至0.158.0-alpha.2.1；没有移除版本门禁。当前候选仍为旧代码且未配置独立二进制，普通群/Knowledge后续新启动可能被原版本门禁拒绝，不能把此开发结果当成线上恢复。
+- Validation：check通过；505/505全量测试（0失败/跳过），保留PR #5/Owner Gateway/FIFO/Knowledge组合；随后样式键校验微调的6项文档测试通过。doctor真实Shared握手/登录/7模型通过，无模型ephemeral smoke及全部Owner动态工具注册通过。开发配置不含飞书凭据。新版实际group探针22类调用及持久会话重启恢复通过，Knowledge15类通过，新增办公写入/样式越权请求均被拒绝；无真实模型调用。目录生成器重建逐字节一致，未新增生产依赖。
+- 真实只读验证：使用现有应用身份查询权限，知识库列表成功；日历page_size=1被字段校验拒绝，使用默认分页成功（不是权限缺失）。云盘列表报99991672，要求tenant drive:drive / drive:drive:readonly / space:document:retrieve任一；任务清单要求tenant task:tasklist:read / task:tasklist:write任一。已有user grants不能替代用户OAuth或tenant grants。未发送消息、未写飞书资料、未改应用权限。
+- Remaining：需要管理员补充所需应用身份权限并使应用版本生效，以及审核后候选部署/真实写入验收。未接入用户OAuth、通用素材二进制上传、人员写入/企业管理、群控制扩权或任意API代理。全部接口仍受飞书资源权限约束；不宣称已经具备所有权限。开发代码已完成，创建Draft PR后转Ready请求审核；未部署、未Merge、未修改现有候选配置/数据/Shared服务/遥测。
+
 # 当前交接：PR #17 已审核版本候选部署（2026-09-26 21:39 北京时间）
 
 - Human 明确授权部署独立复审 PASS 的 `1e6ead72b71564418cf315fb4a3b9c8e042da6c3`，不 Merge，部署后等待 Human Gate；免重复专门24KB边界人工测试。审核评论： https://github.com/dccaoxy/codex-feishu-bot/pull/17#issuecomment-5846675017 。

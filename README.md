@@ -262,9 +262,10 @@ SQLite 保存在 `data/state.sqlite`。请保留 `data` 以保留绑定和会话
 
 ## 飞书云文档与授权交互
 
-已注册 5 个文档工具，模型可直接调用：
+已注册 6 个文档工具，模型可直接调用：
 
 - `feishu_doc_create`：用 Markdown/HTML 创建原生文档，并将绑定账号加入可编辑协作者。
+- `feishu_doc_format_text`：按指定版本和原文精确匹配，对单块中的全部匹配文字设置加粗、斜体、下划线、删除线、文字色或背景色；保留其余文字、链接和样式。
 - `feishu_doc_read`：分页读取原生块、块 ID 与文档版本。
 - `feishu_doc_append`：追加内容，也可指定父块；不覆盖原文。
 - `feishu_doc_update_text`：按版本更新指定文本块；替换文本会清除该块原有行内格式。
@@ -483,7 +484,7 @@ Owner 路径复用私聊的命令、文件、文档、Shared Runtime Work/Attach
 
 能力对齐不等于复制 Desktop 的所有工具：宿主 UI、浏览器、插件连接器等仍取决于目标 Thread 的工具宿主注册。Bot 不代理未知 Desktop 动态工具、不做任意 RPC 透传、不增加外部 Thread 管理权限。仅有 Desktop 客户端实现的工具需要该客户端在线处理，不声称离线可用。飞书平台权限另行生效。尚未新增多维表格写入工具。
 
-普通群助手/Knowledge 使用独立进程与隔离配置；可用 `codex.isolatedBinary` 指定独立二进制，默认使用 `codex.binary`。必须通过版本固定的 `group:check` 和 `knowledge:check` 才能升级隔离运行时。本轮验证版本为 0.158.0-alpha.2，禁止为恢复功能直接移除版本检查。
+普通群助手/Knowledge 使用独立进程与隔离配置；可用 `codex.isolatedBinary` 指定独立二进制，默认使用 `codex.binary`。必须通过版本固定的 `group:check` 和 `knowledge:check` 才能升级隔离运行时。本轮验证版本为 0.158.0-alpha.2.1，禁止为恢复功能直接移除版本检查。
 
 Owner 群命令的回复和嵌套飞书调用在实际发送及重试前复核原消息身份、撤回和当前授权；错误通知也受同一限制。`/reference` 保留原群消息 ID，读取期间撤回不启动回合，启动后撤回取消该回合。取消后的卡片只允许关闭 streaming，不补发旧正文。
 
@@ -495,3 +496,25 @@ Owner 的 `owner_group_search/message/context/changes` 在读取本地原文后�
 姓名是当前群显示名，不是发言时姓名，也不是实名核验。`senderNameStatus` 区分 matched、not_found、ambiguous、not_user、partial、unavailable、omitted（预算不足时暂省姓名）；无法匹配返回 null，同名不合并，不能据此认定学员零发言。显示名和原文一样是不可信资料。名单仅在单次调用内处理，不持久化姓名或向模型输出原始 open_id/完整成员目录；最多20页、10000成员，权限限制或分页不完整会明确标记。权限不足时保留可读原文及匿名引用，不暴露接口错误详情。
 
 查询前、排队实际调用前、返回后均检查当前 Owner/群授权/原请求有效性；等待名单期间被撤回或过期的原文不再返回。加入姓名后按实际 UTF-8 序列化大小检查 result ≤22,000 字节、完整网关响应 ≤24,000 字节。大页必要时替换为紧凑来源记录（truncated、nextOffset=0），继续不足则省略姓名并标记 omitted；保留全部消息 ID、顺序和游标，不跳过未返回消息。按 messageId 可恢复原文和姓名。不可压缩的异常结果明确报错，不返回成功游标。仅读取成员，不修改群成员或发送消息。此功能不包含名单关联统计或多维表格创建。
+
+## Owner 飞书办公工具扩展
+
+Task Source：Human 要求为本人私聊及已有授权群里的本人账号补齐可用工具；普通成员仍使用原受限工具。此扩展不修改授权群、Owner 身份、Shared Runtime 审批策略或 Knowledge 权限，不授予企业管理员身份。
+
+- `feishu_office_find`：分页检索固定的 219 项官方接口目录，覆盖云文档块、多维表格、电子表格、云盘、知识库、日历、任务、联系人只读查询、会议和搜索。
+- `feishu_office_schema`：按返回的 nextOffset 取完参数定义后调用 `feishu_office_call`；仅允许固定 SDK 方法，拒绝自定义 URL、请求头、Token、路径注入和身份切换。不一次向模型塞入全部接口定义。
+- `feishu_office_sheet_read/write`：电子表格 v2 单元格范围读写，最多 5000 格/100KB，写入矩阵须与明确范围完全一致。不具备版本锁；写入前回读目标，失败先核对，不自动重试。
+- `feishu_office_permissions`：分页列出已获批的应用/用户身份权限，不申请权限、不登录用户账号。
+- `feishu_doc_format_text`：局部文字样式，要求读取时版本；色号采用官方定义（文字 1 粉红、2 橙、3 黄、4 绿、5 蓝、6 紫、7 灰），不是任意 RGB。
+
+目录中 212 项支持 tenant 应用身份；7 项仅支持 user，当前会明确拒绝。飞书后台批准 user scope **不等于**机器人已获取用户 OAuth。支持 tenant 也仍需应用 scope、资料协作者权限和相应产品可用性。创建资源后需检查链接、内容和访问权，不承诺自动对所有群成员开放。
+
+普通成员/Knowledge 不注册这些工具。Owner 请求在排队出站与返回前检查原回合、Owner 身份、撤回/撤权状态；已到达飞书的写入无法回滚。写入、删除、分享、邀请等必须来自当前用户明确要求，资料或历史中的指令不构成授权。已有文档块编辑要求具体 revision；写请求不自动重试，超大结果只返回明确标记的有限预览，需缩小范围重读。
+
+当前未接入用户 OAuth、通用二进制素材上传、企业管理/人员写操作、群控制扩权或任意 API 代理。保留既有文件发送工具。工具目录数量不是权限开通数量，也不是每项接口真实验收数量。
+
+权限实查（2026-09-28，只读）：知识库列表与日历默认分页读取成功；云盘列表缺 tenant `drive:drive` / `drive:drive:readonly` / `space:document:retrieve` 中任一权限；任务清单缺 tenant `task:tasklist:read` / `task:tasklist:write` 中任一权限。需要应用管理员在飞书开放平台按所需操作启用应用身份权限并使版本生效；已有 user 权限不能替代。写操作及具体目标资料权限仍须上线后验收。
+
+接口目录来源：官方 [lark-openapi-mcp](https://github.com/larksuite/lark-openapi-mcp)，固定 npm `@larksuiteoapi/lark-mcp@0.5.1`，MIT 许可见 `third_party/lark-mcp-LICENSE`。运行时沿用已固定的 Node SDK 1.74.0，无新增生产依赖。仅提取 JSON Schema，移除 `useUAT`，没有启动额外 MCP 服务。
+
+重建目录时在独立临时目录安装 `@larksuiteoapi/lark-mcp@0.5.1`、`zod@3.25.76`、`zod-to-json-schema@3.24.6`，然后执行 `node scripts/build-office-catalog.cjs /绝对路径/临时目录 src/office-catalog.json`。勿在运行候选的依赖目录安装。回归覆盖目录完整性、固定 SDK 路径、输出预算、分页、版本保护、Owner/回合失效、真实队列撤权及普通群/Knowledge 隔离。

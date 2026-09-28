@@ -30,3 +30,14 @@ test('images reject before document creation, and only docx links accepted',asyn
  assert.throws(()=>documentId('https://evil.example/docx/abc123'));
  assert.throws(()=>documentId('https://example.feishu.cn/wiki/abc123'));
 });
+function formatting(elements){let patch;const f={call:async(fn,retry,g)=>{g();return fn();},client:{docx:{document:{get:async()=>({document:{revision_id:2}})},documentBlock:{get:async()=>({block:{text:{elements}}}),patch:async p=>{patch=p;return {document_revision_id:3};}}}}};return {f,d:new Documents(f,()=> 'owner'),patch:()=>patch};}
+const formatArgs={documentId:'doc',blockId:'block',matchText:'姓名',revisionId:2,style:{bold:true,textColor:1}};
+test('exact formatting spans runs, preserves original text, links, mentions and unrelated style',async()=>{
+ const input=[{text_run:{content:'🙂姓',text_element_style:{italic:true,link:{url:'https://example.com'}}}},{text_run:{content:'名和姓名'}},{mention_user:{user_id:'fixture'}},{text_run:{content:''}}];
+ const {d,patch}=formatting(input);const r=await d.execute('feishu_doc_format_text',formatArgs);assert.equal(r.matched,2);assert.equal(patch().params.document_revision_id,2);
+ const es=patch().data.update_text_elements.elements;assert.equal(es.map(e=>e.text_run?.content??'@').join(''),'🙂姓名和姓名@');assert.equal(es[0].text_run.text_element_style.bold,undefined);assert.equal(es[1].text_run.text_element_style.bold,true);assert.equal(es[1].text_run.text_element_style.italic,true);assert.equal(es[1].text_run.text_element_style.link.url,'https://example.com');assert.deepEqual(es.at(-2),input[2]);assert.deepEqual(es.at(-1),input[3]);assert.equal(input[0].text_run.content,'🙂姓');
+});
+test('missing match, stale revision and invalid styles leave document untouched',async()=>{
+ for(const a of [{...formatArgs,matchText:'不存在'},{...formatArgs,revisionId:1},{...formatArgs,style:{textColor:8}},{...formatArgs,style:{other:true}}]){const {d,patch}=formatting([{text_run:{content:'姓名'}}]);await assert.rejects(d.execute('feishu_doc_format_text',a));assert.equal(patch(),undefined);}
+});
+test('formatting revocation during block read prevents mutation',async()=>{const {d,f,patch}=formatting([]);let valid=true;f.client.docx.documentBlock.get=async()=>{valid=false;return {block:{text:{elements:[{text_run:{content:'姓名'}}]}}};};await assert.rejects(d.execute('feishu_doc_format_text',formatArgs,()=>{if(!valid)throw Error('revoked');}),/revoked/);assert.equal(patch(),undefined);});

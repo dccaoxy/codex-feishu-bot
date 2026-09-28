@@ -1,3 +1,4 @@
+import { OFFICE_TOOLS } from './office.mjs';
 import { DOCUMENT_TOOLS } from './documents.mjs';
 const functionTool = (name, description, properties, required = []) => ({
   type: 'function', name, description,
@@ -5,6 +6,7 @@ const functionTool = (name, description, properties, required = []) => ({
 });
 export const TOOLS = [
   ...DOCUMENT_TOOLS,
+  ...OFFICE_TOOLS,
   functionTool('feishu_threads_search', '按标题查找其他 Codex 会话。用户要求参考之前的任务时使用。返回会话更新时间 updatedAtIso / updatedAtLocal（北京时间），不是精确的最后消息时间。只读取历史，不启动其他任务。', {
     query: { type: 'string' }, cursor: { type: 'string', description: '外部会话列表的翻页游标' },
   }),
