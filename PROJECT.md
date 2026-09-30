@@ -1,4 +1,14 @@
-# 当前开发：Owner 自然语义群发送（2026-09-30）
+# 当前返工：PR #20 文档链接精确证据 R1（2026-09-30）
+
+- Task Source：[744863a 的 NEEDS CHANGES](https://github.com/dccaoxy/codex-feishu-bot/pull/20#issuecomment-5905428878)。保持 codex/natural-group-send 原分支，先将 PR 转回 Draft；不部署、不 Merge、不重启服务。
+- 复现：对话只有 doc123 链接、拟发送 doc1、模拟接口允许读取任意文档时，原实现仍会出站，新增探针修复前 0/1。此前 549/564 项通过和“链接杜撰”测试未覆盖 ID 前缀，此处修正其证据局限，不以旧测试通过代表该边界安全。
+- Implementation：当前请求、近期每条 request/answer 与拟发送正文使用同一 URL 解析函数，从合法 HTTPS 飞书 docx 完整路径提取大小写敏感的 document_id，用集合精确匹配后再执行固定读取核验。删除整段 JSON 的子串判断；查询串、片段、尾部标点及 Markdown 包装不改变资源 ID。完整主机名校验拒绝仿冒域名作为依据，额外路径/伪造后缀/编码分隔符不截断成合法 ID。
+- 相关边界：括号、方括号和花括号中的查询/片段值作为外层 URL 一起解析，不能将其内嵌链接另算依据。正常 Markdown 链接仍可识别。保留实际发送前的 Owner、当前请求、撤回/撤权、唯一目标和防重复检查；不修改自然语义模型、Group/FIFO/Knowledge 或运行配置。
+- Validation：最终代码 check、581/581 全量测试通过；以 PR #19 精确代码 b70ab30 加本 PR 全部代码差异的隔离临时组合 check、596/596 通过，0 失败/跳过。新增 32 项回归覆盖前缀双向、查询串、片段、尾部标点、伪造路径/域名/编码后缀、嵌套链接、近期 request/answer 与单消息多链接；无依据案例在读取接口前拒绝、零出站。独立只读复核额外执行实际解析函数 7 项探针，7/7 通过。
+- 协议与局限：doctor 真实 Codex 握手/登录/7 模型和无模型 ephemeral smoke/工具注册通过，使用无飞书凭据的开发配置。飞书读取和发送均为模拟；本轮未重复真实语义模型、Group/Knowledge 协议探针或真人发送验收，原记录仅作历史证据。当前远端检查列表无结果，不声称 CI PASS。
+- Delivery：README/PROJECT 已同步，提交推送同一 PR #20 后重新 Ready 请求独立复审；未部署、未 Merge、未重启，真实配置、授权群、Owner、Shared Runtime、Knowledge 和数据未改。PR #19 仍 Open，组合仅在隔离临时目录完成。
+
+# 原实现记录：Owner 自然语义群发送（2026-09-30，744863a）
 
 - Task Source：Human要求取消固定句式，按自然语义识别当前发送命令，程序核对身份/目标/撤回/重复，有歧义才询问。截图两条原始请求在旧sendIntent中均返回null，第二条还是助手建议的无效模板；此前尚未进入飞书发送接口。
 - 基线：最新main c067550，独立分支codex/natural-group-send。PR #19仍Open且候选b70ab30，本次不覆盖运行候选；另以PR #19精确代码做组合验证，不执行Merge或部署。

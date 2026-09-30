@@ -394,3 +394,58 @@ test('recent conversation is scoped to Owner chat and thread, never raw retrieve
  let seen;f.gateway.assess=async(_,x)=>{seen=x;return {decision:'deny',target:null};};const other=f.context('发这个',{thread:'different'}),[g]=await directory(f,other);
  await assert.rejects(f.gateway.execute('owner_group_send',{group:g.reference,text:'hello'},other));assert.deepEqual(seen.recentTurns,[]);assert.ok(!JSON.stringify(seen).includes('SEND private-answer'));
 });
+
+const documentEvidenceCases=[
+ ['prefix truncation','https://feishu.cn/docx/doc123','https://feishu.cn/docx/doc1',false],
+ ['forged ID suffix','https://feishu.cn/docx/doc1','https://feishu.cn/docx/doc123',false],
+ ['same ID with query','https://feishu.cn/docx/doc1?from=chat','https://feishu.cn/docx/doc1?from=share',true],
+ ['same ID with fragment','https://feishu.cn/docx/doc1#part1','https://feishu.cn/docx/doc1#part2',true],
+ ['query cannot hide a different ID','https://feishu.cn/docx/doc123?from=chat','https://feishu.cn/docx/doc1?from=chat',false],
+ ['fragment cannot hide a different ID','https://feishu.cn/docx/doc123#part1','https://feishu.cn/docx/doc1#part1',false],
+ ['quoted Chinese punctuation','“https://feishu.cn/docx/doc1”。','https://feishu.cn/docx/doc1。',true],
+ ['Markdown punctuation','[文档](https://feishu.cn/docx/doc1),','[文档](https://feishu.cn/docx/doc1)。',true],
+ ['ASCII quotes','"https://feishu.cn/docx/doc1"','https://feishu.cn/docx/doc1;',true],
+ ['normalized host and trailing slash','https://TEAM.FEISHU.CN/docx/doc1/','https://team.feishu.cn/docx/doc1?from=chat#part1',true],
+ ['ID case remains significant','https://feishu.cn/docx/Doc1','https://feishu.cn/docx/doc1',false],
+ ['path suffix is not evidence','https://feishu.cn/docx/doc1/forged','https://feishu.cn/docx/doc1',false],
+ ['punctuation suffix is not evidence','https://feishu.cn/docx/doc1.evil','https://feishu.cn/docx/doc1',false],
+ ['forged hostname is not evidence','https://team.feishuxcn/docx/doc1','https://feishu.cn/docx/doc1',false],
+ ['foreign host suffix is not evidence','https://feishu.cn.evil.test/docx/doc1','https://feishu.cn/docx/doc1',false],
+ ['nested query URL is not evidence','https://example.test/?next=https://feishu.cn/docx/doc1','https://feishu.cn/docx/doc1',false],
+ ['nested fragment URL is not evidence','https://example.test/#https://feishu.cn/docx/doc1','https://feishu.cn/docx/doc1',false],
+ ['docx query URL is not separate evidence','https://feishu.cn/docx/doc123?next=https://feishu.cn/docx/doc1','https://feishu.cn/docx/doc1',false],
+ ['docx fragment URL is not separate evidence','https://feishu.cn/docx/doc123#https://feishu.cn/docx/doc1','https://feishu.cn/docx/doc1',false],
+ ['parenthesized query URL is not evidence','https://feishu.cn/docx/doc123?next=(https://feishu.cn/docx/doc1)','https://feishu.cn/docx/doc1',false],
+ ['parenthesized fragment URL is not evidence','https://feishu.cn/docx/doc123#next=(https://feishu.cn/docx/doc1)','https://feishu.cn/docx/doc1',false],
+ ['external parenthesized query URL is not evidence','https://example.test/?next=(https://feishu.cn/docx/doc1)','https://feishu.cn/docx/doc1',false],
+ ['bracketed query URL is not evidence','https://feishu.cn/docx/doc123?next=[https://feishu.cn/docx/doc1]','https://feishu.cn/docx/doc1',false],
+ ['braced query URL is not evidence','https://feishu.cn/docx/doc123?next={https://feishu.cn/docx/doc1}','https://feishu.cn/docx/doc1',false],
+ ['encoded path suffix is not evidence','https://feishu.cn/docx/doc1%2Fextra','https://feishu.cn/docx/doc1',false],
+ ['proposed path suffix is unsupported','https://feishu.cn/docx/doc1','https://feishu.cn/docx/doc1/forged',false],
+ ['proposed punctuation suffix is unsupported','https://feishu.cn/docx/doc1','https://feishu.cn/docx/doc1.evil',false],
+];
+for(const [label,evidence,proposed,allowed] of documentEvidenceCases)test('PR20 R1 exact document evidence: '+label,async t=>{
+ const f=setup(t),c=f.context('把这个文档发到机器人们群：'+evidence),[g]=await directory(f,c);let reads=0;
+ f.gateway.assess=async(_,x)=>({decision:'send',target:x.proposed.target});
+ f.feishu.client.docx={document:{get:async({path:p})=>{reads++;return {data:{document:{document_id:p.document_id}}};}}};
+ const send=f.gateway.execute('owner_group_send',{group:g.reference,text:proposed},c);
+ if(allowed){assert.equal((await send).status,'sent');assert.equal(reads,1);assert.equal(f.sent.length,1);assert.equal(JSON.parse(f.sent[0].data.content).text,proposed);}
+ else{await assert.rejects(send,/对话依据|可验证的文档链接/);assert.equal(reads,0);assert.equal(f.sent.length,0);assert.equal(f.store.db.prepare('SELECT COUNT(*) n FROM owner_group_sends').get().n,0);}
+});
+for(const field of ['request','answer'])for(const authorized of [true,false])test('PR20 R1 recent '+field+' exact document evidence: '+authorized,async t=>{
+ const f=setup(t),link='https://feishu.cn/docx/'+(authorized?'doc1':'doc123');
+ const prior=f.context(field==='request'?'读取 '+link:'整理文档');f.gateway.remember(prior,field==='answer'?'文档：'+link:'已读取');
+ const c=f.context('把刚才的文档发到机器人们群'),[g]=await directory(f,c);let reads=0;
+ f.gateway.assess=async(_,x)=>({decision:'send',target:x.proposed.target});
+ f.feishu.client.docx={document:{get:async({path:p})=>{reads++;return {data:{document:{document_id:p.document_id}}};}}};
+ const send=f.gateway.execute('owner_group_send',{group:g.reference,text:'https://feishu.cn/docx/doc1?from=share#title'},c);
+ if(authorized){assert.equal((await send).status,'sent');assert.equal(reads,1);assert.equal(f.sent.length,1);}
+ else{await assert.rejects(send,/对话依据/);assert.equal(reads,0);assert.equal(f.sent.length,0);}
+});
+test('PR20 R1 one verified document cannot authorize a second link in the same message',async t=>{
+ const f=setup(t),c=f.context('发送 https://feishu.cn/docx/doc123'),[g]=await directory(f,c);const reads=[];
+ f.gateway.assess=async(_,x)=>({decision:'send',target:x.proposed.target});
+ f.feishu.client.docx={document:{get:async({path:p})=>{reads.push(p.document_id);return {data:{document:{document_id:p.document_id}}};}}};
+ await assert.rejects(f.gateway.execute('owner_group_send',{group:g.reference,text:'https://feishu.cn/docx/doc123 https://feishu.cn/docx/doc1'},c),/对话依据/);
+ assert.deepEqual(reads,['doc123']);assert.equal(f.sent.length,0);
+});
