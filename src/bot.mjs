@@ -390,7 +390,7 @@ export class Bot {
     }
     await reply('未识别的命令。发送 /help 查看支持的操作。');
   }
-  setOwnerGroups(gateway) { this.ownerGroups=gateway; this.toolVersion+=':owner-groups-v1'; }
+  setOwnerGroups(gateway) { this.ownerGroups=gateway; this.toolVersion+=':owner-groups-v2-semantic'; }
   dynamicTools() {return [...TOOLS,...(this.config.repositoryApproval?REPOSITORY_TOOLS:[]),...(this.ownerGroups?OWNER_GROUP_TOOLS:[])];}
   threadOptions() {
     return { cwd: this.config.codex.cwd, ...(this.config.ownerAccess?.inheritRuntimeDefaults ? {} : {sandbox: this.config.codex.sandbox, approvalPolicy:this.config.codex.approvalPolicy}), approvalsReviewer: 'user',
@@ -674,6 +674,7 @@ ${this.ownerGroups?OWNER_GROUP_INSTRUCTIONS:''}` };
       const file = path.join(dir, `answer-${randomUUID()}.md`); fs.writeFileSync(file, text, { mode: 0o600 });
       try { await this.feishu.upload(r.chat, file,guard); } catch { await this.feishu.text(r.chat, text,undefined,guard); }
     }
+    if (state==='completed')this.ownerGroups?.remember(r.groupContext,text);
     if (this.runs.get(r.thread) === r) this.store.saveRun(r);
   }
   async sendFile(chat, filename, guard=this.ownerEffectGuard(chat)) {
@@ -748,7 +749,7 @@ ${this.ownerGroups?OWNER_GROUP_INSTRUCTIONS:''}` };
           if (p.tool.startsWith('owner_group')) {
             if(!this.ownerGroups||p.turnId!==run.turn)throw Error('群资料或操作不可用');
             try { result=await this.ownerGroups.execute(p.tool,a,run.groupContext); }
-            catch { throw Error('群资料或操作不可用；请检查当前授权、参数，或明确选择唯一目标和发送要求。'); }
+            catch(e) { throw Error(p.tool==='owner_group_send'?safeError(e):'群资料或操作不可用；请检查当前授权、参数，或明确选择唯一目标和发送要求。'); }
           }
           else if (p.tool === 'feishu_threads_search') result = await this.history.search(a.query, a.cursor);
           else if (p.tool === 'feishu_thread_read') result = await this.history.read(a.threadId, a.cursor);
