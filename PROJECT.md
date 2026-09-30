@@ -1,4 +1,13 @@
-# 当前返工：PR #24 R1 绑定宿主解析结果（2026-09-30）
+# 当前返工：PR #24 R2 空目标默认拒绝（2026-09-30）
+
+- Task Source：[428e505 的 NEEDS CHANGES](https://github.com/dccaoxy/codex-feishu-bot/pull/24#issuecomment-5908009519)。同一 `codex/issue-23-send-context` 分支，先退回 Draft；不部署、不重启、不 Merge。
+- 根因与复现：R1 只在 `targets.size > 0` 时约束 proposed，空集合仍能由主模型和核对器共同补出一个授权群。新增两项在修复前均复现错误发送；上轮706项通过不覆盖此缺口。
+- Implementation：同一宿主绑定检查现在先要求非空目标集合，再要求 proposed 属于集合；空集合在核对器前返回“请明确选择授权群”。文档读取和实际发送队列复用该检查，不新增模型兜底或修改引用解析。唯一群、来源群到目标群、歧义拦截、可信近期选择及来源失效检查保留。
+- 回归：两项使用始终同意发送的核对器，分别覆盖无历史的“发到群里”、已有可信近期选择但当前指定未知“财务群”；要求零核对器调用、零文档读取、零发送领取和零出站。既有语义/文档/等待测试补上明确群名，使它们仍实际到达各自被测试的边界；语义拒绝及错误目标测试增加调用次数断言，未放宽原断言。
+- Validation：最终 `git diff --check`、check、主线 **708/708** 通过；以 PR #19 `b70ab30` 为底应用 main/本分支相对 `c067550` 的运行代码差异，隔离临时组合 check、**723/723** 通过，均0失败/跳过。独立 Gateway 聚焦复核 **36/36**、引用解析专项 **8/8** 通过。真实 Codex `0.159.0` doctor 完成 Shared握手、登录状态与7模型检查，无模型 ephemeral smoke/工具注册通过；开发配置无飞书凭据。
+- Remaining / Delivery：本轮已修改、已测试，随本节提交推送同一 PR 并重新 Ready 请求新 head 独立审核；以GitHub实际head和状态为准。真实候选目录、配置、授权、Shared Runtime、Knowledge、FIFO 和数据未修改；没有真实飞书读取/发送、重启、部署或Merge。语义模型、Group/Knowledge隔离及clientId协议旧证据见下节，本轮不将其冒充重跑结果；无远端CI结果不等于CI通过。
+
+# 历史返工：PR #24 R1 绑定宿主解析结果（2026-09-30）
 
 - Task Source：[2f963f0 的 NEEDS CHANGES](https://github.com/dccaoxy/codex-feishu-bot/pull/24#issuecomment-5907544799)。在原 `codex/issue-23-send-context` 分支返工，PR 已退回 Draft；main 仍为 `57c8180`。本轮不部署、不 Merge，不修改真实配置、权限、数据或服务。
 - 根因与复现：原实现仅将 `resolvedReferences` 交给语义模型，实际目标和链接仍由 proposed 决定；链接校验使用整个近期历史集合。新增第一组9项探针修复前2通过/7失败，复现唯一目标群替换、当前链接/标题被历史其他文档替换，以及缺失依据未在模型前拒绝。原668项测试通过不能证明这两个边界安全。

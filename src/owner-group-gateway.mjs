@@ -120,7 +120,8 @@ export class OwnerGroupGateway {
     const documents=new Set(['selected','summary_sources'].includes(resolved.documentScope)?resolved.documents:[]);
     const proposedDocuments=[...new Set(feishuDocumentIds(a.text))];
     const checkReferences=()=>{
-      if(targets.size&&!targets.has(g.reference))throw Error('拟发送目标与本次解析的目标群不一致，请核对目标群；尚未发送。');
+      if(!targets.size)throw Error('未能确定本次发送的目标群，请明确选择授权群；尚未发送。');
+      if(!targets.has(g.reference))throw Error('拟发送目标与本次解析的目标群不一致，请核对目标群；尚未发送。');
       for(const id of proposedDocuments){
         if(!id)throw Error('当前只能核实飞书docx文档链接，请明确可验证的文档链接；尚未发送。');
         if(!documents.has(id))throw Error('文档链接缺少当前对话依据或不在本次选定文档范围内，尚未发送。');
