@@ -341,3 +341,26 @@ test('failed or merely read catalog document never becomes bot-created',async t=
  assert.equal(s.store.get('createdDoc:external1'),undefined);
  assert.equal(s.bot.createdDocumentConsent(deleteContent('external1')),null);
 });
+
+function userOffice(s){
+ const lease={identity:{kind:'owner-user',binding:'fixture',generation:'1'},check(){},access:async()=> 'fixture-user-token'};
+ s.bot.office.ownerOAuth={enabled:()=>true,lease:async()=>lease};return lease;
+}
+test('user identity cannot borrow tenant bot-created document consent',async t=>{
+ const s=await createdOfficeFixture(t);userOffice(s);
+ const p=await officePending(s,101,deleteContent());assert.equal(s.sent.length,1);assert.equal(s.writes.length,0);
+ await confirmOffice(s,p.token,'owner','decline');await p.promise;assert.equal(s.writes.length,0);
+});
+test('user-created document is not registered as tenant bot-created',async t=>{
+ const s=officeFixture(t);s.config.feishu.appId='app1';userOffice(s);
+ s.bot.office.feishu.client.docx={v1:{document:{create:async()=>({document:{document_id:'userCreated'}})}}};
+ const p=await officePending(s,100,{api:'docx.v1.document.create',payload:{data:{title:'fixture'}}});await confirmOffice(s,p.token);await p.promise;
+ assert.equal(s.store.get('createdDoc:userCreated'),undefined);
+});
+for(const reason of ['recall','revoke'])test(`user credential wait in real Owner group pipeline is fenced on ${reason}`,async t=>{
+ const s=officeFixture(t),lease=userOffice(s);let release,entered;const waiting=new Promise(r=>entered=r);
+ lease.access=async()=>{entered();await new Promise(r=>release=r);return 'fixture';};
+ const p=await officePending(s);await confirmOffice(s,p.token);await waiting;
+ if(reason==='recall')await s.bot.cancelOwnerGroup('group','m1');else s.config.ownerAccess.enabled=false;
+ release();await p.promise;await s.run.finishPromise;assert.equal(s.writes.length,0);
+});

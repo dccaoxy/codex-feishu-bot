@@ -510,11 +510,11 @@ Task Source：Human 要求为本人私聊及已有授权群里的本人账号补
 - `feishu_office_permissions`：分页列出已获批的应用/用户身份权限，不申请权限、不登录用户账号。
 - `feishu_doc_format_text`：局部文字样式，要求读取时版本；色号采用官方定义（文字 1 粉红、2 橙、3 黄、4 绿、5 蓝、6 紫、7 灰），不是任意 RGB。
 
-目录中 212 项支持 tenant 应用身份；7 项仅支持 user，当前会明确拒绝。飞书后台批准 user scope **不等于**机器人已获取用户 OAuth。支持 tenant 也仍需应用 scope、资料协作者权限和相应产品可用性。创建资源后需检查链接、内容和访问权，不承诺自动对所有群成员开放。
+目录中 212 项支持 tenant 应用身份；7 项仅支持 user，未配置本机 Owner OAuth 时会明确拒绝。飞书后台批准 user scope **不等于**机器人已获取用户 OAuth。支持 tenant 也仍需应用 scope、资料协作者权限和相应产品可用性。创建资源后需检查链接、内容和访问权，不承诺自动对所有群成员开放。
 
 普通成员/Knowledge 不注册这些工具。Owner 请求在排队出站与返回前检查原回合、Owner 身份、撤回/撤权状态；已到达飞书的写入无法回滚。除下述机器人自建文档内容编辑外，所有新增办公目录非 GET 接口（包括采用 POST 的查询）、电子表格写入及局部文字样式修改，都先由宿主生成确认卡片，完整展示确切 API 和参数。只有原 Owner 经可信飞书按钮事件或当前 `/approve` 消息确认后才能执行；模型/资料/历史/通用回合守卫不能生成写入许可。已有文档块编辑要求具体 revision；写请求不自动重试，超大结果只返回明确标记的有限预览，需缩小范围重读。
 
-当前未接入用户 OAuth、通用二进制素材上传、企业管理/人员写操作、群控制扩权或任意 API 代理。保留既有文件发送工具。工具目录数量不是权限开通数量，也不是每项接口真实验收数量。
+用户 OAuth 仅提供下文的本机 Owner 可选绑定；不提供通用二进制素材上传、企业管理/人员写操作、群控制扩权或任意 API 代理。保留既有文件发送工具。工具目录数量不是权限开通数量，也不是每项接口真实验收数量。
 
 权限实查（2026-09-28，只读）：知识库列表与日历默认分页读取成功；云盘列表缺 tenant `drive:drive` / `drive:drive:readonly` / `space:document:retrieve` 中任一权限；任务清单缺 tenant `task:tasklist:read` / `task:tasklist:write` 中任一权限。需要应用管理员在飞书开放平台按所需操作启用应用身份权限并使版本生效；已有 user 权限不能替代。写操作及具体目标资料权限仍须上线后验收。
 
@@ -530,7 +530,7 @@ Task Source：Human 要求为本人私聊及已有授权群里的本人账号补
 
 Owner 私聊和 Owner 群的原消息撤回均会使对应确认失效、取消匹配回合并尝试中断；私聊依据持久化原消息核对当前 Owner 和会话身份，撤回无关消息不会取消当前操作。
 
-确认正文显示完整 JSON（转义富文本控制字符）、原消息/回合与摘要，超过可完整展示的预算则拒绝并要求拆小，不用模型摘要代替确切操作。不能完成确认时零写入；发送确认卡片本身不代表批准。已经到达飞书的操作无法回滚。当前确认机制仅覆盖本次新增办公执行器和局部样式工具，既有文档/本机工具仍沿用原授权路径。未接入用户OAuth，也不改变云盘/任务缺少tenant scope的限制。
+确认正文显示完整 JSON（转义富文本控制字符）、原消息/回合与摘要，超过可完整展示的预算则拒绝并要求拆小，不用模型摘要代替确切操作。不能完成确认时零写入；发送确认卡片本身不代表批准。已经到达飞书的操作无法回滚。当前确认机制仅覆盖本次新增办公执行器和局部样式工具，既有文档/本机工具仍沿用原授权路径。可选的 Owner OAuth 不改变云盘/任务缺少 tenant scope 的限制，也不自动扩大用户身份接口白名单。
 
 
 ### 机器人自建文档内容免确认
@@ -540,3 +540,25 @@ Owner 私聊和 Owner 群的原消息撤回均会使对应确认失效、取消�
 有匹配记录的文档，Owner私聊及现有授权Owner群可免卡片执行局部样式、块patch/batchUpdate、children/descendant插入及children.batchDelete内容删除。删除整个云盘文件、分享/协作者变更、其他资源操作仍走原确认。免卡片仍须当前可信Owner消息，保留回合/来源/撤回/撤权/期限/一次消耗/版本检查，出站和最终回传再次核对；记录或应用身份变化也使许可失效。
 
 旧版本创建但未留此记录的文档、外部文档以及无法确认归属的文档保持原流程，不从历史文字自动迁移或推断。该规则只在新版部署后生效，既有文档工具的原权限路径不变。
+
+## 本机一次性 Owner OAuth（默认关闭）
+
+此工具只绑定既有 Owner，不提供 `/feishu-login`、多用户登录或自动扩大权限。授权页与 Token 使用飞书官方 OAuth v3，PKCE S256 + 随机 state；localhost callback 默认 `http://localhost:18923/oauth/feishu/callback`，仅监听本机，10分钟超时。用户须在运行机器的浏览器完成授权，手机只用于登录确认；回调不能在另一设备打开。
+
+先在现有应用安全设置登记该完整重定向URL，确认 `offline_access` 和所需 **user** scopes 已生效、Owner 在应用可用范围内；若存在刷新开关需启用并按后台要求发布。`owner-oauth.policy.example.json` 是最小文档/任务读取方案，只申请6个scope、固定13个支持user的Office接口，不代表全部Office权限。需要其他接口时由本机操作者明确调整名单与scope并重新授权，不由模型或错误自动扩权。
+
+```sh
+node scripts/owner-oauth.mjs authorize --config /绝对路径/config.local.json --policy owner-oauth.policy.example.json
+node scripts/owner-oauth.mjs status --config /绝对路径/config.local.json
+node scripts/owner-oauth.mjs refresh-check --config /绝对路径/config.local.json
+```
+
+授权工具读取现有配置和只读SQLite中的Owner，以官方用户信息接口核对同应用 `open_id`，不按姓名猜测或更换Owner。凭据加密保存到 `storageDir/owner-oauth/credentials.enc`，目录0700/文件0600，AES-256-GCM密钥存macOS钥匙串；沿用Git忽略的data目录，禁止放在模型工作目录、共享盘或提交任何真实凭据。密钥不进入命令参数/环境，回调和Token错误不输出原文。macOS首次访问钥匙串可能要求本人批准；不能仅因Git忽略就视作加密。拥有同一macOS账号完整本机执行能力的Owner仍属于信任边界，不能防御该账号被入侵。
+
+授权保存**不自动修改生产配置或重启服务**。部署经过审核的实现后，在本地配置加入 `ownerOAuth: {"enabled": true, "apis": [...]}`，名单取本次本地授权策略中需要的接口；其余API仍使用tenant，用户身份失败不回退tenant。模型不能传身份/token/任意URL。仅 `feishu_office_call` 支持这一受控路由；既有专用文档/电子表格工具继续使用tenant。配置不包含凭据，默认缺省即关闭。Group/Knowledge不注册或获得这些能力。
+
+运行时在调用前按有效期自动刷新，串行并加跨进程锁；仅轮换凭据，不重放办公写操作。refresh token单次使用，先写入pending标记再交换并原子保存新值；网络结果不确定、进程崩溃、锁残留、scope缩减或撤销则停止用户身份调用并要求本机检查/重新授权，不猜测重试旧token。空闲期间不维持独立刷新服务，超过refresh有效期需再次授权；官方规定授权满365天也需重新授权。`refresh-check`仅在需要时刷新，不强制消耗仍有效的refresh token。
+
+请求许可绑定应用/Owner/状态目录、授权generation、接口名单和原请求。撤回/撤权/换Owner/重新授权后旧请求失效，检查覆盖钥匙串/刷新等待后、SDK队列出站前及结果返回。应用身份已有的bot-created内容免确认行为保持；用户身份不能借用该记录，用户创建的文档也不会登记为tenant bot-created。资源删除、分享、邀请和权限管理仍需明确确认，本轮不扩大Trusted Document范围。
+
+官方说明：[授权码](https://open.feishu.cn/document/authentication-management/access-token/obtain-oauth-code)、[v3 Token](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/authentication-management/access-token/get-user-access-token-v3)、[刷新](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/authentication-management/access-token/refresh-user-access-token-v3)。截至2026-09-30，授权码页还保留v2 PKCE旧提示，但v3参数和示例明确支持PKCE；真实兼容性以本机实际授权结果为准，不自动降级。
