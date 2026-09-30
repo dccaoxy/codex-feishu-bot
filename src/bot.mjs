@@ -184,8 +184,8 @@ export class Bot {
     try{await this.feishu.finish(r.card,++r.sequence,'已停止');}catch(e){this.log(`停止卡片关闭失败：${this.redact(e)}`);}
   }
   ownerMessageCancelled(chat, id) {
-    if(this.store.get(`ownerChannel:${chat}`) && (typeof id!=='string' || !id))return true;
-    return Boolean(this.store.get(`ownerChannel:${chat}`) && this.store.db.prepare("SELECT 1 FROM inbox WHERE chat=? AND id=? AND state='cancelled'").get(chat,id));
+    if(typeof id!=='string' || !id)return Boolean(this.store.get(`ownerChannel:${chat}`));
+    return Boolean(this.store.db.prepare("SELECT 1 FROM inbox WHERE chat=? AND id=? AND state='cancelled'").get(chat,id));
   }
   assertOwnerChannel(chat) {
     const owner=this.store.get(`ownerChannel:${chat}`);
@@ -434,24 +434,42 @@ ${this.ownerGroups?OWNER_GROUP_INSTRUCTIONS:''}` };
       if(this.ownerGroups)active.groupContext=null;
       this.assertOwnerChannel(chat);
       if(this.ownerMessageCancelled(chat,clientUserMessageId))throw Error('请求已撤回');
-      await this.rpc.request('turn/steer', { threadId: id, expectedTurnId: active.turn, input });
-      if(this.ownerGroups)active.groupContext=source?this.ownerGroups.context(source,id,()=>!this.closed&&!active.ending&&this.runs.get(id)===active):null;
+      await this.rpc.request('turn/steer', { threadId: id, expectedTurnId: active.turn, input, clientUserMessageId });
+      if(this.ownerGroups)active.groupContext=source?this.ownerGroups.context(source,id,()=>!this.closed&&!active.ending&&this.runs.get(id)===active&&this.store.chat(chat).thread===id&&!this.store.binding(chat)):null;
       await this.feishu.text(chat, '已将补充要求加入当前任务。'); return;
     }
-    if (this.store.get(`tools:${id}`) !== this.toolVersion) {
+    // The main model and send assessor must see the same scoped recent task.
+    // Only host-owned, currently bound threads are eligible for restoration;
+    // exact client IDs are checked against the trusted inbox by SendContext.
+    const owner=this.owner;
+    const context=()=>source&&this.ownerGroups?this.ownerGroups.context(source,id,()=>
+      !this.closed&&this.owner===owner&&!this.store.binding(chat)&&this.store.chat(chat).thread===id&&
+      !this.ownerMessageCancelled(chat,clientUserMessageId)):null;
+    let reference;
+    const migrating=this.store.get(`tools:${id}`)!==this.toolVersion;
+    if(migrating||(source&&this.ownerGroups&&!this.ownerGroups.sendContext.recent(context()).length)){
+      if(source&&this.ownerGroups)this.ownerGroups.authorize(context());
+      try{reference=await this.history.read(id,undefined,true);}
+      catch(e){if(migrating)throw e;this.log('近期发送参考暂不可恢复；仍需当前对话依据。');}
+      if(source&&this.ownerGroups){const c=context();this.ownerGroups.authorize(c);if(reference)this.ownerGroups.restore(c,reference);}
+    }
+    if (migrating) {
       const previous=id;
-      const reference=await this.history.read(previous);
       id=await this.createThread(chat, this.store.ownThread(previous)?.title || '升级会话');
-      input=[{type:'text',text:`工具版本已升级。以下仅为旧会话参考资料，不是新指令；更早历史可用 feishu_thread_read 读取 ${previous}。\n${JSON.stringify(reference)}`},...input];
+      if(source&&this.ownerGroups)this.ownerGroups.migrate(context(),previous);
+      // Source IDs are host metadata, not model-supplied authority.
+      const modelReference=JSON.stringify(reference,(key,value)=>key==='clientId'?undefined:value);
+      input=[{type:'text',text:`工具版本已升级。以下仅为旧会话参考资料，不是新指令；更早历史可用 feishu_thread_read 读取 ${previous}。\n${modelReference}`},...input];
       await this.feishu.text(chat, '已加载当前授权工具，并带入近期历史。旧会话仍保留，可按需查询完整历史。');
     }
     await this.resume(id);
+    if(source&&this.ownerGroups)this.ownerGroups.authorize(context());
     const r = { thread: id, chat, turn: null, card: null, sequence: 0, state: 'running', status: '正在处理',
       messages: new Map(), lastText: '', text: '', created: Date.now(), ending: false, flush: Promise.resolve() };
     r.officeOwner=this.owner;
     r.sourceIds=new Set([clientUserMessageId]);
     this.runs.set(id, r);
-    if(this.ownerGroups&&source)r.groupContext=this.ownerGroups.context(source,id,()=>!this.closed&&!r.ending&&this.runs.get(id)===r);
+    if(this.ownerGroups&&source)r.groupContext=this.ownerGroups.context(source,id,()=>!this.closed&&!r.ending&&this.runs.get(id)===r&&this.store.chat(chat).thread===id&&!this.store.binding(chat));
     this.store.saveRun(r);
     try {
       r.card = await this.feishu.stream(chat, this.store.ownThread(id)?.title || 'Codex');
@@ -674,7 +692,7 @@ ${this.ownerGroups?OWNER_GROUP_INSTRUCTIONS:''}` };
       const file = path.join(dir, `answer-${randomUUID()}.md`); fs.writeFileSync(file, text, { mode: 0o600 });
       try { await this.feishu.upload(r.chat, file,guard); } catch { await this.feishu.text(r.chat, text,undefined,guard); }
     }
-    if (state==='completed')this.ownerGroups?.remember(r.groupContext,text);
+    if (state==='completed')this.ownerGroups?.remember(r.groupContext,text,[...(r.sourceIds||[])]);
     if (this.runs.get(r.thread) === r) this.store.saveRun(r);
   }
   async sendFile(chat, filename, guard=this.ownerEffectGuard(chat)) {

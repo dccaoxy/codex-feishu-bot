@@ -34,7 +34,7 @@ function setup(t){
  for(const chat of ['a','b','secret']){groupStore.setSync(chat,{state:'complete',initial_complete:1,last_reconciled_at:'2026-09-24T00:00:00Z'});add(chat,'first-'+chat,'training plan '+chat);}
  function add(chat,id,text,time='2026-09-23T12:00:00Z',sender='speaker'){groupStore.ingest({sender:{sender_type:'user',sender_id:{open_id:sender}},message:{chat_id:chat,message_id:id,message_type:'text',create_time:String(Date.parse(time)),content:JSON.stringify({text})}},false);}
  let seq=0;
- function context(text,opts={}){const d=event(opts.id||'req'+(++seq),text,opts.user||owner,opts.chat||'private',opts.type||'p2p');gateway.accept(d.message.chat_id,d.message.message_id);return gateway.context(d,opts.thread||'private-thread',opts.live||(()=>true));}
+ function context(text,opts={}){const d=event(opts.id||'req'+(++seq),text,opts.user||owner,opts.chat||'private',opts.type||'p2p');store.enqueue(d.message.message_id,d.message.chat_id,d);gateway.accept(d.message.chat_id,d.message.message_id);return gateway.context(d,opts.thread||'private-thread',opts.live||(()=>true));}
  t.after(()=>{store.close();groupStore.close();fs.rmSync(dir,{recursive:true,force:true});});
  return {dir,store,groupStore,config,groups,feishu,gateway,sent,names,context,add,setOwner:x=>owner=x};
 }
@@ -448,4 +448,48 @@ test('PR20 R1 one verified document cannot authorize a second link in the same m
  f.feishu.client.docx={document:{get:async({path:p})=>{reads.push(p.document_id);return {data:{document:{document_id:p.document_id}}};}}};
  await assert.rejects(f.gateway.execute('owner_group_send',{group:g.reference,text:'https://feishu.cn/docx/doc123 https://feishu.cn/docx/doc1'},c),/对话依据/);
  assert.deepEqual(reads,['doc123']);assert.equal(f.sent.length,0);
+});
+
+for(const stage of ['assessment','document-read','send-queue'])for(const invalidation of ['recall','source-change'])test(`historical reference ${invalidation} during ${stage} prevents actual dispatch`,async t=>{
+ const f=setup(t),prior=f.context('整理学员群的文档',{id:'source-doc'});
+ f.gateway.remember(prior,'《讨论统计》 https://feishu.cn/docx/doc1');
+ const c=f.context('把这个文档发到学员群'),[,g]=await directory(f,c);
+ let entered,release;const waiting=new Promise(r=>entered=r),gate=new Promise(r=>release=r);
+ const pause=async()=>{entered();await gate;};
+ f.gateway.assess=async(_,input)=>{if(stage==='assessment')await pause();return {decision:'send',target:input.proposed.target};};
+ f.feishu.client.docx={document:{get:async()=>{if(stage==='document-read')await pause();return {data:{document:{document_id:'doc1'}}};}}};
+ if(stage==='send-queue'){
+  const call=f.feishu.call.bind(f.feishu);let calls=0;
+  f.feishu.call=async(...args)=>{if(++calls===2)await pause();return call(...args);};
+ }
+ const pending=f.gateway.execute('owner_group_send',{group:g.reference,text:'https://feishu.cn/docx/doc1'},c);
+ const rejected=stage==='send-queue'?pending.then(r=>assert.equal(r.status,'cancelled')):assert.rejects(pending,/参考消息已撤回或失效/);await waiting;
+ if(invalidation==='recall')f.store.mark(prior.id,'cancelled');
+ else {const changed=event(prior.id,'另一个请求');f.store.db.prepare('UPDATE inbox SET payload=? WHERE id=?').run(JSON.stringify(changed),prior.id);}
+ release();await rejected;assert.equal(f.sent.length,0);
+});
+
+test('recall of an earlier steered input invalidates its completed reference answer',async t=>{
+ const f=setup(t),first=f.context('整理文档',{id:'original'}),last=f.context('补充统计说明',{id:'steered'});
+ f.gateway.remember(last,'https://feishu.cn/docx/doc1',[first.id,last.id]);
+ f.store.mark(first.id,'cancelled');
+ const c=f.context('把这个文档发到学员群'),[,g]=await directory(f,c);
+ let seen;f.gateway.assess=async(_,input)=>{seen=input;return {decision:'send',target:input.proposed.target};};
+ await assert.rejects(f.gateway.execute('owner_group_send',{group:g.reference,text:'https://feishu.cn/docx/doc1'},c),/缺少当前对话依据/);
+ assert.deepEqual(seen.recentTurns,[]);assert.equal(f.sent.length,0);
+});
+
+for(const stage of ['before','assessment','send-queue'])test(`recent group selection loses recalled source at ${stage}`,async t=>{
+ const f=setup(t),prior=f.context('看看机器人们群',{id:'selected-source'});await directory(f,prior);
+ if(stage==='before')f.store.mark(prior.id,'cancelled');
+ const c=f.context('把刚才的总结发到这个群里'),[g]=await directory(f,c);
+ let enter,release;const entered=new Promise(r=>enter=r),gate=new Promise(r=>release=r);
+ f.gateway.assess=async(_,input)=>{
+  if(stage==='assessment'){enter();await gate;}
+  return input.recentTarget?{decision:'send',target:input.recentTarget}:{decision:'clarify',target:null};
+ };
+ if(stage==='send-queue'){const call=f.feishu.call.bind(f.feishu);f.feishu.call=async(...args)=>{enter();await gate;return call(...args);};}
+ const work=f.gateway.execute('owner_group_send',{group:g.reference,text:'summary'},c),rejected=stage==='send-queue'?work.then(r=>assert.equal(r.status,'cancelled')):assert.rejects(work);
+ if(stage!=='before'){await entered;f.store.mark(prior.id,'cancelled');release();}
+ await rejected;assert.equal(f.sent.length,0);
 });
