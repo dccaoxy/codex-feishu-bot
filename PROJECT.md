@@ -1,8 +1,8 @@
 # 当前修正：Owner OAuth 实际交换兼容性（2026-09-30）
 
-- PR #28 已退回 Draft。Human 点击授权后，脱敏诊断确认 callback 到达、token exchange 返回 HTTP400/API20049（PKCE失败），未取得或保存凭据；先前753项模拟测试不能替代真实接口兼容验证。
+- PR #28 修正时退回 Draft。此前 Human 点击授权后，脱敏诊断确认 callback 到达、token exchange 返回 HTTP400/API20049（PKCE失败），未取得或保存凭据；先前753项模拟测试不能替代真实接口兼容验证。
 - 按官方授权页 PKCE 提示，交换/刷新明确采用 v2 固定端点及 JSON 格式，保留 S256、state、Owner核验及全部权限边界；不重用失败 code、不静默回退、不取消PKCE。补强真实序列化格式和 challenge/verifier 对应断言。
-- 本轮 check、授权专项26/26、完整组合753/753通过，diff检查通过。重新授权仍待Human完成，真实v2交换/刷新尚未确认。PR暂留Draft直到本次在线问题定位完成；未启用生产身份路由、未部署/重启/Merge。
+- 本轮 check、授权专项26/26、完整组合753/753通过，diff检查通过。Human 重新授权后，真实 v2 code交换、user_info精确Owner核验、加密保存及后续状态读取通过：bound=true，access/refresh未过期，refreshPending=false，6 scopes/13 APIs。refresh-check复用有效access成功，未触发真实refresh rotation；不将此冒充刷新端到端验证。随记录推送重新Ready请求独立审核；未启用生产身份路由、未部署/重启/Merge。
 
 # 当前开发：本机一次性 Owner OAuth（2026-09-30）
 
@@ -12,8 +12,8 @@
 - Runtime：默认关闭；仅固定 Office API 白名单采用 SDK request-scoped user token，其余保留 tenant。按需提前刷新、刷新串行/跨进程锁、rotation 原子保存；刷新结果不确定则停止复用旧 refresh token，要求重新授权。Owner、应用、策略、grant generation、撤回/撤权在等待后和实际出站前复核。用户身份写入仍走宿主审批，不借用 tenant 的机器人自建文档免确认记录。Group/Knowledge、FIFO、Shared Runtime 不扩权。
 - 初始策略：文档读写与任务读取，13个明确支持 user 的 Office API、6个 scope（包含 offline_access）；不声称全部 Office API 已启用。既有专用文档/表格工具仍采用 tenant 身份。
 - Validation：check、全量组合 **753/753**（main + PR #19 + OAuth）、聚焦 OAuth/Owner **302/302** 通过。真实 Codex `0.159.0` doctor 完成共享握手、登录及7模型检查；无模型 ephemeral smoke通过。Group22项/Knowledge15项隔离探针通过（本地模拟 provider，无真实群发送）。
-- 本地授权准备：开放平台 callback 已保存；真实钥匙串密钥创建/读取成功，临时 callback 已启动，飞书已展示预期5项办公权限及持续访问授权页面。当前等待 Human 点击授权，不能视为已经取得用户凭据或真实 OAuth/Office 验收通过。
-- Delivery / Remaining：实现等待独立审核；准备 Draft → Ready，不 Merge、不部署、不重启。生产 config、群名单、业务数据和现有服务未修改，仅创建获准的本地 OAuth 安全状态目录及钥匙串密钥。真实授权绑定、实际 refresh rotation、用户身份 Office 端到端尚待验证；按需刷新无法保证长期闲置超过 refresh 有效期后仍无需重新授权。独立复审后才安排已审核版本启用。
+- 本地授权准备：开放平台 callback 已保存；真实钥匙串密钥创建/读取成功，临时 callback 已启动，飞书已展示预期5项办公权限及持续访问授权页面。现已取得并安全保存Owner凭据；OAuth授权成功不等于Office端到端验收通过。
+- Delivery / Remaining：实现等待独立审核；准备 Draft → Ready，不 Merge、不部署、不重启。生产 config、群名单、业务数据和现有服务未修改，仅创建获准的本地 OAuth 安全状态目录及钥匙串密钥。真实授权绑定已通过；实际 refresh rotation、用户身份 Office 端到端尚待验证；按需刷新无法保证长期闲置超过 refresh 有效期后仍无需重新授权。独立复审后才安排已审核版本启用。
 
 # 当前返工：PR #24 R2 空目标默认拒绝（2026-09-30）
 
