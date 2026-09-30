@@ -19,8 +19,12 @@ const normalize=value=>text(value).normalize('NFKC').replace(/\s+/gu,'').toLower
 const documentTitles=value=>[...value.matchAll(/《([^》\n]{1,200})》/gu)].map(m=>m[1].trim());
 const documentPointer=/(?:这个|那个|这份|那份|这篇|那篇|刚才的?|刚刚的?|上述|上面的?|前面的?)\s*(?:文档|链接|表格|报告)/u;
 const groupPointer=/(?:这个|那个|刚才的?|刚刚的?|上述|上面的?|前面的?)群/u;
+// Describe which document references are being selected; these markers do not
+// establish an instruction to send, nor bypass independent semantic assessment.
+const summaryReference=/(?:刚才|刚刚|之前|前面|上面|上一轮|近期)(?:整理|生成|写好)?(?:的|那份|那段)?(?:总结|摘要|要点|概括|汇总|小结)/u;
+const pluralDocuments=/(?:(?:这些|那些|所有|全部|多个)\s*(?:文档|链接|表格|报告)|(?:这|那)?(?:几|[两二三四五六七八九十百\d]+)(?:个|份|篇)\s*(?:文档|链接|表格|报告))/u;
 
-function groupReferenceText(value){
+function maskResourceReferences(value){
   const raw=text(value),characters=raw.split('');
   // Document labels and URL contents are not mentions of a destination group.
   // Mask before whitespace normalization, with a non-word separator so the
@@ -29,7 +33,17 @@ function groupReferenceText(value){
     ...raw.matchAll(/\[[^\]\n]{1,200}\]\(https?:\/\/[^\s]+?\)/giu),
     ...raw.matchAll(/https?:\/\/[^\s<>"'`“”‘’「」『』【】]+/giu)];
   for(const span of spans)for(let i=span.index;i<span.index+span[0].length;i++)characters[i]='\uFFFC';
-  return normalize(characters.join(''));
+  return characters.join('');
+}
+// A delimited message body is not another destination. Keep separately named
+// source/destination groups in the request itself for semantic assessment.
+const groupReferenceText=value=>normalize(maskResourceReferences(value).split(/[：:\n\r]/u,1)[0]);
+function scopeReferenceText(value){
+  // Quoted words and a colon/newline-delimited body are payload, not a request
+  // to select past documents. Conservative uncertainty stays context-only.
+  const valueWithoutQuotes=maskResourceReferences(value).replace(/“[^”]*(?:”|$)|‘[^’]*(?:’|$)|「[^」]*(?:」|$)|『[^』]*(?:』|$)|"[^"]*(?:"|$)|'[^']*(?:'|$)|`[^`]*(?:`|$)/gu,'\uFFFC');
+  if(/^\s*>/u.test(valueWithoutQuotes))return '';
+  return valueWithoutQuotes.split(/[：:\n\r]/u,1)[0];
 }
 
 function groupMentions(value,groups){
@@ -98,21 +112,24 @@ export function resolveSendReferences(input){
     if(!mentions.length&&directory.some(g=>g.reference===input.recentTarget))mentions=[{reference:input.recentTarget,source:'recent_target',kind:'selection'}];
   }
   const groups=unique(mentions.map(g=>g.reference));
-  const current=documentEvidence(request,'current_request');
+  const currentReferences=feishuDocumentIds(request),current=documentEvidence(request,'current_request');
   const older=recent.flatMap((turn,i)=>[...documentEvidence(text(turn?.request),`recent_turn_${i}_user`),...documentEvidence(text(turn?.answer),`recent_turn_${i}_assistant`)]);
   const labels=documentTitles(request),all=[...current,...older];
   let docs;
-  if(current.length)docs=current;
+  if(currentReferences.length)docs=current;
   else if(labels.length)docs=all.filter(d=>d.titles.some(t=>labels.includes(t)));
   else docs=all;
   const documents=unique(docs.map(d=>d.documentId)),ambiguities=[];
+  const referenceRequest=scopeReferenceText(request);
+  const documentScope=currentReferences.length||labels.length||documentPointer.test(referenceRequest)?'selected':
+    summaryReference.test(referenceRequest)||pluralDocuments.test(referenceRequest)?'summary_sources':'context';
   // Several separately named groups may describe source and destination. Only
   // one mention mapping to different directory entries is intrinsically ambiguous.
   const sharedMention=mentions.some(a=>mentions.some(b=>a.reference!==b.reference&&a.source===b.source&&a.start===b.start&&a.end===b.end));
   if(sharedMention||(usedPrevious&&groupPointer.test(groupRequest)&&groups.length>1))ambiguities.push('group');
   // Multiple source links in a summary are not a singular document reference.
-  if(documents.length>1&&(documentPointer.test(request)||labels.length===1))ambiguities.push('document');
-  return {referenceOnly:true,groups,documents,ambiguities,sources:{
+  if(documents.length>1&&(documentPointer.test(referenceRequest)||labels.length===1))ambiguities.push('document');
+  return {referenceOnly:true,groups,documents,documentScope,ambiguities,sources:{
     groups:mentions.map(({reference,source,kind,start,end})=>({reference,source,kind,...(start!==undefined?{normalizedSpan:[start,end]}:{})})),
     documents:docs.map(({documentId,source})=>({documentId,source})),
   }};

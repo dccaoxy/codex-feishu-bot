@@ -51,6 +51,18 @@ test('masked resource spans cannot join separate characters into a group alias',
  assert.deepEqual(r.groups,[]);
 });
 
+test('a group name inside a delimited message body cannot replace the unique destination',()=>{
+ for(const separator of ['：',':','\n']){
+  const r=resolve('把下面原文发到 FY26 AEG新羽计划'+separator+'机器人们群');
+  assert.deepEqual(r.groups,['g_xinyu']);assert.deepEqual(r.ambiguities,[]);
+ }
+});
+
+test('quoted document-pointer text is neither selection nor a multi-document ambiguity',()=>{
+ const r=resolve('把“刚才的文档”这几个字发到新羽群',{recentTurns:[prior,{request:'另一份',answer:link('doc2')}]});
+ assert.equal(r.documentScope,'context');assert.deepEqual(r.ambiguities,[]);
+});
+
 test('explicit current link takes precedence over historical links without merging document identities',()=>{
  const r=resolve('把这个文档 '+link('doc2')+' 发到机器人们群');
  assert.deepEqual(r.documents,['doc2']);assert.deepEqual(r.groups,['g_people']);assert.deepEqual(r.ambiguities,[]);
@@ -122,6 +134,51 @@ test('query and fragment duplicates are one document; uppercase document IDs sta
  assert.deepEqual(resolve('把这个文档发到新羽群',{recentTurns}).documents,['doc1']);
  recentTurns[0].answer+=' '+link('Doc1');
  assert.deepEqual(resolve('把这个文档发到新羽群',{recentTurns}).ambiguities,['document']);
+});
+
+test('document scope distinguishes deterministic selection from available context',()=>{
+ const recentTurns=[prior,{request:'整理另一篇',answer:'《另一篇》 '+link('doc2')}];
+ for(const request of ['发送 '+link('doc1')+' 到新羽群','发送《新羽群讨论统计》到新羽群']){
+  const r=resolve(request,{recentTurns});assert.equal(r.documentScope,'selected');assert.deepEqual(r.documents,['doc1']);
+ }
+ const singular=resolve('把这个文档发到新羽群');
+ assert.equal(singular.documentScope,'selected');assert.deepEqual(singular.documents,['doc1']);
+ const context=resolve('帮我处理一下',{recentTurns});
+ assert.equal(context.documentScope,'context');assert.deepEqual(context.documents,['doc1','doc2']);
+});
+
+test('an invalid current docx reference does not fall back to an unrelated historical document',()=>{
+ const r=resolve('发送 '+link('doc2')+'/forged 到新羽群');
+ assert.equal(r.documentScope,'selected');assert.deepEqual(r.documents,[]);
+});
+
+for(const request of ['把刚才的总结发送到新羽群，保留来源链接','把刚才的摘要发到新羽群','麻烦把刚才整理的要点分享给新羽同学','把这些文档发到新羽群','把这两份报告发到新羽群','把全部文档链接发到新羽群'])test('explicit summary or plural reference retains several source IDs: '+request,()=>{
+ const recentTurns=[prior,{request:'整理另一篇',answer:'《另一篇》 '+link('doc2')}];
+ const r=resolve(request,{recentTurns});
+ assert.equal(r.documentScope,'summary_sources');assert.deepEqual(r.documents,['doc1','doc2']);assert.deepEqual(r.ambiguities,[]);
+});
+
+for(const request of ['把下面这句话原样发到学员群：总结完成','把“刚才的总结”这几个字发到学员群','把这些字发到新羽群：“这些文档”','把下面原文发到新羽群：把这些文档放好','把下面原文发到新羽群\n刚才的总结','把 `刚才的总结` 这几个字发到新羽群','把「这些文档」这几个字发到新羽群','> 把刚才的总结发到新羽群','把摘要发到新羽群'])test('payload wording or a bare summary noun cannot select all historical document links: '+request,()=>{
+ const recentTurns=[prior,{request:'整理另一篇',answer:'《另一篇》 '+link('doc2')}];
+ const r=resolve(request,{recentTurns});
+ assert.equal(r.documentScope,'context');assert.deepEqual(r.documents,['doc1','doc2']);
+});
+
+test('URL and document-title summary words do not expand historical-link scope',()=>{
+ assert.equal(resolve('把 https://example.test/?q=刚才的总结 发到新羽群').documentScope,'context');
+ const selected=resolve('把 '+link('doc2')+'?q=刚才的总结 发到新羽群');
+ assert.equal(selected.documentScope,'selected');assert.deepEqual(selected.documents,['doc2']);
+ const title=resolve('把《刚才的总结》这几个字发到新羽群');
+ assert.notEqual(title.documentScope,'summary_sources');assert.deepEqual(title.documents,[]);
+});
+
+test('a summary marker cannot expand an explicit current document selection to all history',()=>{
+ const recentTurns=[prior,{request:'整理另一篇',answer:'《另一篇》 '+link('doc2')}];
+ for(const request of ['根据 '+link('doc1')+' 总结并发到新羽群','把《新羽群讨论统计》的摘要发到新羽群']){
+  const r=resolve(request,{recentTurns});assert.equal(r.documentScope,'selected');assert.deepEqual(r.documents,['doc1']);
+ }
+ const multi=resolve('总结 '+link('doc1')+' 和 '+link('doc2')+' 并发到新羽群',{recentTurns});
+ assert.equal(multi.documentScope,'selected');assert.deepEqual(multi.documents,['doc1','doc2']);assert.deepEqual(multi.ambiguities,[]);
 });
 
 test('negation or quoted instruction never produces an authorization flag, despite matching reference evidence',()=>{

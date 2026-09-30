@@ -112,20 +112,31 @@ export class OwnerGroupGateway {
     input.resolvedReferences=resolveSendReferences(input);
     if(input.resolvedReferences.ambiguities.length)throw Error('目标或内容有歧义，请澄清'+input.resolvedReferences.ambiguities.map(x=>x==='group'?'目标群':'文档').join('和')+'；尚未发送。');
     if(Buffer.byteLength(JSON.stringify(input))>40000)throw Error('当前核对内容过长，请缩小发送范围；尚未发送。');
+    // Capture host bindings separately from the model input. Neither a proposed
+    // target/body nor the assessor's answer can replace a uniquely resolved
+    // reference. History alone is not a selection of every document it contains.
+    const resolved=input.resolvedReferences;
+    const targets=new Set(resolved.groups);
+    const documents=new Set(['selected','summary_sources'].includes(resolved.documentScope)?resolved.documents:[]);
+    const proposedDocuments=[...new Set(feishuDocumentIds(a.text))];
+    const checkReferences=()=>{
+      if(targets.size&&!targets.has(g.reference))throw Error('拟发送目标与本次解析的目标群不一致，请核对目标群；尚未发送。');
+      for(const id of proposedDocuments){
+        if(!id)throw Error('当前只能核实飞书docx文档链接，请明确可验证的文档链接；尚未发送。');
+        if(!documents.has(id))throw Error('文档链接缺少当前对话依据或不在本次选定文档范围内，尚未发送。');
+      }
+    };
     const controller=new AbortController();
-    const check=()=>{this.authorize(c);if(!this.allowed(g.chat))fail();if(JSON.stringify(this.sendContext.recent(c))!==snapshot||(selected&&!validSelection(selected)))throw Error('近期参考消息已撤回或失效，请重新明确发送内容；尚未发送。');};
+    const check=()=>{this.authorize(c);if(!this.allowed(g.chat))fail();checkReferences();if(JSON.stringify(this.sendContext.recent(c))!==snapshot||(selected&&!validSelection(selected)))throw Error('近期参考消息已撤回或失效，请重新明确发送内容；尚未发送。');};
     const timer=setInterval(()=>{try{check();}catch{controller.abort();}},100);timer.unref?.();
     let result;
-    try{check();result=await this.assess(this.config,input,controller.signal);check();}
+    try{check();result=await this.assess(this.config,structuredClone(input),controller.signal);check();}
     catch{check();throw Error('发送意图核对暂时不可用，尚未发送；不要声称缺少飞书权限。');}
     finally{clearInterval(timer);controller.abort();}
     if(result?.decision!=='send'||result.target!==g.reference)throw Error(result?.decision==='clarify'?'目标或内容有歧义，请询问具体歧义；尚未发送。':'当前请求未授权这一目标和内容，尚未发送。');
-    // A document URL must come from actual current/recent conversation, and
-    // resolve through the fixed read API; classifier output cannot invent it.
-    const evidence=new Set([input.currentOwnerRequest,...input.recentTurns.flatMap(r=>[r.request,r.answer])].flatMap(feishuDocumentIds).filter(Boolean));
-    for(const id of feishuDocumentIds(a.text)){
-      if(!id)throw Error('当前只能核实飞书docx文档链接，请明确可验证的文档链接；尚未发送。');
-      if(!evidence.has(id))throw Error('文档链接缺少当前对话依据，尚未发送。');
+    // Only documents selected by the host may reach the fixed read API. The
+    // same binding and source checks also run inside the read/send queues.
+    for(const id of proposedDocuments){
       const doc=await this.feishu.call(()=>{check();return this.feishu.client.docx.document.get({path:{document_id:id}});},false);
       check();if(doc?.document?.document_id!==id)throw Error('文档链接未能核实，尚未发送。');
     }
