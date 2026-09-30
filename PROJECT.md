@@ -1,4 +1,15 @@
-# 当前返工：PR #24 R2 空目标默认拒绝（2026-09-30）
+# 当前交付：Issue #26 Trusted Document（2026-09-30）
+
+- Task Source：[Issue #26](https://github.com/dccaoxy/codex-feishu-bot/issues/26) 及 Human 当前指令。基于最新 main `c9fda13`（含 PR #24 合并）创建 `codex/issue-26-trusted-documents`；只开发、测试和 Draft→Ready，不部署、不 Merge。PR #19 仍独立开放，本轮统一实现其 bot-created 内容免确认能力，不再次叠加旧实现或更改其 PR 状态。
+- Implementation：复用 `createdDoc:<documentId>` 单一登记事实源，新增版本化来源、精确ID、Owner/app、状态库路径绑定的实例、时间和可撤销 generation。仅受控创建成功的返回 ID 自动登记；Owner 可用 `/trusted-doc trust <ID>` 查看长期授权说明，再显式 `confirm-content-write` 登记；list/revoke 查询和撤销。登记前检查应用 view/edit 权限，接受当前 Owner 原始 inbox 消息，模型/正文/链接不能登记。
+- 内容与资源边界：仅文档追加/文字替换/局部样式，以及逐项列出的 docx 内容块、表格内部操作可以免卡片；整篇删除、移动、分享、协作者/权限管理、跨资源和未列入白名单的 API 仍由 PR #18 一次性确认框架处理。普通成员/Group模型/Knowledge无新增写权限。对只读、否定或无法保守识别的当前表达恢复确认；不是任意自然语言意图的正确性证明。
+- 出站与回读：免确认前检查资源阅读/编辑权限、具体revision和目标块；删除先核对父块children顺序，写后回读精确删除结果；文字/局部样式核对元素，追加核对新块ID及父块关系，复杂表格返回回读状态供视觉核对。撤回、Owner/app变化、撤权、换turn、新输入、显式revoke在出站/返回边界失效；单次许可只能消费一次，失败/unknown不自动重试。写入已到达飞书不能回滚。
+- 兼容与状态：非可信文档的 append/update_text 现在也走确认，append 必填 revisionId；工具版本更新触发现有迁移流程。原 `/group-doc` 显式Owner命令保留本群预授权范围和一次性确认语义，适配一次性permit与追加版本检查，不登记长期信任。服务重启保留新版登记；Owner/app/状态库位置变化或状态清理后失效。旧 PR #19 app/owner-only 记录缺少实例归属，不静默迁移，需要 Owner 显式登记。
+- Validation：最终 `git diff --check`、`npm run check` 通过；新增 **59/59** 专项通过；main 全模块组合 `node --test --test-concurrency=1 test/*.test.mjs` **767/767**，0失败/跳过。第一次组合暴露旧 `/group-doc` 授权适配及工具版本断言两项问题，已修复；随后默认并行运行 **766/767**，既有500ms mock RPC initialize超时，独立 core **27/27** 与最终全量串行均通过，未放宽超时或跳过测试。测试覆盖bot-created与显式登记后的追加/改字/加粗/删块、SQLite重开、回读不一致、未确认资源操作、相似ID、Owner/应用/实例隔离、撤回/撤权/排队、失去访问及未知结果单次写入。
+- 真实协议：Codex `0.159.0` doctor 完成 Shared握手、登录状态和7模型检查；无模型 ephemeral smoke 动态工具注册通过。开发配置没有飞书凭据。显式指定已安装 bundled binary 的 Group 首次/恢复 **22** 次及 Knowledge **15** 次本地模拟provider对抗调用通过，工具白名单与文件/shell/Office隔离保持。没有真实模型业务调用或飞书读写，此证据不代替线上验收。
+- Remaining / Delivery：README已补命令、白名单、撤销、版本/回读与旧记录升级边界；实现提交 `99e4181` 已推送，已创建 [PR #27](https://github.com/dccaoxy/codex-feishu-bot/pull/27) Draft；本交付记录推送后转 Ready 请求独立审核，GitHub 实际head/状态为准。尚未独立Review PASS或进行真实临时文档验收；未来部署须另获 Human 授权。没有部署、服务重启、真实配置/授权/数据修改或Merge；当前线上候选不受影响。已知局限：复杂富文本视觉效果待部署后验收；并行测试曾出现短超时，完整串行通过；无远端CI结果不能写成CI通过。
+
+# 历史返工：PR #24 R2 空目标默认拒绝（2026-09-30）
 
 - Task Source：[428e505 的 NEEDS CHANGES](https://github.com/dccaoxy/codex-feishu-bot/pull/24#issuecomment-5908009519)。同一 `codex/issue-23-send-context` 分支，先退回 Draft；不部署、不重启、不 Merge。
 - 根因与复现：R1 只在 `targets.size > 0` 时约束 proposed，空集合仍能由主模型和核对器共同补出一个授权群。新增两项在修复前均复现错误发送；上轮706项通过不覆盖此缺口。

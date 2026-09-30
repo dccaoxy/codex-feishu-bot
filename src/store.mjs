@@ -6,7 +6,8 @@ import { randomBytes } from 'node:crypto';
 export class Store {
   constructor(dir) {
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-    const filename = path.join(dir, 'state.sqlite');
+    const filename = path.join(fs.realpathSync(dir), 'state.sqlite');
+    this.filename = filename;
     this.db = new DatabaseSync(filename);
     fs.chmodSync(filename, 0o600);
     this.db.exec(`PRAGMA journal_mode=WAL;
