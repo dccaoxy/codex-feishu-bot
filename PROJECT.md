@@ -1,4 +1,15 @@
-# 当前返工：PR #20 文档链接精确证据 R1（2026-09-30）
+# 当前交接：PR #20 已合并，部署回滚；Codex 0.159.0 兼容补丁待审核（2026-09-30）
+
+- Task Source：PR #20 精确 head `3293dce` 独立复审 PASS 后，Human 明确要求“部署，merge”。本节记录此次操作及部署阻塞所需的最小兼容修复，不扩展功能或群权限。
+- Merge：PR #20 已 squash merge，main 为 `760047d98fd636f96296b05724b05275342488f5`，其运行代码与已审核 `3293dce3150746953e41980acefa172f9c2fa20e` 一致。PR #19 仍未合并；部署包以线上 `b70ab30` 加 PR #20 的完整运行代码差异构建，保留自有文档免确认能力，隔离组合 check / 596 项测试通过。
+- 部署失败：机器人停止并完成代码、配置和 SQLite 一致性备份后，组合代码的 check、doctor、smoke 通过；Group 隔离探针发现本机内置 Codex 已从 `0.158.0-alpha.2.1` 更新为 `0.159.0`，精确版本门拒绝执行，部署未宣告成功。没有删除版本检查或继续启动未验证组合。
+- 回滚核对：恢复旧版 `b70ab30` 的全部65个受管文件哈希，移除新发送核对模块；真实配置与 launchd plist 逐字节不变，数据库未恢复或覆盖。机器人 PID 为87771，Shared App Server PID743保持不变；启动日志确认 Codex、飞书连接恢复。15:07回查私人业务表逐行未变；群镜像因接收新消息从1272增至1274，其余变化为 history_sync 与 sqlite_sequence，知识/FIFO业务表未变。备份及本地证据：`data/pr20-3293dce-backup-20260930-145610/{failed-deployment.json,rollback-verified.json}`；不提交配置、数据库或日志。
+- 当前局限：连接恢复不代表所有能力可用。线上仍为旧PR #19，普通群助手和 Knowledge 新任务会被旧版本门拦住；PR #20 的自然语义发送尚未部署。未找到本机可复用的旧隔离二进制。没有恢复/重启 Shared App Server、Desktop 或遥测，也没有发送真实飞书消息。
+- 最小兼容修复：从最新main建立 `codex/codex-0159-isolation`，仅把 Group/Knowledge/发送核对共用的精确版本固定为已重新验证的 `codex-cli 0.159.0`；全部禁工具、空技能目录、独立HOME、无环境、Owner/FIFO/撤回/撤权规则不变。新增3项回归确认旧版、未来版和夹带额外文本的版本在建立HOME、RPC、工具执行或更改群绑定前拒绝。
+- Validation：最终 check、584/584 主线全量测试，保留 PR #19 的隔离组合 check、599/599 测试全部通过，0失败/跳过。真实0.159.0 Group首次/恢复共22次对抗调用、Knowledge15次探针通过（本地模拟provider，无凭据/远端模型）；doctor Shared握手、登录及7模型、无模型ephemeral smoke/工具注册通过（开发配置无飞书凭据）。另以真实模型核对两条合成请求，自然发送判send、只查询不发送判deny，2/2通过；未调用飞书发送或读取真实文档，不作为端到端群发送验收。
+- 下一步：README同步当前验证版本，将此最小补丁 Draft→Ready 请求新head独立审核。PR #20的PASS不覆盖该补丁；补丁尚未部署或合并，线上保持上述回滚状态。审核后再按Human Gate处理兼容版本部署与真实发送验收，不把本次测试通过写成线上恢复。
+
+# 历史返工：PR #20 文档链接精确证据 R1（2026-09-30）
 
 - Task Source：[744863a 的 NEEDS CHANGES](https://github.com/dccaoxy/codex-feishu-bot/pull/20#issuecomment-5905428878)。保持 codex/natural-group-send 原分支，先将 PR 转回 Draft；不部署、不 Merge、不重启服务。
 - 复现：对话只有 doc123 链接、拟发送 doc1、模拟接口允许读取任意文档时，原实现仍会出站，新增探针修复前 0/1。此前 549/564 项通过和“链接杜撰”测试未覆盖 ID 前缀，此处修正其证据局限，不以旧测试通过代表该边界安全。
