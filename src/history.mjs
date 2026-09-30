@@ -33,7 +33,7 @@ export class History {
     return { threads: r.data.map(t => ({ id: t.id, title: t.name || t.preview || '未命名', cwd: t.cwd, status: t.status, ...threadTimes(t) })),
       nextCursor: r.nextCursor, order: 'updated_at_desc', timeNote: 'updatedAt 是 Codex 会话更新时间，不保证等于最后一条聊天消息的时间。', scope: '当前 Codex 可读取的本地会话（不含归档）' };
   }
-  async read(id, cursor) {
+  async read(id, cursor, includeClientIds = false) {
     this.assertRead(id);
     let turns, nextCursor;
     try {
@@ -47,8 +47,8 @@ export class History {
     }
     // Return explicit truncation markers; do not expose hidden reasoning or arbitrary tool stdout.
     const text = turns.map(t => ({ turnId: t.id, status: t.status, messages: (t.items || []).flatMap(i => {
-      if (i.type === 'agentMessage') return [{ role: 'assistant', text: trim(i.text, 5000) }];
-      if (i.type === 'userMessage') return [{ role: 'user', text: trim(i.content.map(c => c.text || `[${c.type}]`).join('\n'),5000) }];
+      if (i.type === 'agentMessage') return [{ role: 'assistant', text: trim(i.text, 5000), ...(includeClientIds?{truncated:(i.text||'').length>5000}:{}) }];
+      if (i.type === 'userMessage') return [{ role: 'user', text: trim(i.content.map(c => c.text || `[${c.type}]`).join('\n'),5000), ...(includeClientIds?{clientId:typeof i.clientId==='string'?i.clientId:null}:{}) }];
       return [];
     }) }));
     return { sourceThreadId: id, order: 'newest_first', turns: text, nextCursor,

@@ -31,8 +31,11 @@ test('recall during slow card creation starts no turn and leaves no timer',async
  const run=bot.runs.get('t');await bot.cancelOwnerGroup('group','m1');release('card');await work;await run.finishPromise;
  assert.equal(calls.includes('turn/start'),false);assert.equal(run.timer,undefined);assert.equal(bot.runs.size,0);assert.deepEqual(closed,['card']);
 });
-test('ordinary private execution does not depend on owner inbox cancellation storage',t=>{
- const {bot}=setup(t);bot.store={get:()=>null};assert.equal(bot.ownerMessageCancelled('private','m'),false);
+test('private recall is checked without requiring an Owner group channel marker',async t=>{
+ const {bot,store}=setup(t);assert.equal(bot.ownerMessageCancelled('private','m'),false);
+ store.enqueue('m','private',{kind:'message',user:'owner',message:{chat_type:'p2p',chat_id:'private',message_id:'m'}});
+ await bot.cancelOwnerGroup('private','m');
+ assert.equal(store.get('ownerChannel:private'),undefined);assert.equal(bot.ownerMessageCancelled('private','m'),true);
 });
 test('existing owner resource and group document commands keep their original route',t=>{
  const {bot,event}=setup(t);
