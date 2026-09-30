@@ -214,7 +214,7 @@ npm run doctor
 npm start
 ```
 
-当前组合开发验证版本：Codex CLI `0.155.0-alpha.16.3`、飞书 SDK `1.74.0`、Node.js `24.21.0`。使用本机协议的连字符枚举值（如 `workspace-write`），不将网页示例中的其他版本写法直接套用。
+当前隔离运行时验证版本：Codex CLI `0.159.0`、飞书 SDK `1.74.0`、Node.js `24.21.0`。历史共享协议验收版本另见 PROJECT.md；隔离探针不代表重跑全部 Desktop 人工验收。使用本机协议的连字符枚举值（如 `workspace-write`），不将网页示例中的其他版本写法直接套用。
 
 ```sh
 npm run check       # 语法检查
@@ -335,7 +335,7 @@ Owner @ 后可使用：
 
 每群使用独立、持久化的 Codex HOME 与 `ephemeral:false`、`environments: []` Group Thread。首次工作 @ 时创建任务并立即保存 ID；后续 @ 和进程重启都 resume 原 ID，恢复失败不偷偷新建替代任务。普通消息只写 GroupMessageStore，不为创建空 Thread 启动无意义模型 Turn。显式关闭 shell、apps、plugins、记忆、浏览器、委派及技能发现，不加载私人配置或历史。仅引用同机 `auth.json` 登录状态，不复制凭据。不能将 read-only 沙箱或提示词当作隔离边界。群模型不连接 Desktop 的共享 App Server。
 
-目前仅允许已验证的 `codex-cli 0.155.0-alpha.16.3`。升级后先重新验证再更新版本门槛。运行 `GROUP_CODEX_BINARY=/实际/codex npm run group:check`：本地假模型捕获真实工具清单，并主动请求技能枚举、伪造技能文件读取、命令和文件读取。该版本残留 `skills.list/read` 接口，但两类技能目录为空，伪造包不可读；问答请求被桥接拒绝。模型可用资料工具只有本群 `group_search/context/changes/message`。探针同时覆盖首次创建和进程重启后的 resume；两次共10个对抗调用。检查不使用凭据、不调用远端模型。
+目前仅允许已验证的 `codex-cli 0.159.0`。升级后先重新验证再更新版本门槛。运行 `GROUP_CODEX_BINARY=/实际/codex npm run group:check`：本地假模型捕获真实工具清单，并主动请求技能枚举、伪造技能文件读取、命令和文件读取。技能目录为空，伪造包不可读；问答请求被桥接拒绝。模型可用资料工具只有本群 `group_search/context/changes/message`。本轮探针覆盖首次创建、进程重启后的 resume 和22次对抗调用；Knowledge 探针覆盖15次。检查不使用凭据、不调用远端模型。
 
 每群最多一个活动请求，全局最多两个；实时有效 @ 先持久化，按本机成功认领顺序 FIFO 调度，同群逐条独立 Turn，全局满额时等待。不会语义合并或使用群 turn/steer，单聊 steer 不变。单次180秒、最多12次动态工具调用；回复截断并说明检索范围。失败后不自动重新调用模型、写文档或重发未知结果。切换群功能不授予任何 Full 权限。
 
@@ -481,7 +481,7 @@ Owner 路径复用私聊的命令、文件、文档、Shared Runtime Work/Attach
 
 能力对齐不等于复制 Desktop 的所有工具：宿主 UI、浏览器、插件连接器等仍取决于目标 Thread 的工具宿主注册。Bot 不代理未知 Desktop 动态工具、不做任意 RPC 透传、不增加外部 Thread 管理权限。仅有 Desktop 客户端实现的工具需要该客户端在线处理，不声称离线可用。飞书平台权限另行生效。尚未新增多维表格写入工具。
 
-普通群助手/Knowledge 使用独立进程与隔离配置；可用 `codex.isolatedBinary` 指定独立二进制，默认使用 `codex.binary`。必须通过版本固定的 `group:check` 和 `knowledge:check` 才能升级隔离运行时。本轮验证版本为 0.158.0-alpha.2.1，禁止为恢复功能直接移除版本检查。
+普通群助手/Knowledge 使用独立进程与隔离配置；可用 `codex.isolatedBinary` 指定独立二进制，默认使用 `codex.binary`。必须通过版本固定的 `group:check` 和 `knowledge:check` 才能升级隔离运行时。本轮验证版本为 0.159.0；仍精确匹配，不接受任意更新版本，禁止为恢复功能直接移除版本检查。Owner 发送语义核对复用同一版本门槛。
 
 Owner 群命令的回复和嵌套飞书调用在实际发送及重试前复核原消息身份、撤回和当前授权；错误通知也受同一限制。`/reference` 保留原群消息 ID，读取期间撤回不启动回合，启动后撤回取消该回合。取消后的卡片只允许关闭 streaming，不补发旧正文。
 
