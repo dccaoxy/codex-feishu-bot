@@ -1,8 +1,14 @@
+# 当前修正：Owner OAuth 实际交换兼容性（2026-09-30）
+
+- PR #28 已退回 Draft。Human 点击授权后，脱敏诊断确认 callback 到达、token exchange 返回 HTTP400/API20049（PKCE失败），未取得或保存凭据；先前753项模拟测试不能替代真实接口兼容验证。
+- 按官方授权页 PKCE 提示，交换/刷新明确采用 v2 固定端点及 JSON 格式，保留 S256、state、Owner核验及全部权限边界；不重用失败 code、不静默回退、不取消PKCE。补强真实序列化格式和 challenge/verifier 对应断言。
+- 本轮 check、授权专项26/26、完整组合753/753通过，diff检查通过。重新授权仍待Human完成，真实v2交换/刷新尚未确认。PR暂留Draft直到本次在线问题定位完成；未启用生产身份路由、未部署/重启/Merge。
+
 # 当前开发：本机一次性 Owner OAuth（2026-09-30）
 
 - Task Source：Human 要求为既有 Owner 绑定飞书用户身份，通过临时 localhost callback 授权、安全保存 access/refresh credentials 并支持自动刷新；不开发完整 `/feishu-login` 产品。用户随后授权继续实施。
 - 基线：独立 `codex/owner-oauth-local`，从最新 main `c9fda13` 开始；保留线上 PR #19 已审核 `b70ab30` 的自建文档内容免确认实现，依赖提交为 `3e36ef5`。PR #27 Trusted Document 开发分支未覆盖，未合并 PR #19 或 PR #27。
-- Implementation：官方 OAuth v3、随机 state、PKCE S256、仅回环地址的10分钟单次 callback；通过 user_info 精确核对既有 Owner。凭据 AES-256-GCM 加密，密钥保存在本机 macOS 钥匙串；状态目录0700、文件0600、原子写入，拒绝符号链接和不安全权限。无 token/secret 输出或提交。
+- Implementation：官方 OAuth v2、随机 state、PKCE S256、仅回环地址的10分钟单次 callback；通过 user_info 精确核对既有 Owner。凭据 AES-256-GCM 加密，密钥保存在本机 macOS 钥匙串；状态目录0700、文件0600、原子写入，拒绝符号链接和不安全权限。无 token/secret 输出或提交。
 - Runtime：默认关闭；仅固定 Office API 白名单采用 SDK request-scoped user token，其余保留 tenant。按需提前刷新、刷新串行/跨进程锁、rotation 原子保存；刷新结果不确定则停止复用旧 refresh token，要求重新授权。Owner、应用、策略、grant generation、撤回/撤权在等待后和实际出站前复核。用户身份写入仍走宿主审批，不借用 tenant 的机器人自建文档免确认记录。Group/Knowledge、FIFO、Shared Runtime 不扩权。
 - 初始策略：文档读写与任务读取，13个明确支持 user 的 Office API、6个 scope（包含 offline_access）；不声称全部 Office API 已启用。既有专用文档/表格工具仍采用 tenant 身份。
 - Validation：check、全量组合 **753/753**（main + PR #19 + OAuth）、聚焦 OAuth/Owner **302/302** 通过。真实 Codex `0.159.0` doctor 完成共享握手、登录及7模型检查；无模型 ephemeral smoke通过。Group22项/Knowledge15项隔离探针通过（本地模拟 provider，无真实群发送）。

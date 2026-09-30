@@ -1,3 +1,4 @@
+import {createHash} from 'node:crypto';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -53,7 +54,7 @@ for(const change of ['owner','app','policy','generation','disabled','api'])test(
 });
 test('parallel callers refresh once, rotate both tokens and bind the resulting user',async t=>{
  const f=await stored(t);let count=0;f.vault.write(f.key,{...f.record(),expiresAt:0});
- const fetcher=async(url,options)=>{if(url===USER_URL)return json({code:0,data:{open_id:f.getOwner()}});assert.equal(url,TOKEN_URL);assert.equal(options.redirect,'error');count++;assert.equal(options.body.get('refresh_token'),'fixture-refresh');return json({code:0,...f.tokens,access_token:'new-access',refresh_token:'new-refresh'});};
+ const fetcher=async(url,options)=>{if(url===USER_URL)return json({code:0,data:{open_id:f.getOwner()}});assert.equal(url,TOKEN_URL);assert.equal(options.redirect,'error');count++;assert.equal(JSON.parse(options.body).refresh_token,'fixture-refresh');return json({code:0,...f.tokens,access_token:'new-access',refresh_token:'new-refresh'});};
  const p=new OwnerOAuth(f.config,f.getOwner,{vault:f.vault,fetcher}),a=await p.lease(api,()=>{}),b=await p.lease(api,()=>{});
  assert.deepEqual(await Promise.all([a.access(),b.access()]),['new-access','new-access']);assert.equal(count,1);assert.equal(f.vault.read(f.key).refreshToken,'new-refresh');
 });
@@ -90,7 +91,7 @@ async function callbackFixture(t,fetcher){
  const request=async(suffix)=>fetch(`http://localhost:${p}${suffix}`,{redirect:'manual'});
  const start=await request(new URL(flow.url).pathname),url=new URL(start.headers.get('location'));
  assert.equal(url.searchParams.get('code_challenge_method'),'S256');assert.equal(url.searchParams.has('client_secret'),false);
- return {...f,flow,request,state:url.searchParams.get('state')};
+ return {...f,flow,request,state:url.searchParams.get('state'),challenge:url.searchParams.get('code_challenge')};
 }
 test('callback rejects invalid/duplicate state with zero exchange',async t=>{
  let calls=0;const f=await callbackFixture(t,async()=>{calls++;throw Error();});
@@ -98,7 +99,7 @@ test('callback rejects invalid/duplicate state with zero exchange',async t=>{
  assert.equal(calls,0);assert.equal(fs.existsSync(f.vault.file),false);
 });
 test('callback validates Owner, stores encrypted grant, strips code and consumes code once',async t=>{
- let calls=0;const f=await callbackFixture(t,async(url,opts)=>{calls++;if(url===USER_URL)return json({code:0,data:{open_id:'fixture-owner'}});assert.ok(opts.body.get('code_verifier'));return json({code:0,access_token:'callback-access',refresh_token:'callback-refresh',scope:scopes.join(' '),expires_in:7200,refresh_token_expires_in:604800});});
+ let calls=0;const f=await callbackFixture(t,async(url,opts)=>{calls++;if(url===USER_URL)return json({code:0,data:{open_id:'fixture-owner'}});assert.equal(url,'https://open.feishu.cn/open-apis/authen/v2/oauth/token');assert.equal(opts.headers['Content-Type'],'application/json; charset=utf-8');const payload=JSON.parse(opts.body);assert.equal(createHash('sha256').update(payload.code_verifier).digest('base64url'),f.challenge);assert.equal(payload.code,'fixture-code');return json({code:0,access_token:'callback-access',refresh_token:'callback-refresh',scope:scopes.join(' '),expires_in:7200,refresh_token_expires_in:604800});});
  const callback=`/oauth/feishu/callback?state=${f.state}&code=fixture-code`,r=await f.request(callback);assert.equal(r.status,303);assert.equal(r.headers.get('location'),'/done');await f.flow.done;
  assert.equal((await f.request(callback)).status,400);assert.equal(calls,2);assert.equal(f.vault.read(f.key).binding,binding(f.config,f.getOwner()));
 });

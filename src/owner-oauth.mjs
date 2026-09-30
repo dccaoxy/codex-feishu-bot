@@ -5,7 +5,7 @@ import {randomBytes,randomUUID,createHash,createCipheriv,createDecipheriv} from 
 import {spawn} from 'node:child_process';
 export const REDIRECT_URI='http://localhost:18923/oauth/feishu/callback';
 export const AUTHORIZE_URL='https://accounts.feishu.cn/open-apis/authen/v1/authorize';
-export const TOKEN_URL='https://accounts.feishu.cn/oauth/v3/token';
+export const TOKEN_URL='https://open.feishu.cn/open-apis/authen/v2/oauth/token';
 export const USER_URL='https://open.feishu.cn/open-apis/authen/v1/user_info';
 const fail=()=>Error('Owner OAuth 不可用；请在本机检查授权状态，勿提交凭据。');
 export const hash=s=>createHash('sha256').update(s).digest('hex');
@@ -80,7 +80,7 @@ export async function oauthJson(url,options={},fetcher=fetch){
  }catch{throw fail();}
 }
 export async function exchange(config,fields,fetcher=fetch){
- return oauthJson(TOKEN_URL,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({...fields,client_id:config.feishu.appId,client_secret:config.feishu.appSecret})},fetcher);
+ return oauthJson(TOKEN_URL,{method:'POST',headers:{'Content-Type':'application/json; charset=utf-8'},body:JSON.stringify({...fields,client_id:config.feishu.appId,client_secret:config.feishu.appSecret})},fetcher);
 }
 export function tokenRecord(data,expectedScopes,now=Date.now()){
  const scopes=typeof data.scope==='string'?data.scope.split(/\s+/).filter(Boolean):[];

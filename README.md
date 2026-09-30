@@ -543,7 +543,7 @@ Owner 私聊和 Owner 群的原消息撤回均会使对应确认失效、取消�
 
 ## 本机一次性 Owner OAuth（默认关闭）
 
-此工具只绑定既有 Owner，不提供 `/feishu-login`、多用户登录或自动扩大权限。授权页与 Token 使用飞书官方 OAuth v3，PKCE S256 + 随机 state；localhost callback 默认 `http://localhost:18923/oauth/feishu/callback`，仅监听本机，10分钟超时。用户须在运行机器的浏览器完成授权，手机只用于登录确认；回调不能在另一设备打开。
+此工具只绑定既有 Owner，不提供 `/feishu-login`、多用户登录或自动扩大权限。授权页搭配飞书官方 OAuth v2 Token 接口，PKCE S256 + 随机 state；localhost callback 默认 `http://localhost:18923/oauth/feishu/callback`，仅监听本机，10分钟超时。用户须在运行机器的浏览器完成授权，手机只用于登录确认；回调不能在另一设备打开。
 
 先在现有应用安全设置登记该完整重定向URL，确认 `offline_access` 和所需 **user** scopes 已生效、Owner 在应用可用范围内；若存在刷新开关需启用并按后台要求发布。`owner-oauth.policy.example.json` 是最小文档/任务读取方案，只申请6个scope、固定13个支持user的Office接口，不代表全部Office权限。需要其他接口时由本机操作者明确调整名单与scope并重新授权，不由模型或错误自动扩权。
 
@@ -561,4 +561,4 @@ node scripts/owner-oauth.mjs refresh-check --config /绝对路径/config.local.j
 
 请求许可绑定应用/Owner/状态目录、授权generation、接口名单和原请求。撤回/撤权/换Owner/重新授权后旧请求失效，检查覆盖钥匙串/刷新等待后、SDK队列出站前及结果返回。应用身份已有的bot-created内容免确认行为保持；用户身份不能借用该记录，用户创建的文档也不会登记为tenant bot-created。资源删除、分享、邀请和权限管理仍需明确确认，本轮不扩大Trusted Document范围。
 
-官方说明：[授权码](https://open.feishu.cn/document/authentication-management/access-token/obtain-oauth-code)、[v3 Token](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/authentication-management/access-token/get-user-access-token-v3)、[刷新](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/authentication-management/access-token/refresh-user-access-token-v3)。截至2026-09-30，授权码页还保留v2 PKCE旧提示，但v3参数和示例明确支持PKCE；真实兼容性以本机实际授权结果为准，不自动降级。
+官方说明：[授权码](https://open.feishu.cn/document/authentication-management/access-token/obtain-oauth-code)、[v2 Token](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/authentication-management/access-token/get-user-access-token)、[刷新](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/authentication-management/access-token/refresh-user-access-token)。2026-09-30真实授权回调到达后，v3交换返回20049（PKCE失败）。遵循授权码页的兼容提示，明确采用v2 JSON交换及配套刷新；保留S256，不重放失败授权码，不自动尝试其他端点。
