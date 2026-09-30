@@ -7,7 +7,7 @@
 - 兼容与状态：非可信文档的 append/update_text 现在也走确认，append 必填 revisionId；工具版本更新触发现有迁移流程。原 `/group-doc` 显式Owner命令保留本群预授权范围和一次性确认语义，适配一次性permit与追加版本检查，不登记长期信任。服务重启保留新版登记；Owner/app/状态库位置变化或状态清理后失效。旧 PR #19 app/owner-only 记录缺少实例归属，不静默迁移，需要 Owner 显式登记。
 - Validation：最终 `git diff --check`、`npm run check` 通过；新增 **59/59** 专项通过；main 全模块组合 `node --test --test-concurrency=1 test/*.test.mjs` **767/767**，0失败/跳过。第一次组合暴露旧 `/group-doc` 授权适配及工具版本断言两项问题，已修复；随后默认并行运行 **766/767**，既有500ms mock RPC initialize超时，独立 core **27/27** 与最终全量串行均通过，未放宽超时或跳过测试。测试覆盖bot-created与显式登记后的追加/改字/加粗/删块、SQLite重开、回读不一致、未确认资源操作、相似ID、Owner/应用/实例隔离、撤回/撤权/排队、失去访问及未知结果单次写入。
 - 真实协议：Codex `0.159.0` doctor 完成 Shared握手、登录状态和7模型检查；无模型 ephemeral smoke 动态工具注册通过。开发配置没有飞书凭据。显式指定已安装 bundled binary 的 Group 首次/恢复 **22** 次及 Knowledge **15** 次本地模拟provider对抗调用通过，工具白名单与文件/shell/Office隔离保持。没有真实模型业务调用或飞书读写，此证据不代替线上验收。
-- Remaining / Delivery：README已补命令、白名单、撤销、版本/回读与旧记录升级边界；代码与本节将提交推送，创建 Draft PR 后转 Ready 请求独立审核，GitHub 实际head/状态为准。尚未独立Review PASS或进行真实临时文档验收；未来部署须另获 Human 授权。没有部署、服务重启、真实配置/授权/数据修改或Merge；当前线上候选不受影响。已知局限：复杂富文本视觉效果待部署后验收；并行测试曾出现短超时，完整串行通过；无远端CI结果不能写成CI通过。
+- Remaining / Delivery：README已补命令、白名单、撤销、版本/回读与旧记录升级边界；实现提交 `99e4181` 已推送，已创建 [PR #27](https://github.com/dccaoxy/codex-feishu-bot/pull/27) Draft；本交付记录推送后转 Ready 请求独立审核，GitHub 实际head/状态为准。尚未独立Review PASS或进行真实临时文档验收；未来部署须另获 Human 授权。没有部署、服务重启、真实配置/授权/数据修改或Merge；当前线上候选不受影响。已知局限：复杂富文本视觉效果待部署后验收；并行测试曾出现短超时，完整串行通过；无远端CI结果不能写成CI通过。
 
 # 历史返工：PR #24 R2 空目标默认拒绝（2026-09-30）
 
