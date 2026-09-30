@@ -1,3 +1,13 @@
+# 当前部署：PR #24 已审核候选（2026-09-30）
+
+- **Task Source / Gate**：Human 明确授权部署 PR #24 精确 head `c4ab54bbf3155cb261378536a22462c4462fbf91`；[独立复审 PASS](https://github.com/dccaoxy/codex-feishu-bot/pull/24#issuecomment-5908292190)。仅候选部署，不 Merge；真实验收限定为下述两项，不修改真实业务文档。PR #24 代码 head 不因本部署记录改变，本记录单独文档分支交付。
+- **Deployment**：北京时间 2026-09-30 17:40 完成。原候选为已部署 PR #21 `8d12a51` 加 PR #19 `b70ab30`；先从这两个审核基线重建原包，67 个受管文件与运行清单完全一致，再生成 `c4ab54b` 加既有 PR #19 的保留组合。新包 72 个文件，相对旧候选的 11 个变动恰好等于 PR #24 的运行代码/测试差异。独立只读复核确认组合相对 `c4ab54b` 的三个文件差异逐行等于 PR #19 内容，不含额外功能。安装后逐项 SHA256 核对通过。
+- **Preservation**：原 `data/issue6-candidate` 位置不变，真实配置及 LaunchAgent plist 逐字节不变；既有两个授权群、Owner、Owner Gateway、Shared Runtime、Group/FIFO、Knowledge、Office 与自有文档免重复确认能力保留。部署前及停止后确认无活动/排队私聊、群请求或运行中 Knowledge 作业。仅机器人重启，PID `91347 → 11564`；Shared App Server PID `743` 未变，Desktop、Shared 和遥测服务未重启或改配置。
+- **Validation**：精确组合在隔离临时包执行 check、**723/723 全量测试**，0 失败/跳过；真实 `codex-cli 0.159.0` 的 Group 首次/恢复 **22** 次、Knowledge **15** 次隔离探针通过（本地模拟 provider、无真实消息出站）。实际安装候选再次执行 check、doctor、smoke 通过；doctor 确认 Shared 握手、已登录及 7 个模型，smoke 完成无模型 ephemeral thread 与工具注册。启动新日志同时确认 Codex 已连接及飞书长连接已建立；复核窗口无新 error、EMFILE，错误日志无新增内容。当前没有远端 CI 结果，不将本地结果称为 CI PASS。
+- **Data / Backup**：切换前保留代码、配置、plist 和两份 SQLite 一致性备份，停服期间验证前后数据库全部表指纹相同。启动后两库 integrity_check 为 ok，私人和群旧业务表逐行不变；仅新增空 `owner_send_context` 表及空 SQLite 自增元数据，群库只变化 `history_sync.last_reconciled_at` 与正常自增序列。未覆盖或恢复数据库，未读取/编辑真实业务文档，未主动发送真实飞书消息。既有 Knowledge 作业 `completed=5 / blocked=2` 为原状态，不因此次部署声称已修复。
+- **Evidence / anomalies**：本地私有证据 `data/pr24-deployment.json`、`data/pr24-c4ab54b-backup-20260930-174020/`（含 stage check/tests/隔离、线上 check/doctor/smoke、部署前后指纹和 post-review）。无新增部署异常，未触发回滚。凭据、配置、日志与数据库不进入 Git。
+- **Remaining / Human acceptance**：后台检查通过，可以开始真实验收；尚未执行下列两项，不把连接正常等同于端到端 PASS。① 在同一私聊前文已唯一确定《新羽群讨论统计》和 `FY26 AEG新羽计划群` 后发“把这个文档发到新羽群里去”，应只向正确群发送一次，不要求机械重述。② 发“把刚才的总结发到财务群”，当前无法唯一可信解析时应零发送并要求澄清。等待 Human 反馈后只核对这两项；不扩大测试、不改业务文档、不 Merge。
+
 # 当前交接：PR #20 已合并，部署回滚；Codex 0.159.0 兼容补丁待审核（2026-09-30）
 
 - Task Source：PR #20 精确 head `3293dce` 独立复审 PASS 后，Human 明确要求“部署，merge”。本节记录此次操作及部署阻塞所需的最小兼容修复，不扩展功能或群权限。
