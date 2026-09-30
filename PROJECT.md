@@ -1,4 +1,15 @@
-# 当前交接：PR #20 已合并，部署回滚；Codex 0.159.0 兼容补丁待审核（2026-09-30）
+# 当前交接：PR #21 已合并并部署，保留 PR #19 组合能力（2026-09-30）
+
+- Task Source：Human 在 [PR #21 精确 head `8d12a51` 独立复审 PASS](https://github.com/dccaoxy/codex-feishu-bot/pull/21#issuecomment-5906187259) 后明确授权“部署和 merge”。仅处理该兼容版本及已审核 PR #20 的组合部署，不扩大配置、授权群、Owner 或 Shared Runtime 权限。
+- Merge：PR #21 已 squash merge，main 为 `57c8180335b1b4b2983740255f3c875b0e2c68f7`，合并后整棵代码树与审核 head `8d12a515bcbde9b4847479230afb81dd9087b36b` 一致。PR #20 已在此前合并为 `760047d`；PR #19 仍 Open、未合并，其线上 `b70ab30` 自有文档免确认能力完整保留。
+- Deployment：以 PR #19 `b70ab30` 加共同基线 `c067550` 到 PR #21 审核 head 的完整运行/测试差异生成组合，67个受管文件部署后逐项SHA256一致，`office.mjs` 与 `owner-access.test.mjs` 保持PR #19原样。持锁复核精确head、干净受管工作区、已合并代码树、候选/配置/空闲状态；备份后只重启机器人。部署前、各检查前后及启动后均复核内置Codex精确 `0.159.0` 和二进制SHA256，未绕过版本门。
+- Validation：精确部署包 check、599/599 全量组合测试通过，0失败/跳过；独立审核的600项包含审核方额外边界探针，未冒充本次仓库自带测试数。实际候选 check、doctor真实Shared握手/登录/7模型、无模型ephemeral smoke及工具注册通过；真实0.159.0 Group首次/恢复22次、Knowledge15次隔离攻击探针通过（本地模拟provider，无凭据/远端模型）。本次部署未调用真实语义模型或飞书发送；此前2条合成意图核对只作历史证据。
+- 服务/配置：机器人PID87771→91347，Shared App Server PID743不变；Desktop、Shared和采样/遥测服务未重启。真实config与launchd plist逐字节不变，原2个授权群、Owner Gateway数据源/私人查询、FIFO、Knowledge与PR #5能力保留。新启动stdout189字节确认Codex和飞书长连接建立，stderr0，无error/EMFILE；部署后独立只读复核再次确认文件、版本、服务及配置一致。
+- 数据：停止期间全部业务表逐行指纹一致，未恢复或覆盖数据库；启动后即时核对仅SQLite自增序列正常变化。两库integrity_check均ok；后续独立核对仍为runs completed6/detached1、inbox done136/failed5、群请求cancelled2/done8、Knowledge blocked2/completed5，与部署前一致，无新增失败。既有2个blocked任务未手动重试，不声称历史补算已经完成。
+- 证据：本机 `data/pr21-deployment.json`；备份 `data/pr21-8d12a51-backup-20260930-153518/` 包含旧代码/配置、两份一致性SQLite快照、部署前后检查日志及参数化脚本。敏感配置、数据库和日志不提交Git。
+- Human Gate / Remaining：已审核的新运行版本和自然语义发送代码已上线，原版本不匹配阻塞解除。可以在飞书私聊提供真实文档链接和明确目标群做一次自然语言发送验收，核对仅发送一次、目标/链接正确；本次未代发消息，不把连接和隔离检查等同真实飞书端到端验收。远端仍无CI结果，不声称CI PASS；后续内置Codex若再次改变，仍须重新验证精确版本。部署记录通过独立文档PR回写，不改变已部署运行代码。
+
+# 历史交接：PR #20 已合并，部署回滚；Codex 0.159.0 兼容补丁待审核（2026-09-30）
 
 - Task Source：PR #20 精确 head `3293dce` 独立复审 PASS 后，Human 明确要求“部署，merge”。本节记录此次操作及部署阻塞所需的最小兼容修复，不扩展功能或群权限。
 - Merge：PR #20 已 squash merge，main 为 `760047d98fd636f96296b05724b05275342488f5`，其运行代码与已审核 `3293dce3150746953e41980acefa172f9c2fa20e` 一致。PR #19 仍未合并；部署包以线上 `b70ab30` 加 PR #20 的完整运行代码差异构建，保留自有文档免确认能力，隔离组合 check / 596 项测试通过。
