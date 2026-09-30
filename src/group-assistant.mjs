@@ -160,7 +160,12 @@ export class GroupAssistant {
     const [,op,id,block,revision,content]=match;
     const name=op==='append'?'feishu_doc_append':'feishu_doc_update_text';
     if(this.policy.actorRole(sender)!=='owner'||(!this.policy.mayUseTool(name,sender,chat,documentId(id))&&!this.store.hasDocument(chat,id)))return '此群文档未获授权或你不是Owner，未执行。';
-    const result=await docs.execute(name,op==='append'?{documentId:id,content,format:'markdown'}:{documentId:id,blockId:block,revisionId:Number(revision),text:content});
+    // This existing deterministic Owner command is its own one-shot confirmation;
+    // it never registers a Trusted Document or grants model/ordinary-member writes.
+    const commandGuard=()=>{check();if(this.policy.actorRole(sender)!=='owner'||(!this.policy.mayUseTool(name,sender,chat,id)&&!this.store.hasDocument(chat,id)))throw Error('群文档授权已撤销');};
+    let used=false;const permit={check:commandGuard,consume:()=>{commandGuard();if(used)throw Error('群文档命令已执行');used=true;}};
+    const revisionId=op==='append'?(await docs.api(()=>this.feishu.client.docx.document.get({path:{document_id:id}}),false,commandGuard)).document.revision_id:Number(revision);
+    const result=await docs.execute(name,op==='append'?{documentId:id,content,format:'markdown',revisionId}:{documentId:id,blockId:block,revisionId,text:content},commandGuard,permit);
     return `群文档已更新：https://feishu.cn/docx/${result.documentId}`;
   }
   onRecall(data) {const d=data.event||data;if(this.policy.allowedGroup(d.chat_id)&&d.message_id){this.store.recall(d.chat_id,d.message_id);this.drain();}}

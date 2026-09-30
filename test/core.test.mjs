@@ -396,7 +396,7 @@ test('legacy conversations migrate once with history reference and all new tools
   assert.match(turn.params.input[0].text,/legacy/);
   assert.match(turn.params.input[0].text,/旧结论/);
   assert.ok(store.ownThread('legacy'));
-  assert.equal(store.get(`tools:${store.chat('chat').thread}`),'office-v1:docs-v1');
+  assert.equal(store.get(`tools:${store.chat('chat').thread}`),'office-trusted-v2:docs-v1');
 });
 
 test('extended MCP forms validate named enums, arrays, nested data and format before submit', async t=>{
