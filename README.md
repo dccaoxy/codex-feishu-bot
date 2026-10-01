@@ -562,3 +562,58 @@ node scripts/owner-oauth.mjs refresh-check --config /绝对路径/config.local.j
 请求许可绑定应用/Owner/状态目录、授权generation、接口名单和原请求。撤回/撤权/换Owner/重新授权后旧请求失效，检查覆盖钥匙串/刷新等待后、SDK队列出站前及结果返回。应用身份已有的bot-created内容免确认行为保持；用户身份不能借用该记录，用户创建的文档也不会登记为tenant bot-created。资源删除、分享、邀请和权限管理仍需明确确认，本轮不扩大Trusted Document范围。
 
 官方说明：[授权码](https://open.feishu.cn/document/authentication-management/access-token/obtain-oauth-code)、[v2 Token](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/authentication-management/access-token/get-user-access-token)、[刷新](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/authentication-management/access-token/refresh-user-access-token)。2026-09-30真实授权回调到达后，v3交换返回20049（PKCE失败）。遵循授权码页的兼容提示，明确采用v2 JSON交换及配套刷新；保留S256，不重放失败授权码，不自动尝试其他端点。
+
+
+## Owner Office 统一只读身份（Issue #29）
+
+此功能只用于已绑定 Owner 的私聊及既有授权 Owner 群执行通道，不向普通成员、Group Assistant 或 Knowledge Worker提供凭据或新增工具权限。未启用 `ownerOAuth` 时，既有 tenant 路由保持；启用后，五类资源读取统一要求固定只读白名单、本地 `ownerOAuth.apis`、加密 grant 的 `allowedApis` 和实际用户 scope 同时满足。缺任何一项直接拒绝，**不回退 tenant**。其他既有 Office 身份策略、写入审批、Trusted Document 内容编辑与群发送规则不扩大。
+
+- `feishu_doc_read`、`feishu_office_sheet_read` 和 `feishu_office_call` 的已列明读取 API 共用身份、scope和撤回守卫。`feishu_doc_read` 的 Owner 结果在 `data.document / data.blocks`，带 `identity=owner-user`、`hasMore / nextCursor`。
+- `feishu_office_read_resources` 只接受本次明确的最多5个飞书链接。Wiki 先用节点 API 返回的 `obj_type / obj_token` 决定后续读取，节点可读不等于正文可读。Docx返回一页块；Sheets、Bitable、Drive只返回元数据，`metadataOnly=true`，后续内容通过固定 API 指定范围/表/页读取。不下载附件、不做后台全量同步或知识索引。
+- `feishu_office_drive_search` 通过固定只读 POST 搜索用户可见云文档；关键词明确、每页1–50项、offset+count<200。它不是任意 URL 请求或遍历整个 Drive。
+- 分页默认20、最多50项，单次只读一页；Drive清单必须指定文件夹（官方根目录清单忽略page_size，所以本工具拒绝无文件夹请求）。Sheets values只接受明确起止单元格、最多5000格。Drive metadata一次最多20个token。`rawContent` 官方接口不分页，长结果仅预览，优先使用块分页读取。
+- 输出有字节预算；`truncated` 代表当前页不完整，应缩小范围重读当前页，不能拿 nextCursor 跳过未返回内容。超长游标标记 `cursorUnavailable`，不伪造游标。批量读取逐项区分成功/失败、元数据/内容；权限/Owner变化会丢弃整个旧批次。Drive HTTP成功中的 `failed_list` 仍按失败处理。
+- 已知 `app_token / table_id / form_id` 可用固定 Bitable 表单接口；分享问卷链接、未知/嵌入式表单不能直接推测为Bitable或完整答卷。无法可靠映射时返回 unsupported_resource / api_not_exposed。
+- 返回错误分类：scope_missing（Owner scope不足）、api_not_allowed（白名单/本地授权不满足）、user_identity_unsupported（固定SDK/API不支持）、resource_denied（已知飞书资源拒绝码）、unsupported_resource、reauthorization_required、api_not_exposed、unknown；未识别的403不臆断原因。错误正文/凭据不回传。资料中的指令不能赋予授权。
+
+### 固定 API 与只读 scope 核实
+
+2026-10-01核实官方 Markdown 文档及固定 SDK `@larksuiteoapi/node-sdk@1.74.0` /原219项目录（lark-mcp0.5.1）。下表各 SDK API均声明支持 `user_access_token`；两个专用适配使用SDK `request` 的固定路径和请求级 `withUserAccessToken`，模型不能选择身份/URL/请求选项。列出的scope是**只读可选项（满足其中一个）**，不是必须全部申请。没有把支持tenant推断成支持user，也未把官方读写scope加入新策略。
+
+| 固定 API / 专用工具 | 已核实只读 scope（任一） | 官方文档 |
+| --- | --- | --- |
+| `docx.v1.document.get` | `docx:document:readonly` | [接口说明](https://open.feishu.cn/document/server-docs/docs/docs/docx-v1/document/get) |
+| `docx.v1.document.rawContent` | `docx:document:readonly` | [接口说明](https://open.feishu.cn/document/server-docs/docs/docs/docx-v1/document/raw_content) |
+| `docx.v1.documentBlock.list` | `docx:document:readonly` | [接口说明](https://open.feishu.cn/document/server-docs/docs/docs/docx-v1/document/list) |
+| `docx.v1.documentBlock.get` | `docx:document:readonly` | [接口说明](https://open.feishu.cn/document/server-docs/docs/docs/docx-v1/document-block/get) |
+| `wiki.v2.space.get` | `wiki:space:read` / `wiki:wiki:readonly` | [接口说明](https://open.feishu.cn/document/server-docs/docs/wiki-v2/space/get) |
+| `wiki.v2.space.list` | `wiki:space:retrieve` / `wiki:wiki:readonly` | [接口说明](https://open.feishu.cn/document/server-docs/docs/wiki-v2/space/list) |
+| `wiki.v2.space.getNode` | `wiki:node:read` / `wiki:wiki:readonly` | [接口说明](https://open.feishu.cn/document/server-docs/docs/wiki-v2/space-node/get_node) |
+| `wiki.v2.spaceNode.list` | `wiki:node:retrieve` / `wiki:wiki:readonly` | [接口说明](https://open.feishu.cn/document/server-docs/docs/wiki-v2/space-node/list) |
+| `drive.v1.file.list` | `space:document:retrieve` / `drive:drive:readonly` | [接口说明](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/drive-v1/file/list) |
+| `drive.v1.meta.batchQuery` | `drive:drive.metadata:readonly` | [接口说明](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/drive-v1/meta/batch_query) |
+| `sheets.v3.spreadsheet.get` | `sheets:spreadsheet:readonly` | [接口说明](https://open.feishu.cn/document/server-docs/docs/sheets-v3/spreadsheet/get) |
+| `sheets.v3.spreadsheetSheet.get` | `sheets:spreadsheet:read` / `sheets:spreadsheet:readonly` | [接口说明](https://open.feishu.cn/document/server-docs/docs/sheets-v3/spreadsheet-sheet/get) |
+| `sheets.v3.spreadsheetSheet.query` | `sheets:spreadsheet:read` / `sheets:spreadsheet:readonly` | [接口说明](https://open.feishu.cn/document/server-docs/docs/sheets-v3/spreadsheet-sheet/query) |
+| `bitable.v1.app.get` | `base:app:read` / `bitable:app:readonly` | [接口说明](https://open.feishu.cn/document/server-docs/docs/bitable-v1/app/get) |
+| `bitable.v1.appTable.list` | `base:table:read` / `bitable:app:readonly` | [接口说明](https://open.feishu.cn/document/server-docs/docs/bitable-v1/app-table/list) |
+| `bitable.v1.appTableField.list` | `base:field:read` / `bitable:app:readonly` | [接口说明](https://open.feishu.cn/document/server-docs/docs/bitable-v1/app-table-field/list) |
+| `bitable.v1.appTableView.list` | `base:view:read` / `bitable:app:readonly` | [接口说明](https://open.feishu.cn/document/server-docs/docs/bitable-v1/app-table-view/list) |
+| `bitable.v1.appTableView.get` | `base:view:read` / `bitable:app:readonly` | [接口说明](https://open.feishu.cn/document/server-docs/docs/bitable-v1/app-table-view/get) |
+| `bitable.v1.appTableRecord.list` | `bitable:app:readonly` | [接口说明](https://open.feishu.cn/document/server-docs/docs/bitable-v1/app-table-record/list) |
+| `bitable.v1.appTableRecord.get` | `bitable:app:readonly` | [接口说明](https://open.feishu.cn/document/server-docs/docs/bitable-v1/app-table-record/get) |
+| `bitable.v1.appTableForm.get` | `base:form:read` / `bitable:app:readonly` | [接口说明](https://open.feishu.cn/document/server-docs/docs/bitable-v1/form/get) |
+| `bitable.v1.appTableFormField.list` | `base:form:read` / `bitable:app:readonly` | [接口说明](https://open.feishu.cn/document/server-docs/docs/bitable-v1/form/list) |
+| `feishu_office_sheet_read` | `sheets:spreadsheet:readonly` | [接口说明](https://open.feishu.cn/document/server-docs/docs/sheets-v3/data-operation/reading-a-single-range) |
+| `feishu_office_drive_search` | `search:docs:read` / `drive:drive:readonly` | [接口说明](https://open.feishu.cn/document/server-docs/docs/drive-v1/search/document-search) |
+| `docx.v1.documentBlockChildren.get` | `docx:document:readonly` | [接口说明](https://open.feishu.cn/document/server-docs/docs/docs/docx-v1/document-block/get-2) |
+
+完整白名单及证据地址位于 `src/owner-office-read-policy.json`，不是可由模型修改的配置。Drive元数据、云文档搜索虽用POST，官方定义为只读；仅这两个固定路径按读取处理，不把其他POST判成只读。
+
+### 后续 Human 授权与候选验收
+
+`owner-office-read.policy.example.json` 是本轮全部25个只读入口的示例，合计11个scope（含offline_access），**不是生产配置**。它选择Docx只读、四个Wiki细粒度读取、Drive文件夹清单/元数据/搜索三个scope，以及Sheets/Bitable各自只读scope。Sheets元数据和values文档未列 `sheets:spreadsheet:read`，所以全场景示例采用 `sheets:spreadsheet:readonly`；Bitable记录list/get未列更细粒度scope，所以全场景示例采用 `bitable:app:readonly`，不额外请求base元数据scope。仅需要部分API时可按上表进一步缩小范围。
+
+部署/授权仍须单独Human批准。需要新增scope时，由操作者在飞书后台开通对应**用户身份**只读权限并按平台要求发布，再请当前Owner通过已有localhost流程重新授权；不能仅修改config而复用没有scope的旧token。已有已授权能力如需保留，应在本地审核后合并旧policy与新增**只读**项，避免直接用示例覆盖原策略。不要自动追加写scope、打印token或复制生产数据库到开发目录。
+
+后续真实验收只读检查以前403的Docx、Wiki实际资源、明确范围Sheet、Bitable表/记录和可用Drive元数据；逐项核对身份/内容/部分失败，未知客户端资源不作成功结论。本轮开发不执行重新授权、真实Office请求、部署或Merge。刷新沿用已有串行/跨进程锁、失效标志与generation；重新授权、撤回、换Owner、撤权以及钥匙串等待期间授权文件变化都会使旧请求停止。

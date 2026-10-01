@@ -1,3 +1,13 @@
+# 当前开发：Issue #29 统一 Owner 只读身份路由（2026-10-01）
+
+- Task Source：[Issue #29](https://github.com/dccaoxy/codex-feishu-bot/issues/29) 与 Human 当前指令；从最新 main `4f280a9` 建立独立 `codex/issue-29-owner-read`。本轮只开发/回归/PR，不部署、不 Merge，不修改真实配置、授权范围、业务数据或运行服务。
+- 官方能力核实：固定 SDK `1.74.0`，核对 Docx/Wiki/Drive/Sheets/Bitable 的23个SDK只读接口与2个固定只读适配接口，共25项。逐接口用户身份、只读scope替代项和官方来源保存在 `src/owner-office-read-policy.json` / README；`owner-office-read.policy.example.json` 为只读授权示例，包含 offline_access，不会自动应用或增加scope。Drive根目录分页限制、搜索边界及表单实际API边界明确保留。
+- Implementation：Owner启用OAuth时，专用文档读取、单元格读取和通用Office五类读取使用同一固定策略、scope与身份检查；新增明确链接批量读取和关键词搜索。Wiki先解析真实对象类型；元数据成功不冒充正文成功，每项失败单独报告。缺少API授权、scope、SDK支持或用户身份均停止，不回退tenant。未启用OAuth的既有tenant路径及既有写入/Trusted Document审批边界保持不变，无新增写权限。
+- 生命周期与预算：守卫覆盖排队、钥匙串解锁、刷新、SDK出站、响应及交付；修复解锁等待期间授权代际变化的竞态。分页单页默认20/最多50，最多5个资源，单元格最多5000格，元数据批量最多20；返回保留续页标记和截断说明，不递归抓取、不后台索引、不下载附件。Group/Knowledge/普通成员不会获得Owner身份工具；工具数据均标记不可信。
+- Validation：语法check、最终全量组合 **873/873**、Office/OAuth聚焦 **128/128**、Owner宿主边界 **312/312** 通过，0失败/跳过；全量包含新只读84项与宿主36项。覆盖固定SDK真实HTTP序列化（模拟传输）、user凭据选用且无tenant请求、分页/预算、批量部分失败、Wiki类型、错误脱敏、缺scope、撤回/撤权/Owner变化/重新授权等待竞态，以及旧办公写入审批不变。没有把模拟接口结果当作真实飞书验收。
+- 本机协议验证：隔离开发配置无飞书凭据、无Shared App Server连接；真实安装的 Codex `0.159.0` doctor握手/登录/8模型检查及无模型ephemeral smoke通过。Group **28** 次、Knowledge **18** 次本地模拟provider隔离探针通过；未发起真实飞书读取、写入或群消息，未触碰当前候选或长期观察服务。
+- Remaining / Delivery：提交、推送后创建Draft，再转Ready请求独立审核，GitHub实际head/状态为准。新增只读scope/API需后续Human授权、重新OAuth绑定及单独部署后才能做真实资源验收；本轮没有扩大现有grant，也未验证真实五类资源读取或自然refresh rotation。无远端CI结果，不声称独立审核PASS。下一步等待独立审核，保留Human部署/Merge门禁。
+
 # 当前候选：PR #28 审核版本部署与 Owner OAuth 只读验收（2026-09-30）
 
 - Human 明确授权部署及真实只读验收；独立 PASS 对应 `36749d260384151c90a58b8178e025621aed1bab`。精确审核源码已部署；本节仅记录结果，线上不随此文档提交变更。未 Merge。

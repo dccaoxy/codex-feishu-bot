@@ -364,3 +364,28 @@ for(const reason of ['recall','revoke'])test(`user credential wait in real Owner
  if(reason==='recall')await s.bot.cancelOwnerGroup('group','m1');else s.config.ownerAccess.enabled=false;
  release();await p.promise;await s.run.finishPromise;assert.equal(s.writes.length,0);
 });
+
+import {OwnerOfficeReader} from '../src/owner-office-read.mjs';
+const readRequests=[
+ ['feishu_office_read_resources',{urls:['https://example.feishu.cn/base/base']}],
+ ['feishu_office_drive_search',{query:'fixture'}],
+ ['feishu_office_sheet_read',{spreadsheetToken:'sheet',range:'tab!A1:A1'}],
+ ['feishu_doc_read',{documentId:'doc'}],
+];
+for(const [tool,args] of readRequests)for(const reason of ['recall','revoke','leave','owner'])for(const stage of ['queue','response'])test(`${tool} Owner pipeline fences ${reason} at ${stage}`,async t=>{
+ const {bot,config,event,groups}=setup(t);bot.onMessage(event);toolRun(bot);config.ownerOAuth={enabled:true,apis:[]};
+ let entered,release;const waiting=new Promise(r=>entered=r),responses=[];let calls=0;
+ const pause=async()=>{entered();await new Promise(r=>release=r);};
+ const sdk=async()=>{calls++;if(stage==='response')await pause();return {document:{revision_id:1},private:'PRIVATE_READ_SENTINEL'};};
+ const f={client:{request:sdk,bitable:{v1:{app:{get:sdk}}},docx:{v1:{document:{get:sdk},documentBlock:{list:sdk}}}},call:async(fn,_r,g)=>{if(stage==='queue')await pause();g();return fn();}};
+ const provider={enabled:()=>true,lease:async(_a,g)=>({check:g,access:async()=> 'fixture-user'})};
+ const reader=new OwnerOfficeReader(f,provider);bot.office.reader=reader;bot.office.ownerOAuth=provider;bot.documents=new Documents(f,()=>bot.owner,reader);
+ bot.rpc.respond=(...a)=>responses.push(a);bot.rpc.request=async()=>{};
+ const pending=toolCall(bot,tool,args);await waiting;
+ if(reason==='recall')await bot.cancelOwnerGroup('group','m1');if(reason==='revoke')config.ownerAccess.enabled=false;if(reason==='leave')groups.closed=true;if(reason==='owner')bot.owner='other';
+ release();await pending;assert.equal(calls,stage==='queue'?0:1);assert.ok(!JSON.stringify(responses).includes('PRIVATE_READ_SENTINEL'));
+});
+for(const [tool,args] of readRequests)test(`ordinary member cannot borrow Owner route ${tool}`,async t=>{
+ const {bot,event,store}=setup(t);event.sender.sender_id.open_id='member';bot.onMessage(event);assert.equal(store.pending().length,0);assert.equal(bot.runs.size,0);let entered=0;bot.office.execute=async()=>{entered++;};bot.documents.execute=async()=>{entered++;};bot.rpc.respond=()=>{};
+ await toolCall(bot,tool,args);assert.equal(entered,0);
+});
