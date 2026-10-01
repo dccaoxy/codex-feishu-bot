@@ -9,6 +9,10 @@ export const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 export function loadConfig(filename = path.join(ROOT, 'config.local.json'), requireCredentials = true) {
   if (!fs.existsSync(filename)) throw new Error('找不到 config.local.json，请复制 config.example.json 并填写配置。');
   const c = JSON.parse(fs.readFileSync(filename, 'utf8'));
+  if(c.ownerOAuth!==undefined){
+    const o=c.ownerOAuth;
+    if(!o||typeof o!=='object'||Array.isArray(o)||typeof o.enabled!=='boolean'||!Array.isArray(o.apis)||o.apis.length>219||new Set(o.apis).size!==o.apis.length||o.apis.some(a=>typeof a!=='string'||!/^[-a-zA-Z0-9.]{1,150}$/.test(a))||Object.keys(o).some(k=>!['enabled','apis'].includes(k)))throw Error('ownerOAuth仅接受enabled和明确的Office API名单；凭据不得放在配置中');
+  }
   c.groups = groupConfig(c.groups);
   c.ownerAccess = ownerAccessConfig(c.ownerAccess);
   c.ownerGateway = gatewayConfig(c.ownerGateway);

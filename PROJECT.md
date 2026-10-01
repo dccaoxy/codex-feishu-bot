@@ -1,3 +1,31 @@
+# 当前候选：PR #28 审核版本部署与 Owner OAuth 只读验收（2026-09-30）
+
+- Human 明确授权部署及真实只读验收；独立 PASS 对应 `36749d260384151c90a58b8178e025621aed1bab`。精确审核源码已部署；本节仅记录结果，线上不随此文档提交变更。未 Merge。
+- 基线复核：运行目录全部既有受管文件与 PR #24 部署记录一致、配置字节一致。新版本保留已上线 PR #19 自建文档能力；没有部署 PR #27 或扩大 Trusted Document。变更前无 active/queued 群或私聊请求，无运行中的 Knowledge job。
+- 备份：本地 Git 忽略目录 `data/pr28-36749d2-backup-20260930-202524` 保存旧源码、真实配置、LaunchAgent副本及 state/groups SQLite一致性备份。部署锁内复核版本、review、源码、配置、空闲状态；停机检查期间两库逐表内容指纹不变。配置原有字段逐项保持一致，仅按本次授权新增 `ownerOAuth.enabled=true` 与审核固定13 API名单；实际授权6 scopes未变。
+- Validation：部署前 check、组合753/753；实际候选安装后 check、组合753/753、doctor/smoke通过。启用路由后再次doctor/smoke通过；实际候选 Group22项、Knowledge15项隔离协议探针通过。普通成员/Owner边界、user请求失败不回退tenant由全量回归覆盖，不声称另做真实普通成员攻击或群发消息。
+- 真实 Owner 只读：通过已部署 `Office.execute` / Feishu SDK 路由调用白名单 user-only `task.v2.task.list`，page_size=1/type=my_tasks，成功返回1条任务。请求拦截核对实际GET目标及Authorization等于当前Owner用户凭据；仅1次真实Office请求，未打印或记录token、任务标题/正文/人员信息。另用同一access调用user_info精确核对既有Owner，一致。固定策略/API与实际6 scopes核对通过。
+- 失败边界：相同Office路由的合成凭据获取失败探针拒绝，0 HTTP请求、无tenant回退。SDK失败/撤回撤权等回归继续通过；未制造真实服务端错误。无真实Office写操作、业务文档修改、scope扩张或人为token到期。refresh-check/状态检查为有效凭据读取，真实refresh rotation保留后续自然到期观察，未声称已验证。
+- 服务：仅机器人按部署/启用两阶段短暂重启，最终PID54048；Shared App Server PID743前后不变，Desktop/Shared服务及plist未改。最新启动日志确认Codex及飞书长连接ready；增量日志未发现error/EMFILE标记。两授权群、Owner Gateway、Knowledge及原有Office能力配置保留。
+- 脱敏证据：本地 `data/pr28-deployment.json`、`pr28-owner-enable.json`、`pr28-owner-read-acceptance.json` 和备份目录验证日志；不将真实配置、数据库或凭据提交Git。按Human本轮六项标准，候选部署与只读验收通过，可提交Human Gate判定；不代表自动Merge、真实写入或refresh rotation已验收。
+
+# 当前修正：Owner OAuth 实际交换兼容性（2026-09-30）
+
+- PR #28 修正时退回 Draft。此前 Human 点击授权后，脱敏诊断确认 callback 到达、token exchange 返回 HTTP400/API20049（PKCE失败），未取得或保存凭据；先前753项模拟测试不能替代真实接口兼容验证。
+- 按官方授权页 PKCE 提示，交换/刷新明确采用 v2 固定端点及 JSON 格式，保留 S256、state、Owner核验及全部权限边界；不重用失败 code、不静默回退、不取消PKCE。补强真实序列化格式和 challenge/verifier 对应断言。
+- 本轮 check、授权专项26/26、完整组合753/753通过，diff检查通过。Human 重新授权后，真实 v2 code交换、user_info精确Owner核验、加密保存及后续状态读取通过：bound=true，access/refresh未过期，refreshPending=false，6 scopes/13 APIs。refresh-check复用有效access成功，未触发真实refresh rotation；不将此冒充刷新端到端验证。随记录推送重新Ready请求独立审核；未启用生产身份路由、未部署/重启/Merge。
+
+# 当前开发：本机一次性 Owner OAuth（2026-09-30）
+
+- Task Source：Human 要求为既有 Owner 绑定飞书用户身份，通过临时 localhost callback 授权、安全保存 access/refresh credentials 并支持自动刷新；不开发完整 `/feishu-login` 产品。用户随后授权继续实施。
+- 基线：独立 `codex/owner-oauth-local`，从最新 main `c9fda13` 开始；保留线上 PR #19 已审核 `b70ab30` 的自建文档内容免确认实现，依赖提交为 `3e36ef5`。PR #27 Trusted Document 开发分支未覆盖，未合并 PR #19 或 PR #27。
+- Implementation：官方 OAuth v2、随机 state、PKCE S256、仅回环地址的10分钟单次 callback；通过 user_info 精确核对既有 Owner。凭据 AES-256-GCM 加密，密钥保存在本机 macOS 钥匙串；状态目录0700、文件0600、原子写入，拒绝符号链接和不安全权限。无 token/secret 输出或提交。
+- Runtime：默认关闭；仅固定 Office API 白名单采用 SDK request-scoped user token，其余保留 tenant。按需提前刷新、刷新串行/跨进程锁、rotation 原子保存；刷新结果不确定则停止复用旧 refresh token，要求重新授权。Owner、应用、策略、grant generation、撤回/撤权在等待后和实际出站前复核。用户身份写入仍走宿主审批，不借用 tenant 的机器人自建文档免确认记录。Group/Knowledge、FIFO、Shared Runtime 不扩权。
+- 初始策略：文档读写与任务读取，13个明确支持 user 的 Office API、6个 scope（包含 offline_access）；不声称全部 Office API 已启用。既有专用文档/表格工具仍采用 tenant 身份。
+- Validation：check、全量组合 **753/753**（main + PR #19 + OAuth）、聚焦 OAuth/Owner **302/302** 通过。真实 Codex `0.159.0` doctor 完成共享握手、登录及7模型检查；无模型 ephemeral smoke通过。Group22项/Knowledge15项隔离探针通过（本地模拟 provider，无真实群发送）。
+- 本地授权准备：开放平台 callback 已保存；真实钥匙串密钥创建/读取成功，临时 callback 已启动，飞书已展示预期5项办公权限及持续访问授权页面。现已取得并安全保存Owner凭据；OAuth授权成功不等于Office端到端验收通过。
+- Delivery / Remaining：实现等待独立审核；准备 Draft → Ready，不 Merge、不部署、不重启。生产 config、群名单、业务数据和现有服务未修改，仅创建获准的本地 OAuth 安全状态目录及钥匙串密钥。真实授权绑定已通过；实际 refresh rotation、用户身份 Office 端到端尚待验证；按需刷新无法保证长期闲置超过 refresh 有效期后仍无需重新授权。独立复审后才安排已审核版本启用。
+
 # 当前返工：PR #24 R2 空目标默认拒绝（2026-09-30）
 
 - Task Source：[428e505 的 NEEDS CHANGES](https://github.com/dccaoxy/codex-feishu-bot/pull/24#issuecomment-5908009519)。同一 `codex/issue-23-send-context` 分支，先退回 Draft；不部署、不重启、不 Merge。
