@@ -7,7 +7,7 @@ import {OwnerOfficeReader,boundedRead} from '../src/owner-office-read.mjs';
 import {Office,OFFICE_TOOLS,officeDefinition} from '../src/office.mjs';import {Documents} from '../src/documents.mjs';
 import {GROUP_TOOLS} from '../src/group-assistant.mjs';import {loadConfig} from '../src/config.mjs';
 import {ownerReadGuard} from '../src/owner-read-permit.mjs';
-const fixtureText='读取 document_id doc, document_id private, token wiki, token node, space_id 123, folder_token folder, doc_token file, spreadsheet_token sheet, app_token base, block_id block, sheet_id tab, table_id table, view_id view, record_id record, form_id form, range tab!A1:B2';
+const fixtureText='读取 document_id doc, document_id doc block_id block, document_id private, token wiki, token node, space_id 123, folder_token folder, doc_token file, spreadsheet_token sheet, spreadsheet_token sheet sheet_id tab, spreadsheet_token sheet range tab!A1:B2, app_token base, app_token base table_id table, app_token base table_id table view_id view, app_token base table_id table record_id record, app_token base table_id table form_id form';
 const trusted=(text=fixtureText,g=()=>{})=>ownerReadGuard(g,()=>({text}));
 const guard=trusted();
 const apiGuard=api=>trusted(api==='feishu_office_drive_search'?'搜索「requested topic」':api==='wiki.v2.space.list'?'列出知识库':fixtureText);

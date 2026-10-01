@@ -17,3 +17,14 @@ for(const text of ['https://example.feishu.cn/docx/private','引用：读取 doc
 test('R1 plain guard cannot impersonate host authority',()=>{assert.throws(()=>readAuthority(()=>{}),/target_not_authorized/);});
 test('R1 exact call permit detects subsequent argument mutation',()=>{const a=permit('读取 document_id doc'),p={path:{document_id:'doc'}},check=a.authorize('docx.v1.document.get',p);p.path.document_id='private';assert.throws(check,/target_not_authorized/);});
 test('R1 current explicitly quoted search is exact and data stays data',()=>{const a=permit('请搜索「财务工资」');assert.doesNotThrow(()=>a.authorize('feishu_office_drive_search',{query:'财务工资'}));assert.throws(()=>a.authorize('docx.v1.document.get',{path:{document_id:'财务工资'}}));});
+for(const text of ['读取 range tab!A1:A1 spreadsheet_token s','读取 document_id doc range tab!A1:A1','读取 app_token base view_id v table_id t','读取 app_token base table_id t table_id u','读取 spreadsheet_token s range tab!A1:A1 range tab!B1:B1'])test(`R2 ambiguous or incompatible grouping refuses ${text}`,()=>{assert.throws(()=>permit(text),/target_not_authorized/);});
+for(const [text,api,p] of [
+ ['读取 document_id doc block_id b','docx.v1.document.rawContent',{path:{document_id:'doc'}}],
+ ['读取 app_token base table_id t view_id v','bitable.v1.appTableRecord.list',{path:{app_token:'base',table_id:'t'}}],
+ ['读取 spreadsheet_token s sheet_id a, spreadsheet_token s range b!B2:B2','feishu_office_sheet_read',{spreadsheetToken:'s',range:'a!B2:B2'}],
+ ['读取 space_id a parent_node_token x, space_id b parent_node_token y','wiki.v2.spaceNode.list',{path:{space_id:'a'},params:{parent_node_token:'y'}}],
+])test(`R2 cannot omit constraints or recombine same-root grants ${api}`,()=>{assert.throws(()=>permit(text).authorize(api,p),/target_not_authorized/);});
+test('R2 explicit repeated same root preserves independent full tuples',()=>{
+ const a=permit('读取 app_token base table_id t view_id v, app_token base table_id u view_id w');
+ for(const [table,view,ok] of [['t','v',true],['u','w',true],['t','w',false],['u','v',false]]){const f=()=>a.authorize('bitable.v1.appTableView.get',{path:{app_token:'base',table_id:table,view_id:view}});if(ok)assert.doesNotThrow(f);else assert.throws(f);}
+});

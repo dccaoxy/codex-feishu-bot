@@ -405,7 +405,7 @@ function targetFixture(t,text,stage){
  const s=setup(t);s.event.message.content=JSON.stringify({text});s.bot.onMessage(s.event);s.run=toolRun(s.bot);s.config.ownerOAuth={enabled:true,apis:[]};
  let calls=0,leases=0,entered,release;const waiting=new Promise(r=>entered=r),responses=[];
  const sdk=async()=>{calls++;if(stage==='response'){entered();await new Promise(r=>release=r);}return {document:{revision_id:1},items:[{text:'PRIVATE_TARGET_SENTINEL'}],secret:'PRIVATE_TARGET_SENTINEL'};};
- const f={client:{request:sdk,docx:{v1:{document:{get:sdk,rawContent:sdk},documentBlock:{list:sdk}}},wiki:{v2:{space:{getNode:sdk}}},drive:{v1:{file:{list:sdk}}},bitable:{v1:{app:{get:sdk},appTableRecord:{list:sdk}}}},call:async(fn,_r,g)=>{if(stage==='queue'){entered();await new Promise(r=>release=r);}g();return fn();}};
+ const f={client:{request:sdk,docx:{v1:{document:{get:sdk,rawContent:sdk},documentBlock:{list:sdk,get:sdk}}},sheets:{v3:{spreadsheetSheet:{get:sdk}}},wiki:{v2:{space:{getNode:sdk}}},drive:{v1:{file:{list:sdk}}},bitable:{v1:{app:{get:sdk},appTableRecord:{list:sdk,get:sdk},appTableView:{get:sdk},appTableForm:{get:sdk}}}},call:async(fn,_r,g)=>{if(stage==='queue'){entered();await new Promise(r=>release=r);}g();return fn();}};
  const provider={enabled:()=>true,lease:async(_api,g)=>{leases++;return {check:g,access:async()=> 'fixture'};}};
  const reader=new OwnerOfficeReader(f,provider);s.bot.office.reader=reader;s.bot.office.ownerOAuth=provider;s.bot.documents=new Documents(f,()=>s.bot.owner,reader);s.bot.rpc.respond=(...a)=>responses.push(a);s.bot.rpc.request=async()=>{};
  return {...s,responses,waiting,release:()=>release(),counts:()=>({calls,leases})};
@@ -448,4 +448,21 @@ for(const text of ['读取 document_id private','你好'])test(`R1 private chat 
  const s=targetFixture(t,text);const row=s.store.db.prepare('SELECT payload FROM inbox WHERE id=?').get('m1'),d=JSON.parse(row.payload);d.message.chat_id='private';d.message.chat_type='p2p';
  s.store.db.prepare('UPDATE inbox SET chat=?,payload=? WHERE id=?').run('private',JSON.stringify(d),'m1');s.run.chat='private';
  await toolCall(s.bot,'feishu_doc_read',{documentId:'private'});assert.equal(s.counts().calls,text==='你好'?0:2);
+});
+
+for(const syntax of ['typed','url'])for(let i=0;i<2;i++)for(let j=0;j<2;j++)test(`R2 host Sheet token/range tuple ${syntax} ${i}/${j}`,async t=>{
+ const root=n=>syntax==='typed'?`spreadsheet_token sheet${n}`:`https://example.feishu.cn/sheets/sheet${n}`;
+ const s=targetFixture(t,`读取 ${root(0)} range tab0!A1:A1, ${root(1)} range tab1!B2:B2`);
+ await toolCall(s.bot,'feishu_office_sheet_read',{spreadsheetToken:`sheet${i}`,range:j?'tab1!B2:B2':'tab0!A1:A1'});
+ assert.deepEqual(s.counts(),{calls:i===j?1:0,leases:i===j?1:0});assert.equal(s.responses[0][1].success,i===j);
+});
+for(const [api,root,child] of [['docx.v1.documentBlock.get','document_id','block_id'],['sheets.v3.spreadsheetSheet.get','spreadsheet_token','sheet_id']])for(let i=0;i<2;i++)for(let j=0;j<2;j++)test(`R2 host subresource tuple ${api} ${i}/${j}`,async t=>{
+ const s=targetFixture(t,`读取 ${root} root0 ${child} child0, ${root} root1 ${child} child1`);
+ await toolCall(s.bot,'feishu_office_call',{api,payload:{path:{[root]:`root${i}`,[child]:`child${j}`}}});
+ assert.deepEqual(s.counts(),{calls:i===j?1:0,leases:i===j?1:0});assert.equal(s.responses[0][1].success,i===j);
+});
+for(const [api,child] of [['bitable.v1.appTableView.get','view_id'],['bitable.v1.appTableRecord.get','record_id'],['bitable.v1.appTableForm.get','form_id']])for(let i=0;i<2;i++)for(let j=0;j<2;j++)for(let k=0;k<2;k++)test(`R2 host Bitable triple ${child} ${i}/${j}/${k}`,async t=>{
+ const s=targetFixture(t,`读取 https://example.feishu.cn/base/base0 table_id tbl0 ${child} sub0, app_token base1 table_id tbl1 ${child} sub1`),ok=i===j&&j===k;
+ await toolCall(s.bot,'feishu_office_call',{api,payload:{path:{app_token:`base${i}`,table_id:`tbl${j}`,[child]:`sub${k}`}}});
+ assert.deepEqual(s.counts(),{calls:ok?1:0,leases:ok?1:0});assert.equal(s.responses[0][1].success,ok);
 });

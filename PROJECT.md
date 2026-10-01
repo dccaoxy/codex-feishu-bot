@@ -1,4 +1,13 @@
-# 当前返工：PR #30 R1 绑定可信 Owner 读取目标（2026-10-01）
+# 当前返工：PR #30 R2 多资源授权组合（2026-10-01）
+
+- Task Source：[3ea2172 的高风险 NEEDS CHANGES](https://github.com/dccaoxy/codex-feishu-bot/pull/30#issuecomment-5923482731)。同一分支与PR，先退回Draft，不部署、不Merge、不改变线上配置/权限/服务/数据。
+- 根因：R1的平面目标集合只证明各个ID/范围出现过，丢失了资源与子资源的配对关系；上轮1017项未覆盖跨组拼接，不能证明多目标安全。
+- Implementation：按每个根资源保存完整grant tuple，新URL/根ID开启新组，范围和子资源仅属于当前组。授权须匹配同一完整组合，禁止跨组借用；相同根的多组仍分别匹配，不能交叉拼接table/view/record/form或Sheet范围。游离子资源、错误类型、同组重复字段、缺少table父级均保守拒绝。不可省略已有子资源约束扩大正文/记录范围；固定根元数据读取只允许同根元数据，不扩大内容权限。Wiki派生记录仍仅来自当前有效批读的真实节点响应。
+- Validation：check / diff检查通过；专项 **590/590**，完整组合 **1067/1067**，0失败/跳过。本轮新增50项，包括真实Bot→Office/Reader路径的typed/URL两张表四组合矩阵、Docx document/block、Sheets spreadsheet/sheet、Bitable app/table/view或record或form的完整组合矩阵；只放行原始组合，交叉组合均0 OAuth lease/0模拟SDK或HTTP出站。另覆盖相同根的多组、Wiki父节点、省略约束、错误分组与字段顺序。既有身份、scope、生命周期、写入审批回归继续通过。
+- 环境：本轮重跑隔离真实Codex0.159.0 doctor/smoke与Group28次/Knowledge18次模拟provider隔离探针，均通过。无真实Office读取/写入/群发送；开发配置无飞书凭据，未触碰候选Shared App Server和运行服务。
+- Delivery / Remaining：README已补充分组语法、完整组合与元数据边界；推送同一PR新head，更新PR及Issue #29报告后重新Ready请求独立复审。没有远端CI结果，不声称独立PASS。含糊自然语言/历史指代仍要求澄清；真实资源、重新授权及部署/Merge继续保留Human Gate。
+
+# 历史返工：PR #30 R1 绑定可信 Owner 读取目标（2026-10-01）
 
 - Task Source：[e9f04d4 的高风险 NEEDS CHANGES](https://github.com/dccaoxy/codex-feishu-bot/pull/30#issuecomment-5923191153)。沿用 `codex/issue-29-owner-read`，先将同一 PR 退回 Draft；不部署、不 Merge、不改变线上配置、权限、业务数据或服务。
 - 根因：原实现只验证 Owner/生命周期/API/scope，目标完全来自模型参数。原873项通过不能证明读取目标已获当前Owner授权；旧文档中“本次明确目标”的描述缺少宿主强制实现。
