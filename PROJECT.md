@@ -1,4 +1,15 @@
-# 当前开发：Issue #29 统一 Owner 只读身份路由（2026-10-01）
+# 当前返工：PR #30 R1 绑定可信 Owner 读取目标（2026-10-01）
+
+- Task Source：[e9f04d4 的高风险 NEEDS CHANGES](https://github.com/dccaoxy/codex-feishu-bot/pull/30#issuecomment-5923191153)。沿用 `codex/issue-29-owner-read`，先将同一 PR 退回 Draft；不部署、不 Merge、不改变线上配置、权限、业务数据或服务。
+- 根因：原实现只验证 Owner/生命周期/API/scope，目标完全来自模型参数。原873项通过不能证明读取目标已获当前Owner授权；旧文档中“本次明确目标”的描述缺少宿主强制实现。
+- Implementation：新增宿主只读 permit，依据当前 `run.sourceIds` 的可信 inbox 原文/身份/会话生成，只用最新输入确定读取意图，全部来源仍为失效依赖。精确校验资源ID/类型、Sheet范围、搜索关键词与子资源；在OAuth lease前及排队、凭据等待、SDK出站、响应和交付前检查同一绑定。来源改变、steer、撤回/撤权/Owner变化后旧permit失效。专用Docx、Sheet、资源批读、搜索及通用Office五类读取共用此边界；无可信permit的底层Owner读取也拒绝。
+- 资料隔离：不从模型参数/旧会话/引用/代码块/文档正文/搜索结果生成授权；唯一派生例外为同一有效批读会话中，已授权Wiki节点API实际返回的类型/token。不能将此例外用于猜测其他文档或表格。批量metadata精确绑定每个token与资源类型，不按前缀/子串放行。
+- 保守范围：完整解析当前明确读取命令；歧义或混杂解释要求澄清，不引入LLM授权核对或新的确认卡片。README列出链接、typed ID、子资源、范围和关键词示例。历史指代、“刚才那个”、未明确的表ID/块ID等不会自动借用历史资料；这是本轮明确保留的可用性限制，不声称能解析任意自然语言。
+- Validation：check / diff检查通过；最终全量组合 **1017/1017**，0失败/跳过（较上轮新增144项）。新增真实宿主调用路径回归覆盖五类通用/专用读取、群/私聊、空目标、模型猜测、否定/引用/代码块、目标前缀/查询串/类型/子资源/范围/关键词替换、steer与原文修改/来源移除等待竞态、返回文档中的链接不扩权。未授权目标的模拟传输为0次OAuth lease、0次SDK/HTTP出站；明确请求正常返回。既有scope、刷新、撤回撤权、预算和写入审批回归继续通过；传输使用模拟响应，不冒充真实飞书验收。
+- 环境验证：无飞书凭据的隔离开发配置，真实Codex `0.159.0` doctor握手/登录/8模型及ephemeral smoke通过；Group28次、Knowledge18次本地模拟provider隔离探针通过。未连接/重启候选Shared App Server、未发送真实消息、未读取真实Office资源、未改授权scope或进行OAuth重新绑定。
+- Delivery / Remaining：更新同一PR说明和Issue #29返工报告，推送新head后重新Ready请求独立复审，以GitHub实际状态为准。本地通过不等于独立PASS；真实资源效果、部署、重新授权及自然refresh rotation仍待后续Human Gate。无远端CI结果，不自动Merge。
+
+# 历史开发：Issue #29 统一 Owner 只读身份路由（2026-10-01）
 
 - Task Source：[Issue #29](https://github.com/dccaoxy/codex-feishu-bot/issues/29) 与 Human 当前指令；从最新 main `4f280a9` 建立独立 `codex/issue-29-owner-read`。本轮只开发/回归/PR，不部署、不 Merge，不修改真实配置、授权范围、业务数据或运行服务。
 - 官方能力核实：固定 SDK `1.74.0`，核对 Docx/Wiki/Drive/Sheets/Bitable 的23个SDK只读接口与2个固定只读适配接口，共25项。逐接口用户身份、只读scope替代项和官方来源保存在 `src/owner-office-read-policy.json` / README；`owner-office-read.policy.example.json` 为只读授权示例，包含 offline_access，不会自动应用或增加scope。Drive根目录分页限制、搜索边界及表单实际API边界明确保留。

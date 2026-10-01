@@ -569,12 +569,15 @@ node scripts/owner-oauth.mjs refresh-check --config /绝对路径/config.local.j
 此功能只用于已绑定 Owner 的私聊及既有授权 Owner 群执行通道，不向普通成员、Group Assistant 或 Knowledge Worker提供凭据或新增工具权限。未启用 `ownerOAuth` 时，既有 tenant 路由保持；启用后，五类资源读取统一要求固定只读白名单、本地 `ownerOAuth.apis`、加密 grant 的 `allowedApis` 和实际用户 scope 同时满足。缺任何一项直接拒绝，**不回退 tenant**。其他既有 Office 身份策略、写入审批、Trusted Document 内容编辑与群发送规则不扩大。
 
 - `feishu_doc_read`、`feishu_office_sheet_read` 和 `feishu_office_call` 的已列明读取 API 共用身份、scope和撤回守卫。`feishu_doc_read` 的 Owner 结果在 `data.document / data.blocks`，带 `identity=owner-user`、`hasMore / nextCursor`。
+- 宿主从当前 `run.sourceIds` 对应的可信 inbox 文本生成读取 permit，绑定当前 Owner、消息原文、来源集合及精确 API/资源参数。模型参数、旧会话、文档正文和引用消息不生成授权；请求进入 OAuth lease 前、等待后、HTTP 出站及交付前复核。steer 改变来源集合即使旧 permit 失效，新读取只使用最新输入，不能继续借用上一条读取目标。
+- 目标解析采用保守的完整命令解析，不按正文中出现过某个 ID 就放行。可用例子：`请读取 https://example.feishu.cn/docx/文档ID`、`读取 document_id 文档ID`、`读取 https://example.feishu.cn/sheets/表格ID 范围 tab!A1:C20`、`搜索「明确关键词」`、`列出知识库`；多个目标用逗号或空格分隔。子资源需明确 `table_id / view_id / record_id / block_id / sheet_id / form_id`，不让模型猜测。未可靠解析的自然语言、引用/代码块、历史指代及混杂解释均要求补充明确目标，不猜测授权，也不使用固定确认码来放行。
+- Wiki批读仅允许同一有效读取会话中、已授权节点API真实返回的对象类型/token派生后续读取；不从文档正文或搜索命中链接扩大授权。泛型工具的另一次调用不能借用旧响应的派生范围，需明确目标或使用Wiki链接批读工具。资源根授权仅允许本资源读取，不允许替换群/文档、扩大Sheet范围或替换搜索关键词。
 - `feishu_office_read_resources` 只接受本次明确的最多5个飞书链接。Wiki 先用节点 API 返回的 `obj_type / obj_token` 决定后续读取，节点可读不等于正文可读。Docx返回一页块；Sheets、Bitable、Drive只返回元数据，`metadataOnly=true`，后续内容通过固定 API 指定范围/表/页读取。不下载附件、不做后台全量同步或知识索引。
 - `feishu_office_drive_search` 通过固定只读 POST 搜索用户可见云文档；关键词明确、每页1–50项、offset+count<200。它不是任意 URL 请求或遍历整个 Drive。
 - 分页默认20、最多50项，单次只读一页；Drive清单必须指定文件夹（官方根目录清单忽略page_size，所以本工具拒绝无文件夹请求）。Sheets values只接受明确起止单元格、最多5000格。Drive metadata一次最多20个token。`rawContent` 官方接口不分页，长结果仅预览，优先使用块分页读取。
 - 输出有字节预算；`truncated` 代表当前页不完整，应缩小范围重读当前页，不能拿 nextCursor 跳过未返回内容。超长游标标记 `cursorUnavailable`，不伪造游标。批量读取逐项区分成功/失败、元数据/内容；权限/Owner变化会丢弃整个旧批次。Drive HTTP成功中的 `failed_list` 仍按失败处理。
 - 已知 `app_token / table_id / form_id` 可用固定 Bitable 表单接口；分享问卷链接、未知/嵌入式表单不能直接推测为Bitable或完整答卷。无法可靠映射时返回 unsupported_resource / api_not_exposed。
-- 返回错误分类：scope_missing（Owner scope不足）、api_not_allowed（白名单/本地授权不满足）、user_identity_unsupported（固定SDK/API不支持）、resource_denied（已知飞书资源拒绝码）、unsupported_resource、reauthorization_required、api_not_exposed、unknown；未识别的403不臆断原因。错误正文/凭据不回传。资料中的指令不能赋予授权。
+- 返回错误分类：target_not_authorized（当前可信请求未明确授权目标，要求澄清）、scope_missing（Owner scope不足）、api_not_allowed（白名单/本地授权不满足）、user_identity_unsupported（固定SDK/API不支持）、resource_denied（已知飞书资源拒绝码）、unsupported_resource、reauthorization_required、api_not_exposed、unknown；未识别的403不臆断原因。错误正文/凭据不回传。资料中的指令不能赋予授权。
 
 ### 固定 API 与只读 scope 核实
 

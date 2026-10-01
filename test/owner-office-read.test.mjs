@@ -6,7 +6,11 @@ import {OWNER_READ_APIS,OWNER_READ_SPECIAL,readError} from '../src/owner-office-
 import {OwnerOfficeReader,boundedRead} from '../src/owner-office-read.mjs';
 import {Office,OFFICE_TOOLS,officeDefinition} from '../src/office.mjs';import {Documents} from '../src/documents.mjs';
 import {GROUP_TOOLS} from '../src/group-assistant.mjs';import {loadConfig} from '../src/config.mjs';
-const guard=()=>{};
+import {ownerReadGuard} from '../src/owner-read-permit.mjs';
+const fixtureText='读取 document_id doc, document_id private, token wiki, token node, space_id 123, folder_token folder, doc_token file, spreadsheet_token sheet, app_token base, block_id block, sheet_id tab, table_id table, view_id view, record_id record, form_id form, range tab!A1:B2';
+const trusted=(text=fixtureText,g=()=>{})=>ownerReadGuard(g,()=>({text}));
+const guard=trusted();
+const apiGuard=api=>trusted(api==='feishu_office_drive_search'?'搜索「requested topic」':api==='wiki.v2.space.list'?'列出知识库':fixtureText);
 async function fixture(t){
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'owner-read-'));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));const key=randomBytes(32);
  const apis=Object.keys(OWNER_READ_APIS),scopes=['offline_access',...new Set(Object.values(OWNER_READ_APIS).flatMap(r=>r.scopes))];
@@ -45,7 +49,7 @@ const payloads={
  'feishu_office_drive_search':{query:'requested topic',count:5,offset:0},
 };
 for(const [api,payload] of Object.entries(payloads))test(`${api} uses only scoped Owner user identity`,async t=>{
- const f=await fixture(t);const r=await f.reader.session(guard).call(api,payload);assert.equal(r.identity,'owner-user');assert.equal(f.calls.length,1);
+ const f=await fixture(t);const r=await f.reader.session(apiGuard(api)).call(api,payload);assert.equal(r.identity,'owner-user');assert.equal(f.calls.length,1);
  assert.equal(f.calls[0].opts.lark[Reflect.ownKeys(f.calls[0].opts.lark)[0]],'fixture-uat');assert.equal(JSON.stringify(r).includes('fixture-uat'),false);
 });
 test('fixed policy matches fixed SDK, contains no write or permission endpoints',()=>{
@@ -65,7 +69,7 @@ for(const change of ['no-provider','api-unlisted','grant-missing','scope-missing
  await assert.rejects(f.reader.session(guard).call(api,payloads[api]));assert.equal(f.calls.length,0);
 });
 for(const stage of ['queue','unlock','access','response'])for(const change of ['recalled','owner','disabled','reauthorized','scope'])test(`${change} during ${stage} discards read; zero tenant fallback`,async t=>{
- const f=await fixture(t),api='docx.v1.document.get';let active=true;const g=()=>{if(!active)throw Error('withdrawn');};
+ const f=await fixture(t),api='docx.v1.document.get';let active=true;const g=trusted(fixtureText,()=>{if(!active)throw Error('withdrawn');});
  const invalidate=()=>{if(change==='recalled')active=false;if(change==='owner')f.setOwner('other');if(change==='disabled')f.config.ownerOAuth.enabled=false;if(change==='reauthorized')f.vault.write(f.key,{...f.record,generation:'new'});if(change==='scope')f.vault.write(f.key,{...f.record,scopes:[]});};
  if(stage==='queue')f.f.call=async(fn)=>{invalidate();return fn();};
  if(stage==='unlock'){const unlock=f.vault.unlock.bind(f.vault);f.vault.unlock=async()=>{const key=await unlock();invalidate();return key;};}
@@ -103,7 +107,7 @@ test('batch reports per-item partial failure without exposing raw error/token or
  assert.deepEqual(r.results.map(x=>x.status),['success','failed','failed']);assert.equal(r.results[1].reason,'resource_denied');assert.ok(!JSON.stringify(r).includes('fixture-uat'));
 });
 test('unknown share-form does not guess a backing Bitable; known form uses fixed API',async t=>{const f=await fixture(t);const r=await f.reader.resources(['https://example.feishu.cn/share/base/abc','https://example.feishu.cn/base/base?form=opaque'],guard);assert.equal(f.calls.length,0);assert.ok(r.results.every(x=>x.status==='failed'));await f.reader.session(guard).call('bitable.v1.appTableForm.get',payloads['bitable.v1.appTableForm.get']);assert.equal(f.calls.length,1);});
-test('revocation aborts whole batch including preceding successful private result',async t=>{const f=await fixture(t);let valid=true;f.outputs.set('bitable.v1.app.get',()=>{valid=false;return {private:'private'};});await assert.rejects(f.reader.resources(['https://example.feishu.cn/base/base','https://example.feishu.cn/wiki/wiki'],()=>{if(!valid)throw Error('withdrawn');}),/withdrawn/);assert.equal(f.calls.length,1);});
+test('revocation aborts whole batch including preceding successful private result',async t=>{const f=await fixture(t);let valid=true;f.outputs.set('bitable.v1.app.get',()=>{valid=false;return {private:'private'};});await assert.rejects(f.reader.resources(['https://example.feishu.cn/base/base','https://example.feishu.cn/wiki/wiki'],trusted(fixtureText,()=>{if(!valid)throw Error('withdrawn');})),/withdrawn/);assert.equal(f.calls.length,1);});
 test('oversized response retains explicit partial flag/current/next cursors within byte budget',()=>{const r=boundedRead({data:{text:'中'.repeat(30000)},hasMore:true,nextCursor:'next',requestedCursor:'current',identity:'owner-user'});assert.equal(r.truncated,true);assert.equal(r.nextCursor,'next');assert.equal(r.requestedCursor,'current');assert.ok(Buffer.byteLength(JSON.stringify(r))<24000);});
 test('new tools excluded from Group schema; reader without Owner provider refuses',async()=>{for(const tool of OFFICE_TOOLS)assert.ok(!GROUP_TOOLS.some(g=>g.name===tool.name));const reader=new OwnerOfficeReader({});await assert.rejects(reader.session(guard).call('docx.v1.document.get',payloads['docx.v1.document.get']),/api_not_allowed/);});
 for(const [code,expected] of [[99991672,'scope_missing'],[131006,'resource_denied'],[99991663,'reauthorization_required'],[123456,'unknown']])test(`safe error classification ${code}`,async t=>{const f=await fixture(t);f.outputs.set('docx.v1.document.get',()=>{const e=Error('fixture-uat');e.feishuCode=code;throw e;});await assert.rejects(f.reader.session(guard).call('docx.v1.document.get',payloads['docx.v1.document.get']),e=>e.readCode===expected&&!e.message.includes('fixture-uat'));assert.equal(f.calls.length,1);});
@@ -114,7 +118,7 @@ test('actual pinned SDK serializes user Authorization on both SDK method and fix
  f.f.client=client;
  await f.reader.session(guard).call('docx.v1.document.get',payloads['docx.v1.document.get']);
  await f.reader.session(guard).call('feishu_office_sheet_read',payloads.feishu_office_sheet_read);
- await f.reader.session(guard).call('feishu_office_drive_search',payloads.feishu_office_drive_search);
+ await f.reader.session(apiGuard('feishu_office_drive_search')).call('feishu_office_drive_search',payloads.feishu_office_drive_search);
  assert.equal(requests.length,3);assert.ok(requests.every(r=>r.headers.Authorization==='Bearer fixture-uat'));assert.ok(requests.every(r=>!r.url.includes('tenant_access_token')));
 });
 import {OWNER_READ_GUARD} from '../src/owner-office-read.mjs';

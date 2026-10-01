@@ -3,6 +3,7 @@ const policy=JSON.parse(fs.readFileSync(new URL('./owner-office-read-policy.json
 export const OWNER_READ_APIS=Object.freeze(Object.fromEntries(Object.entries(policy.apis).map(([k,v])=>[k,Object.freeze({...v,scopes:Object.freeze(v.scopes)})])));
 export const OWNER_READ_SPECIAL=['feishu_office_sheet_read','feishu_office_drive_search'];
 const messages={
+ target_not_authorized:'当前可信Owner请求未明确授权这个读取目标；请明确提供资源链接/ID、单元格范围或搜索关键词，不会使用历史或资料中的指令。',
  scope_missing:'Owner 用户只读 scope 不足；需要本人重新授权，不会自动扩权。',
  api_not_allowed:'接口不在当前 Owner 只读身份白名单或本地授权范围内。',
  user_identity_unsupported:'固定 SDK/API 不支持该用户身份读取。',

@@ -1,3 +1,4 @@
+import {ownerReadGuard} from './owner-read-permit.mjs';
 import {OWNER_READ_GUARD} from './owner-office-read.mjs';
 import { Office } from './office.mjs';
 import {OwnerOAuth} from './owner-oauth.mjs';
@@ -779,7 +780,7 @@ ${this.ownerGroups?OWNER_GROUP_INSTRUCTIONS:''}` };
             const owner=run.officeOwner;
             const officeGuard=()=>{guard();if(!owner||owner!==this.owner||this.closed)throw Error('Owner办公请求已失效');};
             completionGuard=officeGuard;
-            result=await this.office.execute(p.tool,a,officeGuard,async proposal=>{
+            result=await this.office.execute(p.tool,a,this.config.ownerOAuth?.enabled?this.officeReadGuard(run,officeGuard):officeGuard,async proposal=>{
               const permit=await this.requestOfficeApproval(run,m.id,proposal,officeGuard);
               completionGuard=()=>{officeGuard();permit.check();};return permit;
             });
@@ -791,7 +792,7 @@ ${this.ownerGroups?OWNER_GROUP_INSTRUCTIONS:''}` };
             completionGuard=documentGuard;
             let permit;
             if(p.tool==='feishu_doc_format_text'){permit=await this.requestOfficeApproval(run,m.id,{api:p.tool,payload:a},guard);completionGuard=()=>{guard();permit.check();};}
-            result=await this.documents.execute(p.tool,a,documentGuard,permit);
+            result=await this.documents.execute(p.tool,a,this.config.ownerOAuth?.enabled&&p.tool==='feishu_doc_read'?this.officeReadGuard(run,documentGuard):documentGuard,permit);
             if(p.tool==='feishu_doc_create')this.recordCreatedDocument(result?.documentId,run,guard,creationApp);
           }
           else if (p.tool === 'aegpc_repository_approval') result = await this.repositoryApproval.execute(a, {thread_id: run.thread},guard);
@@ -875,6 +876,21 @@ ${this.ownerGroups?OWNER_GROUP_INSTRUCTIONS:''}` };
   }
   unavailablePrompt(token,run) {
     if (this.rpc.shared && run.external) this.clearPrompt(token); else this.denyPrompt(token);
+  }
+  officeReadGuard(run,guard) {
+    const owner=this.owner,ids=[...(run.sourceIds||[])];
+    return ownerReadGuard(guard,()=>{
+      if(!owner||this.owner!==owner||run.officeOwner!==owner||!ids.length||JSON.stringify([...(run.sourceIds||[])])!==JSON.stringify(ids))throw Error('当前读取来源已失效');
+      const sources=ids.map(id=>{
+        const row=this.store.db.prepare('SELECT payload,state FROM inbox WHERE chat=? AND id=?').get(run.chat,id);
+        if(!row||!['pending','processing','done'].includes(row.state))throw Error('当前读取来源已失效');
+        const d=JSON.parse(row.payload),m=d.message;
+        if(d.kind!=='message'||d.user!==owner||m?.message_id!==id||m.chat_id!==run.chat||m.message_type!=='text'||typeof d.content?.text!=='string')throw Error('当前读取来源无效');
+        return {id,payload:row.payload,text:d.content.text};
+      });
+      // A steer replaces read intent; older inputs remain revocation dependencies only.
+      return {sources,text:sources.at(-1).text};
+    });
   }
   officeCommandActor(chat,id,source,text) {
     if(!source||source.user!==this.owner||source.message?.message_id!==id)return undefined;

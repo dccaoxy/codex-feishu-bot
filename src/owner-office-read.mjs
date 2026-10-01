@@ -1,3 +1,4 @@
+import {readAuthority} from './owner-read-permit.mjs';
 import {withUserAccessToken} from '@larksuiteoapi/node-sdk';
 import {officeDefinition,validateOffice} from './office-schema.mjs';
 import {OWNER_READ_APIS,readError,classifyReadError,OwnerReadError} from './owner-office-read-policy.mjs';
@@ -28,9 +29,10 @@ export class OwnerOfficeReader{
  constructor(feishu,oauth){this.feishu=feishu;this.oauth=oauth;}
  session(guard){
   if(typeof guard!=='function')throw readError('api_not_allowed');
-  const checks=[],check=()=>{guard();for(const c of checks)c();};
+  const authority=readAuthority(guard);
+  const checks=[authority.check],check=()=>{guard();for(const c of checks)c();};
   return {check,call:async(api,input)=>{
-   check();const rule=OWNER_READ_APIS[api];if(!rule)throw readError('api_not_allowed');
+   check();const permit=authority.authorize(api,input);checks.push(permit);const rule=OWNER_READ_APIS[api];if(!rule)throw readError('api_not_allowed');
    if(!this.oauth?.enabled(api))throw readError('api_not_allowed');
    let payload,fn;
    if(api==='feishu_office_sheet_read'){
@@ -69,6 +71,7 @@ export class OwnerOfficeReader{
      check();return fn(withUserAccessToken(token));
     },true,check);check();
    }catch(e){check();throw classifyReadError(e);}
+   if(api==='wiki.v2.space.getNode')authority.resolveWiki(data);
    return guarded({data,...(api==='drive.v1.meta.batchQuery'?{partial:Boolean(data?.failed_list?.length)}:{}),identity:'owner-user',...pagination(data,payload),...(api==='feishu_office_drive_search'?{nextOffset:data?.has_more&&payload.offset+payload.count<199?payload.offset+payload.count:null}:{} )},check);
   }};
  }
