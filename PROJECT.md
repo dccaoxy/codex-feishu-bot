@@ -1,4 +1,17 @@
-# 当前返工：PR #30 多语言富文本完整性（2026-10-02）
+# 当前候选：PR #30 `240967c` 已部署，集合完整性真实验收未通过（2026-10-02）
+
+- Task Source：Human 授权部署独立 PASS 的 `240967caa10049a1240cd698d8ccf8332f48e4b0`，保持现有权限和数据，仅验收指定授权群当前可信本地镜像的 Office 资源集合，不 Merge。后续 Human 单独批准只为 Group/Knowledge 固定已验证的 Codex `0.159.0`。
+- 部署前环境差异：应用内置 CLI 已从此前 `0.159.0` 变为 `0.159.0-alpha.12.1`，首次部署尝试在停服务之前被版本门禁拒绝，没有生产变更。经明确授权后，以独立官方固定包配置 `codex.isolatedBinary`；GroupModel 和 KnowledgeWorker 使用该路径，Owner 原 `codex.binary`、Shared Runtime 路径/连接/进程均未改。没有放宽版本门禁或修改审核源码。
+- Deployment：北京时间 20:25 完成候选安装；89 个受管文件逐项匹配审核提交。配置语义差异仅 `codex.isolatedBinary`，Owner、授权群、Owner Gateway、Knowledge、Office 写权限、Trusted Document、OAuth 14 scopes/32 API 白名单不变。没有重新 OAuth、扩大权限、修改业务文档或执行 Merge。
+- Backup / Data：本机 Git 忽略目录 `data/pr30-240967c-backup-20261002-202355` 保存旧源码、真实配置、LaunchAgent、加密 OAuth 文件以及 state/groups 两库的一致性备份；未导出 Keychain 密钥。停机验证期间两库逐表计数/摘要一致；启动后仅 history_sync / sqlite_sequence 运行状态发生变化，业务消息表未改变。回滚方案只恢复本轮源码/配置，不覆盖业务数据库或刷新后的凭据。
+- Validation：安装后的 check、**1255/1255** 全量组合回归（0失败/取消/跳过）、doctor 共享握手/登录/7模型检查、无模型 ephemeral smoke、Group **30** 次及 Knowledge **19** 次隔离探针全部通过。机器人重新启动，Codex/飞书长连接均恢复，Shared App Server 保持原进程；验收后复查服务 running、新增错误及 EMFILE 均为0。没有把模拟 provider 隔离检查表述为真实群成员测试。
+- 真实集合读取：北京时间 20:27，通过实际部署的 Bot.officeReadGuard → OwnerOfficeReader → OwnerOAuth/SDK 链路冻结指定群镜像。本机操作员适配器仅在内存保存当前 Human 请求，生产 SQLite 以只读方式打开，没有伪造或保存飞书入站消息，也没有发送群消息。严格解析集合包含 **23 次来源出现、20 个去重资源**（Docx 12、Wiki 8）；全部20项自动得到集合许可并逐项尝试，**0 target_not_authorized**，不需要 Human 逐个重贴链接。
+- 逐项结果汇总：直接 Docx 12项中，2项读到首批20块正文（has_more=true），10项元数据成功但正文 HTTP403 / API1770032（resource_denied）；Wiki 8项的节点全部可读，其中2项关联Docx读到首批20块，5项关联Docx元数据成功但正文同样403，1项关联Bitable元数据及1个表目录成功。该Bitable来源未指定table，未将目录返回的table扩为记录读取授权。没有直接Sheet或Drive路径样本，未补选其他资源；元数据成功或首批正文不代表全文读取成功。
+- **完整性阻断**：独立只读交叉核对本群321条text/post，JSON解析错误0。标准Office URL前缀可辨认 **24次出现、21个去重候选**，与严格集合的差额为1条紧贴中文正文的Docx链接，被当前解析器遗漏；该候选未生成permit、未调用API，其有效性/可访问性未验证。标准路径有3次重复来源。另外，富文本字段中的9处 `/share/base` 出现去重后为 **3个共享入口**（base 1个、form 2个，各自1条来源），当前未解析成精确Office资源ID，分类为 `unsupported_shared_resource_path`，未建立许可或访问。按本次口径共24个可辨认候选URL（21标准路径+3共享入口），其中20已尝试、1漏识别、3不支持；早前“24”的原始口径未留存，不追认其含义。不能把20项已识别集合的成功授权等同于“全部群Office链接覆盖”。本轮不修改已审核代码、不绕过许可补读，不扩大到新API或scope。
+- 身份与权限证据：**48次 Office 请求均使用实际核验属于绑定 Owner 的 user_access_token**；0 tenant回退、0意外出站、0资源写入，不读取其他群正文/资源或文档正文二级链接。授权群目录仅取名称用于唯一匹配。正常读取自然触发1次refresh并验证Owner，scopes/API前后一致；未人为制造到期，未输出/评论/提交token或secret。一次自然刷新成功不等于长期refresh稳定性已证明。
+- Evidence / Human Gate：本机 `data/pr30-collection-deployment.json`、`pr30-collection-acceptance.json`、`pr30-collection-completeness-audit.json` 保留脱敏统计；私有来源清单和 `pr30-collection-report.html` 可逐项核对，资源URL/消息ID不进入GitHub。**部署与已识别集合的读取许可链路通过，但本轮“全部Office资源”完整性验收未通过**。直接Docx403、Sheet缺样本和长期自然刷新限制继续保留。下一步先处理解析漏收及不支持的共享入口边界，再独立审核/安排候选验收；未自动返工、未Merge，PR状态未变。本节仅为部署证据文档，运行源码仍是`240967c`。
+
+# 历史返工：PR #30 多语言富文本完整性（2026-10-02）
 
 - Task Source：[957bfc8 的独立 NEEDS CHANGES](https://github.com/dccaoxy/codex-feishu-bot/pull/30#issuecomment-5950597851)。同一 `codex/issue-29-owner-read` 分支与PR，返工前已退回Draft；不部署、不Merge、不扩大真实验收、不修改业务数据。
 - 根因：locale分支先按结构有效性filter，损坏分支在完整性检查前被丢弃；顶层content路径还会忽略并存的locale。此前1228项通过不覆盖此反例，不能证明所有原始分支都已验证。
@@ -17,7 +30,7 @@
 - 限制：仅从可信text/post可见字段提取资源，超扫描/输出预算或无法可靠解析时保守拒绝。根链接缺Sheet范围/Bitable子表时仍仅允许原有元数据/有界目录，不宣称读完表格正文；每个来源项与原tuple分别检查，重复链接不替换已开始调用的来源。README已说明这些边界。
 - Delivery / Remaining：同一PR/分支提交推送本轮实现和文档，重新Ready请求独立审核，以GitHub最新head/状态为准。当前运行候选仍是已部署的 `4d159c2`，本轮变更未部署、未Merge。原有直接Docx403/Sheet缺样本等真实验收限制仍保留，不因自动化通过而消除；没有新的真实群/Office验收，也没有远端CI结果或独立PASS声明。
 
-# 当前部署：PR #30 Owner 用户只读路由已启用，真实验收部分完成（2026-10-02）
+# 历史部署：PR #30 Owner 用户只读路由已启用，真实验收部分完成（2026-10-02）
 
 - Task Source：Human 授权部署独立 PASS 的 `4d159c2d7f61a1bc3e4e548ef94164216bc13c99`，扩展已审核只读策略并进行真实只读验收；不 Merge，不新增 user 写权限。
 - Deployment：候选已安装上述精确审核代码。部署前备份源码、真实配置、服务配置和两份 SQLite；停机检查前后各业务表计数/摘要一致。真实配置和服务配置未改，Shared App Server 保持原进程；机器人重启后确认 Codex 与飞书长连接恢复，启动日志无新错误或 EMFILE。
