@@ -572,13 +572,27 @@ node scripts/owner-oauth.mjs refresh-check --config /绝对路径/config.local.j
 - 宿主从当前 `run.sourceIds` 对应的可信 inbox 文本生成读取 permit，绑定当前 Owner、消息原文、来源集合及精确 API/资源参数。模型参数、旧会话、文档正文和引用消息不生成授权；请求进入 OAuth lease 前、等待后、HTTP 出站及交付前复核。steer 改变来源集合即使旧 permit 失效，新读取只使用最新输入，不能继续借用上一条读取目标。
 - 目标解析采用保守的完整命令解析，不按正文中出现过某个 ID 就放行。可用例子：`请读取 https://example.feishu.cn/docx/文档ID`、`读取 document_id 文档ID`、`读取 https://example.feishu.cn/sheets/表格ID 范围 tab!A1:C20`、`搜索「明确关键词」`、`列出知识库`；多个目标用逗号或空格分隔。子资源需明确 `table_id / view_id / record_id / block_id / sheet_id / form_id`，不让模型猜测。未可靠解析的自然语言、引用/代码块、历史指代及混杂解释均要求补充明确目标，不猜测授权，也不使用固定确认码来放行。
 - 多目标按“根资源 → 它自己的范围/子资源”逐项分组；每次出现新URL或根ID开始新授权项。例：`读取 spreadsheet_token sheetA range tabA!A1:A1, spreadsheet_token sheetB range tabB!B2:B2` 仅授权这两组，不能交叉组合。Bitable必须把 `app_token / table_id / view_id（或record_id/form_id）` 写在同一组；同一根的多项读取要重复根ID。游离子资源、错误类型、同组重复字段或无法可靠分组均拒绝并要求澄清。读取必须匹配一项完整组合；不得省略约束扩大到整个文档/表。固定根元数据接口仍可核对同一根的元数据，但不因此获得更宽内容范围。
-- Wiki批读仅允许同一有效读取会话中、已授权节点API真实返回的对象类型/token派生后续读取；不从文档正文或搜索命中链接扩大授权。泛型工具的另一次调用不能借用旧响应的派生范围，需明确目标或使用Wiki链接批读工具。资源根授权仅允许本资源读取，不允许替换群/文档、扩大Sheet范围或替换搜索关键词。
-- `feishu_office_read_resources` 只接受本次明确的最多5个飞书链接。Wiki 先用节点 API 返回的 `obj_type / obj_token` 决定后续读取，节点可读不等于正文可读。Docx返回一页块；Sheets、Bitable、Drive只返回元数据，`metadataOnly=true`，后续内容通过固定 API 指定范围/表/页读取。不下载附件、不做后台全量同步或知识索引。
+- Wiki批读仅允许已授权节点API真实返回的对象类型/token派生后续读取；不从文档正文或搜索命中链接扩大授权。逐链接许可仍限同一批读会话；群集合许可可在同一次Owner请求的后续工具中复用该节点的精确映射，但必须继承原来源消息、群和子范围检查。资源根授权仅允许本资源读取，不允许替换群/文档、扩大Sheet范围或替换搜索关键词。
+- `feishu_office_read_resources` 每次最多5个飞书链接，必须属于本次明确目标或下述宿主冻结集合。Wiki 先用节点 API 返回的 `obj_type / obj_token` 决定后续读取，节点可读不等于正文可读。Docx返回一页块；Sheets、Bitable、Drive只返回元数据，`metadataOnly=true`，后续内容通过固定 API 指定范围/表/页读取。不下载附件、不做后台全量同步或知识索引。
 - `feishu_office_drive_search` 通过固定只读 POST 搜索用户可见云文档；关键词明确、每页1–50项、offset+count<200。它不是任意 URL 请求或遍历整个 Drive。
 - 分页默认20、最多50项，单次只读一页；Drive清单必须指定文件夹（官方根目录清单忽略page_size，所以本工具拒绝无文件夹请求）。Sheets values只接受明确起止单元格、最多5000格。Drive metadata一次最多20个token。`rawContent` 官方接口不分页，长结果仅预览，优先使用块分页读取。
 - 输出有字节预算；`truncated` 代表当前页不完整，应缩小范围重读当前页，不能拿 nextCursor 跳过未返回内容。超长游标标记 `cursorUnavailable`，不伪造游标。批量读取逐项区分成功/失败、元数据/内容；权限/Owner变化会丢弃整个旧批次。Drive HTTP成功中的 `failed_list` 仍按失败处理。
 - 已知 `app_token / table_id / form_id` 可用固定 Bitable 表单接口；分享问卷链接、未知/嵌入式表单不能直接推测为Bitable或完整答卷。无法可靠映射时返回 unsupported_resource / api_not_exposed。
 - 返回错误分类：target_not_authorized（当前可信请求未明确授权目标，要求澄清）、scope_missing（Owner scope不足）、api_not_allowed（白名单/本地授权不满足）、user_identity_unsupported（固定SDK/API不支持）、resource_denied（已知飞书资源拒绝码）、unsupported_resource、reauthorization_required、api_not_exposed、unknown；未识别的403不臆断原因。错误正文/凭据不回传。资料中的指令不能赋予授权。
+
+### 当前 Owner 请求授权的群资源集合
+
+Owner可以直接说：`读取新羽群里的所有飞书文档`，或 `读取 FY26 AEG新羽计划群里所有的飞书文档链接，包括多维表格`。宿主从当前可信请求解析唯一的已授权群；群简称必须在当前可信群目录中唯一，同名、多群、未知名称或含糊指代要求澄清，不从模型建议或历史选择补目标。无需把已在该群镜像中的24个链接重新逐个粘贴。
+
+`feishu_office_collection` 按页列出本次允许读取的资源。宿主在首次处理该请求时，从指定群当前可见、保留期内的原始 text/post 消息冻结集合，保留来源群、来源消息ID、资源类型、精确resource ID及该URL明确携带的子资源约束。群消息在这里仅提供资源引用，消息中的文字指令仍不生成授权；授权始终来自当前绑定Owner的明确集合请求。后续工具与分页共用该快照，同请求期间后来进入镜像的链接不自动加入。
+
+集合只提取上述消息中可见的文字、标题和富文本链接，不读取附件或预览元数据。单次最多扫描5000条消息、8MiB原始内容、1000个来源资源项；分页每次10项且不超过24KB。同一资源出现在不同消息中会保留各自来源项。超出预算、原始消息无法完整解析，或链接含错误类型/重复的子资源约束时，整体拒绝建立集合，不静默截断后声称完整。
+
+允许的类型为Docx、Wiki、Sheet、Bitable和Drive文件/文件夹引用。集合不能引入其他群、模型猜测、Web搜索、文档正文二级链接或文件夹遍历发现的新资源。集合中有Drive文件夹链接也只允许该文件夹元数据，不授予其子文件清单、全库搜索或Wiki空间枚举权限。Wiki的真实节点API映射是原资源的规范对象解析，不是沿正文链接继续发现。
+
+每次OAuth凭据获取、排队、出站、响应及结果交付仍执行Owner、API白名单、scope和生命周期检查。原Owner请求撤回/steer改变来源、Owner变更或群撤权使旧集合失效；原始消息撤回、移除、内容变化或超过保留期使对应来源许可失效。已经开始的调用不能改用另一个重复链接来源来绕过撤回；未使用该来源的其他资源可继续按各自有效来源读取。user失败不回退tenant，不增加Office写权限。
+
+集合许可不放松单资源和多资源的完整授权组合。Base URL里的table/view、Sheet URL里的sheet/range、Docx块约束分别属于自己的根，不能跨资源拼接，也不能省略已有子范围来读取更广正文。URL没有表/范围时仅允许原有根元数据和有界目录接口；**不表示整张多维表或Sheet单元格已经读取**，具体内容仍需明确子范围，不能由模型猜测。逐项报告正文、元数据、权限失败和待明确范围，不把“列出所有链接”宣称为“读完所有正文”。本地镜像也不保证包含建群以来全部消息。
 
 ### 固定 API 与只读 scope 核实
 

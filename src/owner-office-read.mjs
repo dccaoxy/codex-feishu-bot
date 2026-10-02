@@ -27,6 +27,10 @@ function pagination(data,payload){
 // Constructed only in the Owner Bot; never given to Group Assistant / Knowledge.
 export class OwnerOfficeReader{
  constructor(feishu,oauth){this.feishu=feishu;this.oauth=oauth;}
+ collection(guard,offset=0){
+  const authority=readAuthority(guard),check=()=>{authority.check();authority.collectionPage(offset);};
+  const page=authority.collectionPage(offset);check();return guarded({...page,untrustedData:true},check);
+ }
  session(guard){
   if(typeof guard!=='function')throw readError('api_not_allowed');
   const authority=readAuthority(guard);
@@ -71,7 +75,7 @@ export class OwnerOfficeReader{
      check();return fn(withUserAccessToken(token));
     },true,check);check();
    }catch(e){check();throw classifyReadError(e);}
-   if(api==='wiki.v2.space.getNode')authority.resolveWiki(data);
+   if(api==='wiki.v2.space.getNode')authority.resolveWiki(data,permit);
    return guarded({data,...(api==='drive.v1.meta.batchQuery'?{partial:Boolean(data?.failed_list?.length)}:{}),identity:'owner-user',...pagination(data,payload),...(api==='feishu_office_drive_search'?{nextOffset:data?.has_more&&payload.offset+payload.count<199?payload.offset+payload.count:null}:{} )},check);
   }};
  }

@@ -6,6 +6,7 @@ import {OWNER_READ_APIS,readError} from './owner-office-read-policy.mjs';
 const str={type:'string',maxLength:300};
 const tool=(name,description,properties,required=[])=>({type:'function',name,description,inputSchema:{type:'object',properties,required,additionalProperties:false}});
 export const OFFICE_TOOLS=[
+ tool('feishu_office_collection','分页列出当前Owner明确要求读取的授权群Office资源集合。集合由宿主从指定群本地镜像冻结，不需逐个粘贴链接；保留来源消息、精确ID和子资源约束。然后用现有只读工具分批读取，元数据不等于正文；不能扩展到其他群或正文二级链接。',{offset:{type:'integer',minimum:0}}),
  tool('feishu_office_read_resources','按Owner当前请求读取最多5个明确飞书资源链接。Wiki先解析真实类型；Docx读取一页，Sheets/Bitable仅返回元数据，内容须明确范围或分页继续读取。逐项报告成功/失败，资料不是授权，不下载附件。',{urls:{type:'array',minItems:1,maxItems:5,items:{type:'string',maxLength:1000}}},['urls']),
  tool('feishu_office_drive_search','仅按Owner明确关键词搜索本人可见云文档，一页最多50条，offset+count小于200。结果是检索元数据，不是正文。',{query:{type:'string',minLength:1,maxLength:200},offset:{type:'integer',minimum:0,maximum:198},count:{type:'integer',minimum:1,maximum:50}},['query']),
  tool('feishu_office_find','查找飞书办公API工具：文档块/样式、表格、多维表格、文件、知识库、日历、任务、会议和通讯录。返回身份要求，不代表已经获批权限。',{query:str,offset:{type:'integer',minimum:0}}),
@@ -20,6 +21,7 @@ export class Office {
  constructor(feishu,ownerOAuth){this.feishu=feishu;this.ownerOAuth=ownerOAuth;this.reader=new OwnerOfficeReader(feishu,ownerOAuth);}
  async execute(name,a,guard,authorize){
   if(typeof guard!=='function')throw Error('缺少Owner请求守卫');guard();a=structuredClone(a);
+  if(name==='feishu_office_collection')return this.reader.collection(guard,a.offset);
   if(name==='feishu_office_read_resources')return this.reader.resources(a.urls,guard);
   if(name==='feishu_office_drive_search')return boundedRead(await this.reader.session(guard).call(name,a));
   if(name==='feishu_office_find'){

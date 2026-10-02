@@ -1,3 +1,13 @@
+# 当前返工：PR #30 Collection-scoped Read Permit（2026-10-02）
+
+- Task Source：Human报告真实候选产品阻断：已找到授权群24个Office链接，但逐链接permit要求Owner重新粘贴。按本轮明确要求在同一PR/分支增加受控群集合许可，返工前已退回Draft；不Merge，不部署、不扩大真实验收、不修改业务数据。
+- Implementation：当前Owner明确指定唯一授权群及全部/所有Office资源，宿主冻结本地可信消息镜像的资源集合，逐来源保存群/消息/类型/精确ID及子资源完整组合。增加集合分页工具，既有文档/Office读取统一使用该集合；不从模型参数、旧消息中的命令、文档正文二级链接、搜索或其他群扩权。
+- 生命周期：同一次Owner请求跨工具/分页共享冻结快照；后入库链接不会加入。源消息撤回/移除/变化/过保留期使关联许可失效；群撤权、Owner变化、当前请求/steer变化使旧集合失效。Wiki实际节点映射继承来源和子范围，集合不允许Drive子文件枚举或Wiki空间遍历。完整grant tuple、user OAuth/API/scopes、无tenant回退及原写权限边界不降低。
+- Validation：check及diff检查通过；全量组合 **1228/1228**，0失败/跳过。本轮新增161项：集合模块82项、真实Bot→Gateway/Office/Reader集成72项、permit专项新增7项。覆盖24个镜像资源无需手工粘贴、Owner私聊/群来源、分页、跨群/模型猜测/正文二级链接/后入库链接拒绝、Sheet/Bitable完整tuple矩阵、Wiki映射继承与来源失效，以及lease/队列/access/响应/交付五个等待边界的撤回、撤权、Owner变化、steer和回合结束。另修正中文标点相邻链接遗漏；富文本href按完整URL原子解析，query/fragment中的嵌套URL不能产生额外许可，Bot级反例确认嵌套目标0 OAuth lease/0 SDK出站。OAuth/SDK均为模拟，不访问真实Office资源。
+- 协议与隔离：无飞书凭据的开发配置下，真实Codex `0.159.0` doctor完成握手/登录/8模型检查，ephemeral只读smoke及动态工具注册通过；Group **30** 次、Knowledge **19** 次本地模拟provider对抗调用全部通过，包含新增集合工具的隔离拒绝。本轮未连接候选Shared App Server、未重启服务、未发送真实消息或修改业务数据。补充代码复核未发现阻断项，但不替代新head独立审核。
+- 限制：仅从可信text/post可见字段提取资源，超扫描/输出预算或无法可靠解析时保守拒绝。根链接缺Sheet范围/Bitable子表时仍仅允许原有元数据/有界目录，不宣称读完表格正文；每个来源项与原tuple分别检查，重复链接不替换已开始调用的来源。README已说明这些边界。
+- Delivery / Remaining：同一PR/分支提交推送本轮实现和文档，重新Ready请求独立审核，以GitHub最新head/状态为准。当前运行候选仍是已部署的 `4d159c2`，本轮变更未部署、未Merge。原有直接Docx403/Sheet缺样本等真实验收限制仍保留，不因自动化通过而消除；没有新的真实群/Office验收，也没有远端CI结果或独立PASS声明。
+
 # 当前部署：PR #30 Owner 用户只读路由已启用，真实验收部分完成（2026-10-02）
 
 - Task Source：Human 授权部署独立 PASS 的 `4d159c2d7f61a1bc3e4e548ef94164216bc13c99`，扩展已审核只读策略并进行真实只读验收；不 Merge，不新增 user 写权限。

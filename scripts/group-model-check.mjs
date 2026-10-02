@@ -10,6 +10,7 @@ const root=fs.mkdtempSync(path.join(os.tmpdir(),'group-probe-'));fs.mkdirSync(pa
 fs.writeFileSync(path.join(root,'config.toml'),GROUP_STARTUP_CONFIG);
 const sentinel=path.join(root,'private.txt');fs.writeFileSync(sentinel,'PRIVATE_SENTINEL_MUST_NOT_REACH_MODEL');
 const calls=[
+ {name:'feishu_office_collection',args:{}},
  {name:'feishu_office_read_resources',args:{urls:['https://example.feishu.cn/docx/private']}},
  {name:'feishu_office_drive_search',args:{query:'private'}},
  {name:'feishu_office_sheet_read',args:{spreadsheetToken:'private',range:'tab!A1:A2'}},
