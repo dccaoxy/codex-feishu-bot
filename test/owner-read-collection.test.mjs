@@ -224,3 +224,22 @@ test('shared entries deduplicate rich text fields and obey type filtering',async
  const f=fixture(t),url='https://example.feishu.cn/share/base/form/shr';f.add('a','source',{zh_cn:{content:[[{tag:'a',text:url,href:url}]]}},'post');
  assert.equal((await f.create()).page().total,1);assert.equal((await f.create('读取新羽群里的所有Docx')).page().total,0);
 });
+
+for(const kind of ['text','post'])for(const second of ['docx/second','share/base/form/shared'])test(`Chinese prose preserves next ${second} in ${kind}`,async t=>{
+ const f=fixture(t),text=office('first')+'请继续看https://example.feishu.cn/'+second;
+ f.add('a','source',kind==='text'?text:{zh_cn:{content:[[{tag:'text',text}]]}},kind);
+ const c=await f.create(),rows=c.page().resources;assert.equal(rows.length,2);assert.ok(rows.every(r=>r.provenance.messageId==='source'));
+ assert.equal(rows[1].state,second.startsWith('share')?'unsupported':'permitted');
+});
+for(const kind of ['text','post'])for(const delimiter of ['?next=中文','#中文'])test(`continued text does not split second URL ${delimiter} atom in ${kind}`,async t=>{
+ const f=fixture(t),text=office('first')+'继续看'+office('second')+delimiter+office('nested')+'继续'+office('alsoNested');
+ f.add('a','source',kind==='text'?text:{zh_cn:{content:[[{tag:'text',text}]]}},kind);
+ assert.deepEqual((await f.create()).grants.map(g=>g.values.document_id),['first','second']);
+});
+test('three Chinese separated roots including unsupported share preserve remaining text',async t=>{
+ const f=fixture(t);f.add('a','source',office('first')+'请看https://example.feishu.cn/share/base/shared再看'+office('last'));
+ assert.equal((await f.create()).page().total,3);
+});
+test('href containing Chinese and another URL remains atomic',async t=>{
+ const f=fixture(t);f.add('a','source',{zh_cn:{content:[[{tag:'a',text:'link',href:office('first')+'请看'+office('second')}]]}},'post');assert.equal((await f.create()).page().total,0);
+});

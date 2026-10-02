@@ -224,3 +224,13 @@ for(const change of ['source-recall','group-revoke','owner-change','request-reca
  assert.ok(!after?.success||!JSON.stringify(after.data).includes('/share/base/form/shared'));
  assert.deepEqual(f.counts(),{calls:0,leases:0,accesses:0});
 });
+
+for(const shared of [false,true])test(`continued Chinese text Bot source lifecycle, shared=${shared}`,async t=>{
+ const f=fixture(t);f.add('a','source',link('docx','first')+'请继续看'+link(shared?'share/base/form':'docx',shared?'shared':'second'));
+ const page=await f.call('feishu_office_collection');assert.equal(page.success,true);assert.equal(page.data.total,2);assert.ok(page.data.resources.every(r=>r.provenance.messageId==='source'));
+ assert.deepEqual(f.counts(),{calls:0,leases:0,accesses:0});
+ if(shared){assert.equal(page.data.resources[1].state,'unsupported');assert.equal((await f.office('bitable.v1.app.get',{path:{app_token:'shared'}})).success,false);assert.deepEqual(f.counts(),{calls:0,leases:0,accesses:0});}
+ else assert.equal((await f.read('second')).success,true);
+ assert.equal((await f.read('first')).success,true);
+ f.groupStore.recall('a','source');const before=f.counts();assert.equal((await f.read('first')).success,false);assert.equal((await f.read(shared?'shared':'second')).success,false);assert.deepEqual(f.counts(),before);
+});

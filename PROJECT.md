@@ -1,4 +1,12 @@
-# 当前返工：PR #30 链接中文边界与共享入口显式报告（2026-10-02）
+# 当前返工：PR #30 中文边界后续链接完整性（2026-10-02）
+
+- Task Source：[c4f86b8独立NEEDS CHANGES](https://github.com/dccaoxy/codex-feishu-bot/pull/30#issuecomment-5952933530)。同一分支，先退回Draft，不部署、不Merge。
+- Root cause / Implementation：上一轮仅截取中文边界前的根URL，丢弃其后无空格文本。现在在顶层文本扫描时拆出已验证根，保留剩余正文并继续扫描下一完整URL；每个后续URL仍拥有完整query/fragment，结构化href不参与拆分。共享入口同样保留后续文本，仅列入unsupported清单，不成为grant。
+- Validation：新增12项（解析10、Bot集成2），旧实现新增解析反例9失败/1通过；修复后集合/permit/Bot专项250/250通过。覆盖text/post连续标准链接、后续共享入口、三段连续链接、后续query/fragment嵌套拒绝、href原子性；Bot验证同一来源的两个标准资源均可读且撤回后无新增OAuth/SDK调用，共享目标尝试0lease/access/SDK。check及diff检查通过；全量组合 **1287/1287**，0失败/取消/跳过。
+- Environment：无飞书凭据、无Shared地址的隔离开发副本，固定Codex0.159.0 doctor/ephemeral smoke通过；Group30/Knowledge19次模拟provider隔离探针通过。未使用真实OAuth、未修改任何飞书资源或生产配置。README已同步。
+- Remaining：同一PR推送新head后Draft→Ready请求独立审核。线上候选继续240967c，本轮未部署、未Merge；共享入口不支持、Docx403、Sheet缺样本与长期refresh观察限制不变，不能宣称真实集合验收通过。
+
+# 历史返工：PR #30 链接中文边界与共享入口显式报告（2026-10-02）
 
 - Task Source：Human 同意同一PR返工，修复真实验收发现的紧贴中文正文Docx漏识别，核查共享入口；不部署、不扩大权限、不Merge。分支仍为 `codex/issue-29-owner-read`，返工前退回Draft。
 - Implementation：仅可见文本的标准资源根ID后允许中文边界；不裁剪结构化href、编码路径、query/fragment，不发现嵌套目标。共享base/form链接加入冻结分页清单，标记unsupported及明确原因，不加入grant，resourceId为null，保留来源群/消息/URL；同样执行预算和来源/Owner生命周期检查。原有tuple、隔离和用户身份不回退tenant边界保留。

@@ -120,6 +120,15 @@ function links(kind,raw){
   for(const span of spans){
    const candidates=field.href?[span]:[];let remaining=field.href?'':span;
    while(remaining){
+    // Split only a validated root followed by visible Chinese prose, before
+    // any query/fragment. Keep the suffix and scan its next top-level URL;
+    // that next URL again owns its complete query/fragment. href never enters.
+    const prose=/^(https:\/\/[^/\s?#]+\/(?:docx|wiki|sheets|base|file|drive\/folder|share\/base(?:\/form)?)\/[a-zA-Z0-9_-]{1,200})(?=\p{Script=Han})/u.exec(remaining);
+    if(prose&&(readTarget(prose[1])||sharedEntry(prose[1]))){
+     candidates.push(prose[1]);
+     const rest=remaining.slice(prose[1].length),next=/https?:\/\//iu.exec(rest);
+     remaining=next?rest.slice(next.index):'';continue;
+    }
     const punctuation=/[，。；！？、：]/u.exec(remaining),query=remaining.search(/[?#]/u);
     if(!punctuation||(query!==-1&&query<punctuation.index)){candidates.push(remaining);break;}
     candidates.push(remaining.slice(0,punctuation.index));
@@ -127,14 +136,8 @@ function links(kind,raw){
     remaining=next?rest.slice(next.index):'';
    }
    for(const rawCandidate of candidates){
-    let candidate=field.href?rawCandidate:rawCandidate.replace(/[。，；！？,.!?;)\]}"'`“”‘’「」『』【】<>]+$/u,'');
+    const candidate=field.href?rawCandidate:rawCandidate.replace(/[。，；！？,.!?;)\]}"'`“”‘’「」『』【】<>]+$/u,'');
     if(Buffer.byteLength(candidate)>limits.urlBytes)incomplete();
-    // Only visible plain text may have a prose boundary. Never split a
-    // structured href, percent-encoded path, query, fragment or nested URL.
-    if(!field.href){
-     const prose=/^(https:\/\/[^/\s?#]+\/(?:docx|wiki|sheets|base|file|drive\/folder)\/[a-zA-Z0-9_-]{1,200})(?=\p{Script=Han})/u.exec(candidate);
-     if(prose&&readTarget(prose[1]))candidate=prose[1];
-    }
     const target=readTarget(candidate);
     if(!target){const shared=sharedEntry(candidate);if(shared)found.set('unsupported:'+candidate,shared);continue;}
     const url=new URL(candidate),extra=selectors(url,target.type);
