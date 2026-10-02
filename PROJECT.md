@@ -1,12 +1,17 @@
-# 当前部署：PR #30 候选已更新，等待 Owner 重新授权（2026-10-02）
+# 当前部署：PR #30 Owner 用户只读路由已启用，真实验收部分完成（2026-10-02）
 
 - Task Source：Human 授权部署独立 PASS 的 `4d159c2d7f61a1bc3e4e548ef94164216bc13c99`，扩展已审核只读策略并进行真实只读验收；不 Merge，不新增 user 写权限。
 - Deployment：候选已安装上述精确审核代码。部署前备份源码、真实配置、服务配置和两份 SQLite；停机检查前后各业务表计数/摘要一致。真实配置和服务配置未改，Shared App Server 保持原进程；机器人重启后确认 Codex 与飞书长连接恢复，启动日志无新错误或 EMFILE。
 - Validation：候选 check、全量 **1067/1067**（0失败/跳过）、真实 Codex doctor/smoke 通过；Group **28** 次与 Knowledge **18** 次模拟 provider 隔离探针通过。未发真实群消息、未进行 Office 写操作。远端 CI 未验证。
 - Exception：首次安装后的测试为1066通过/1失败，原因是本地部署文件清单遗漏测试依赖的 `config.example.json`；自动回滚旧源码并验证连接正常。补齐同一审核版本中的示例文件后，第二次部署及全部验证通过；未修改审核业务代码或真实配置。
-- OAuth pending（Human范围调整）：公司无法批准 `space:document:retrieve`，本轮移除该scope及 `drive.v1.file.list`，不申请更大替代权限。仅准备本地合并策略，保留原13 APIs/6 scopes，新增19个固定只读 APIs/8个读取 scopes，共32 APIs/14 scopes。应用scope只读查询已确认所需用户权限均已开通，包括Human手工开通的Sheets/Bitable；尚未取得新的Owner grant，运行配置未改。准备新的localhost授权，由Human本人确认。
+- OAuth / Enable：Human 已在本机 Chrome 完成个人授权，实际绑定 Owner 精确一致。公司无法批准的 `space:document:retrieve` 及 `drive.v1.file.list` 已从本次策略排除，不申请更大替代权限。保留原13 APIs/6 scopes，新增19个已审核固定只读 APIs/8个读取 scopes，共32 APIs/14 scopes；没有新增 user 写权限。新凭据已加密保存在本地忽略目录，密钥在 macOS Keychain；未打印/提交 token。启用前再次备份配置和两份 SQLite，运行配置仅扩展 `ownerOAuth.apis`，其余字段与备份一致；只重启机器人，未改 Shared App Server/服务配置。
 - 使用边界：不能遍历文件夹清单；可按当前Owner可信请求中的明确链接/ID读取其有访问权的具体Docx/Wiki/Sheet/Bitable，仍须相应scope和资源访问权。群里出现链接不会自动授予权限或读取授权；本版需Owner在当前请求中明确给出目标。Sheet单元格需明确range，多维表格记录需明确table及分页范围；元数据成功不等于正文读取成功。
-- Remaining / Human Gate：Docx（此前tenant403）、Wiki、Sheets、Bitable及合适Drive样本的真实 user 只读验收 **未执行**，身份/结果类别/计数待授权后核对；失败不得tenant回退。不人为制造refresh轮换。部署验证通过不等于真实验收通过，本轮 Gate 尚未完成；不 Merge。
+- 真实只读验收：通过部署版本的 Bot 当前来源守卫、OwnerOfficeReader、OwnerOAuth 和固定 SDK 发起真实飞书读取；本地操作员在 Human 授权选样范围内指定群内既有链接，使用仅内存的来源适配器，未向生产 inbox 写入模拟消息。这不是飞书入站消息端到端验收。Wiki 节点及关联 Docx 正文成功返回20块（has_more=true，仅首个有界页）；Bitable 节点/元数据及指定表成功返回15条记录（total=15，has_more=false）；Drive 单文档元数据成功1项、失败0项，不涉及文件夹遍历。
+- 真实失败：选择并核对历史工具回执中此前 tenant HTTP403/API1770032 的3份 Docx，当前 Owner user 路由均能读取文档元数据，但正文块读取仍返回 HTTP403/API1770032，归类 `resource_denied`。不把元数据成功当正文成功，也不假定这些链接目前对 Owner 可读；需 Human 提供一份当前浏览器可读正文的 Docx 进一步区分资源/接口限制。未切换 tenant 重试。
+- 身份/失败边界：共13次真实 Office API 请求逐次核对 Authorization 为当前 Owner 用户凭据，13/13一致，无其他身份请求；每轮真实 user_info 均与绑定 Owner 一致。合成 user 凭据获取失败及非 Owner 来源探针均在出站前拒绝，0网络请求，无tenant回退。凭据密文快照在验收前后未变，未人为制造到期/refresh rotation。Group/Knowledge隔离沿用同一源码1067项回归与28/18项协议探针，未进行真实普通成员冒充或群发测试。
+- 启用后健康复核：check通过；只读解析配置后执行与doctor/smoke对应的真实协议检查，握手/登录/7模型、ephemeral只读任务及27个动态工具注册通过；不触发模型任务。机器人PID38762、Shared PID743正常，飞书长连接ready；86个部署文件哈希匹配审核源码，plist不变，增量日志无error/EMFILE。本次未重复全量和隔离探针，复用启用前同源码通过证据。
+- 脱敏证据：本地 Git 忽略的 `data/pr30-deployment.json`、`pr30-owner-enable.json`、`pr30-owner-read-acceptance.json` 与两个 additional 验收结果；配置/数据库备份及加密凭据均只在本地。未记录资源正文、Owner标识或任何 access/refresh token 到提交/评论。
+- Remaining / Human Gate：个人OAuth授权与候选启用完成，Wiki/Bitable/Drive元数据真实只读通过；“此前tenant403且Owner可读”的直接Docx成功场景尚未通过，Sheet尚无明确样本及工作表/小范围，已向Human索取。**完整真实验收尚未满足，不标记全部PASS**。现有路由继续保守拒绝无权资源，等待补样本；未进行真实Office写操作、业务文档修改或群发送，未Merge。自然refresh rotation保留后续到期观察。
 
 # 历史返工：PR #30 R2 多资源授权组合（2026-10-01）
 
