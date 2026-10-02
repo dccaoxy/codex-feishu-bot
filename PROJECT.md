@@ -4,7 +4,8 @@
 - Deployment：候选已安装上述精确审核代码。部署前备份源码、真实配置、服务配置和两份 SQLite；停机检查前后各业务表计数/摘要一致。真实配置和服务配置未改，Shared App Server 保持原进程；机器人重启后确认 Codex 与飞书长连接恢复，启动日志无新错误或 EMFILE。
 - Validation：候选 check、全量 **1067/1067**（0失败/跳过）、真实 Codex doctor/smoke 通过；Group **28** 次与 Knowledge **18** 次模拟 provider 隔离探针通过。未发真实群消息、未进行 Office 写操作。远端 CI 未验证。
 - Exception：首次安装后的测试为1066通过/1失败，原因是本地部署文件清单遗漏测试依赖的 `config.example.json`；自动回滚旧源码并验证连接正常。补齐同一审核版本中的示例文件后，第二次部署及全部验证通过；未修改审核业务代码或真实配置。
-- OAuth pending：核对现有加密授权与绑定 Owner 一致；本地准备合并策略（保留原13 APIs/6 scopes，新增20个固定只读 APIs/9个读取 scopes，合计33 APIs/15 scopes）。尚未应用到运行配置、尚未重新授权。应用侧还缺用户身份 `space:document:retrieve`、`sheets:spreadsheet:readonly`、`bitable:app:readonly`；开放平台仅准备勾选，未提交。须先开通并按平台要求发布，再启动新的 localhost Owner OAuth 流程，由 Human 本人确认授权。其余新增 scopes 已在应用用户权限中列出，仍需取得 Owner grant。
+- OAuth pending（Human范围调整）：公司无法批准 `space:document:retrieve`，本轮移除该scope及 `drive.v1.file.list`，不申请更大替代权限。仅准备本地合并策略，保留原13 APIs/6 scopes，新增19个固定只读 APIs/8个读取 scopes，共32 APIs/14 scopes。应用scope只读查询已确认所需用户权限均已开通，包括Human手工开通的Sheets/Bitable；尚未取得新的Owner grant，运行配置未改。准备新的localhost授权，由Human本人确认。
+- 使用边界：不能遍历文件夹清单；可按当前Owner可信请求中的明确链接/ID读取其有访问权的具体Docx/Wiki/Sheet/Bitable，仍须相应scope和资源访问权。群里出现链接不会自动授予权限或读取授权；本版需Owner在当前请求中明确给出目标。Sheet单元格需明确range，多维表格记录需明确table及分页范围；元数据成功不等于正文读取成功。
 - Remaining / Human Gate：Docx（此前tenant403）、Wiki、Sheets、Bitable及合适Drive样本的真实 user 只读验收 **未执行**，身份/结果类别/计数待授权后核对；失败不得tenant回退。不人为制造refresh轮换。部署验证通过不等于真实验收通过，本轮 Gate 尚未完成；不 Merge。
 
 # 历史返工：PR #30 R2 多资源授权组合（2026-10-01）
