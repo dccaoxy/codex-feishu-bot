@@ -206,3 +206,21 @@ for(const failure of ['disabled-api','scope','user-denied'])test(`collection ${f
  if(failure==='user-denied')f.outputs.set('docx.v1.document.rawContent',Object.assign(Error('private SDK error'),{feishuCode:1770032}));
  assert.equal((await f.read('doc')).success,false);assert.equal(f.calls.length,failure==='user-denied'?1:0);assert.ok(!JSON.stringify(f.responses).includes('fixture-user-token'));
 });
+
+test('Chinese adjacent Docx gets exact authority while shared tokens cannot reach OAuth or SDK',async t=>{
+ const f=fixture(t);f.add('a','source',link('docx','doc123')+'请查看');f.add('a','share',link('share/base','shr123'));
+ const page=await f.call('feishu_office_collection');assert.equal(page.success,true);assert.equal(page.data.total,2);
+ assert.equal(page.data.resources.filter(r=>r.state==='unsupported').length,1);
+ assert.deepEqual(f.counts(),{calls:0,leases:0,accesses:0});
+ const denied=await f.office('bitable.v1.app.get',{path:{app_token:'shr123'}});assert.equal(denied.success,false);
+ assert.deepEqual(f.counts(),{calls:0,leases:0,accesses:0});
+ assert.equal((await f.read('doc123')).success,true);assert.equal((await f.read('doc12')).success,false);
+ f.groupStore.recall('a','source');assert.equal((await f.read('doc123')).success,false);
+});
+for(const change of ['source-recall','group-revoke','owner-change','request-recall','steer'])test(`unsupported shared inventory lifecycle ${change}`,async t=>{
+ const f=fixture(t);f.add('a','source',link('share/base/form','shared'));
+ const page=await f.call('feishu_office_collection');assert.equal(page.success,true);assert.equal(page.data.resources[0].state,'unsupported');assert.equal(page.data.resources[0].provenance.resourceId,null);
+ f.change(change);const after=await f.call('feishu_office_collection');
+ assert.ok(!after?.success||!JSON.stringify(after.data).includes('/share/base/form/shared'));
+ assert.deepEqual(f.counts(),{calls:0,leases:0,accesses:0});
+});

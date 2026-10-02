@@ -1,3 +1,12 @@
+# 当前返工：PR #30 链接中文边界与共享入口显式报告（2026-10-02）
+
+- Task Source：Human 同意同一PR返工，修复真实验收发现的紧贴中文正文Docx漏识别，核查共享入口；不部署、不扩大权限、不Merge。分支仍为 `codex/issue-29-owner-read`，返工前退回Draft。
+- Implementation：仅可见文本的标准资源根ID后允许中文边界；不裁剪结构化href、编码路径、query/fragment，不发现嵌套目标。共享base/form链接加入冻结分页清单，标记unsupported及明确原因，不加入grant，resourceId为null，保留来源群/消息/URL；同样执行预算和来源/Owner生命周期检查。原有tuple、隔离和用户身份不回退tenant边界保留。
+- API核查：固定SDK 1.74.0的表单读取需要app_token/table_id/form_id，现有只读API策略没有分享标识反解接口。因此3个真实共享入口仍未验证可读，不能将分享标识冒充资源ID；不增加API、scope、网页抓取或真实调用。README已记录官方接口参考及清单状态语义。
+- Validation：check及diff检查通过；最终全量组合 **1275/1275**，0失败/取消/跳过。本轮新增20项回归覆盖中文正文、富文本href、编码/伪造路径、query/fragment嵌套、共享入口分页/去重/跨群/类型过滤以及撤回撤权和Owner变更；模拟Bot链路证明共享标识0OAuth lease/0SDK调用，标准资源仍可读且撤回后失效。最初新增7项在旧实现3失败/4通过；修复后专项201项通过。补充Owner变更测试需兼容宿主不再响应工具的安全路径，已修正测试断言，无业务实现改动。
+- 环境：无飞书凭据、无共享服务地址的临时开发副本，固定Codex 0.159.0 doctor握手/登录/8模型及ephemeral smoke通过；Group30/Knowledge19次模拟provider隔离探针通过。未连接/重启生产服务，未执行真实Office验收。
+- Remaining：运行候选继续为240967c，OAuth scopes/API、配置和业务数据未改。中文链接实际可读性、共享入口、已知Docx403/Sheet缺样本和长期refresh限制仍须如实保留；新代码提交后重新Ready请求独立审核，不能以自动化通过代替真实集合验收。未部署、未Merge。
+
 # 当前候选：PR #30 `240967c` 已部署，集合完整性真实验收未通过（2026-10-02）
 
 - Task Source：Human 授权部署独立 PASS 的 `240967caa10049a1240cd698d8ccf8332f48e4b0`，保持现有权限和数据，仅验收指定授权群当前可信本地镜像的 Office 资源集合，不 Merge。后续 Human 单独批准只为 Group/Knowledge 固定已验证的 Codex `0.159.0`。

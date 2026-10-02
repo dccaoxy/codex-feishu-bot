@@ -193,3 +193,34 @@ test('row budget overflow rejects even if each source has only one short link',a
  const f=fixture(t),db=f.messages.db,now=Date.now(),row=db.prepare('INSERT INTO messages VALUES(?,?,?,?,?,?,?,?,?,?,?,?)'),raw=db.prepare('INSERT INTO raw_messages(chat,id,content) VALUES(?,?,?)');
  db.exec('BEGIN');for(let i=0;i<5001;i++){row.run('a','r'+i,'speaker','user',now,'text','x','{}',null,null,null,'recorded');raw.run('a','r'+i,JSON.stringify({text:'x'}));}db.exec('COMMIT');await assert.rejects(f.create(),/未建立完整集合/);
 });
+
+for(const kind of ['text','post'])test(`plain ${kind} URL followed immediately by Chinese prose preserves exact ID`,async t=>{
+ const f=fixture(t),text=office('doc123')+'请大家查看';
+ f.add('a','source',kind==='text'?text:{zh_cn:{content:[[{tag:'text',text}]]}},kind);
+ assert.deepEqual((await f.create()).grants.map(g=>g.values.document_id),['doc123']);
+});
+for(const suffix of ['/中文','%E4%B8%AD','-suffix/中文'])test(`invalid path is not repaired at Chinese text: ${suffix}`,async t=>{
+ const f=fixture(t);f.add('a','source',office('doc123')+suffix);assert.equal((await f.create()).grants.length,0);
+});
+test('atomic href with adjacent Chinese is not repaired',async t=>{
+ const f=fixture(t);f.add('a','source',{zh_cn:{content:[[{tag:'a',text:'link',href:office('doc123')+'中文'}]]}},'post');assert.equal((await f.create()).grants.length,0);
+});
+test('shared entries are visible but never grants; pagination and recall still apply',async t=>{
+ const f=fixture(t);for(let i=0;i<11;i++)f.add('a','share'+i,`https://example.feishu.cn/share/base/${i%2?'form/':''}shr${i}`);
+ f.add('a','doc',office('readable'));f.add('b','foreign','https://example.feishu.cn/share/base/foreign');
+ const c=await f.create();assert.equal(c.grants.length,1);assert.equal(c.page().total,12);
+ const entries=[...c.page().resources,...c.page(10).resources];
+ const unsupported=entries.filter(e=>e.state==='unsupported');assert.equal(unsupported.length,11);
+ assert.ok(unsupported.every(e=>e.reason==='unsupported_shared_resource_path'&&!e.root&&!e.values&&e.provenance.chat==='a'));
+ f.messages.db.prepare("UPDATE messages SET state='cancelled' WHERE id='share0'").run();assert.throws(()=>c.page(),/target_not_authorized/);
+});
+for(const tail of ['?next=中文https://example.feishu.cn/docx/nested','#中文https://example.feishu.cn/docx/nested'])test(`Chinese query/fragment never splits nested target ${tail}`,async t=>{
+ const f=fixture(t);f.add('a','source',office('root')+tail);assert.deepEqual((await f.create()).grants.map(g=>g.values.document_id),['root']);
+});
+for(const url of ['https://example.feishu.cn.evil.test/share/base/shr','https://user:pass@example.feishu.cn/share/base/shr','https://example.feishu.cn/share/base/shr/evil','https://evil.test/?next=https://example.feishu.cn/share/base/shr'])test(`forged shared entry is not inventoried ${url}`,async t=>{
+ const f=fixture(t);f.add('a','source',url);assert.equal((await f.create()).page().total,0);
+});
+test('shared entries deduplicate rich text fields and obey type filtering',async t=>{
+ const f=fixture(t),url='https://example.feishu.cn/share/base/form/shr';f.add('a','source',{zh_cn:{content:[[{tag:'a',text:url,href:url}]]}},'post');
+ assert.equal((await f.create()).page().total,1);assert.equal((await f.create('读取新羽群里的所有Docx')).page().total,0);
+});

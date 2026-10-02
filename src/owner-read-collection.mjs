@@ -99,6 +99,15 @@ function selectors(url,type){
  return values;
 }
 
+// Public share tokens are not app/table/form IDs. Inventory only; no resolver
+// exists in the fixed Owner read API policy, and no authority is minted here.
+function sharedEntry(candidate){
+ let u;try{u=new URL(candidate);}catch{return null;}
+ if(!/^\/share\/base\/(?:form\/)?[a-zA-Z0-9_-]{1,200}\/?$/.test(u.pathname))return null;
+ const hostCheck=new URL(u);hostCheck.pathname='/base/hostCheck';
+ if(!readTarget(hostCheck.href))return null;
+ return {type:'base',url:candidate,unsupported:true};
+}
 function links(kind,raw){
  const found=new Map();
  for(const field of messageStrings(kind,raw)){
@@ -118,9 +127,16 @@ function links(kind,raw){
     remaining=next?rest.slice(next.index):'';
    }
    for(const rawCandidate of candidates){
-    const candidate=field.href?rawCandidate:rawCandidate.replace(/[。，；！？,.!?;)\]}"'`“”‘’「」『』【】<>]+$/u,'');
+    let candidate=field.href?rawCandidate:rawCandidate.replace(/[。，；！？,.!?;)\]}"'`“”‘’「」『』【】<>]+$/u,'');
     if(Buffer.byteLength(candidate)>limits.urlBytes)incomplete();
-    const target=readTarget(candidate);if(!target)continue;
+    // Only visible plain text may have a prose boundary. Never split a
+    // structured href, percent-encoded path, query, fragment or nested URL.
+    if(!field.href){
+     const prose=/^(https:\/\/[^/\s?#]+\/(?:docx|wiki|sheets|base|file|drive\/folder)\/[a-zA-Z0-9_-]{1,200})(?=\p{Script=Han})/u.exec(candidate);
+     if(prose&&readTarget(prose[1]))candidate=prose[1];
+    }
+    const target=readTarget(candidate);
+    if(!target){const shared=sharedEntry(candidate);if(shared)found.set('unsupported:'+candidate,shared);continue;}
     const url=new URL(candidate),extra=selectors(url,target.type);
     const values={ [target.key]:target.value,...(target.type==='wiki'?{}:extra) };
     const key=JSON.stringify([target.type,values,extra]);
@@ -151,7 +167,7 @@ export async function createReadCollection(text,gateway,context,guard){
  check();
  const rows=store.db.prepare(`SELECT m.chat,m.id,m.kind,m.time,m.state,r.content FROM messages m JOIN raw_messages r ON r.chat=m.chat AND r.id=m.id WHERE m.chat=? AND m.time>=? AND m.kind IN ('text','post') ORDER BY m.time,m.id LIMIT ?`).all(group.chat,store.lowerBound(),limits.rows+1);
  if(rows.length>limits.rows)incomplete();
- const grants=[];let bytes=0;
+ const grants=[],inventory=[];let bytes=0;
  const valid=row=>row&&row.time>=store.lowerBound()&&!['queued','queue_full','cancelled'].includes(row.state)&&store.visible(group.chat,row.id);
  const sourceHash=row=>digest(JSON.stringify([row.kind,row.time,row.content]));
  const readSource=store.db.prepare('SELECT m.chat,m.id,m.kind,m.time,m.state,r.content FROM messages m JOIN raw_messages r ON r.chat=m.chat AND r.id=m.id WHERE m.chat=? AND m.id=?');
@@ -161,20 +177,25 @@ export async function createReadCollection(text,gateway,context,guard){
   const original=sourceHash(row);
   for(const entry of links(row.kind,row.content)){
    if(!request.types.includes(entry.type))continue;
-   if(grants.length>=limits.resources)incomplete();
-   const provenance=Object.freeze({chat:group.chat,messageId:row.id,resourceType:entry.type,resourceId:entry.id});
+   if(inventory.length>=limits.resources)incomplete();
+   const provenance=Object.freeze({chat:group.chat,messageId:row.id,resourceType:entry.type,resourceId:entry.id??null});
    const sourceCheck=()=>{check();const current=readSource.get(group.chat,row.id);if(!valid(current)||sourceHash(current)!==original)denied();};
+   if(entry.unsupported){
+    inventory.push(Object.freeze({unsupported:true,url:entry.url,check:sourceCheck,provenance}));continue;
+   }
    grants.push(Object.freeze({root:entry.root,values:Object.freeze(entry.values),url:entry.url,check:sourceCheck,provenance,...(entry.wikiSelectors?{wikiSelectors:Object.freeze(entry.wikiSelectors)}:{})}));
+   inventory.push(grants.at(-1));
   }
  }
- check();Object.freeze(grants);
+ check();Object.freeze(grants);Object.freeze(inventory);
  return Object.freeze({check,grants,page(offset=0){
-  check();if(!Number.isSafeInteger(offset)||offset<0||offset>grants.length)throw readError('invalid_request');
-  const resources=grants.slice(offset,offset+10).map((g,i)=>{
+  check();if(!Number.isSafeInteger(offset)||offset<0||offset>inventory.length)throw readError('invalid_request');
+  const resources=inventory.slice(offset,offset+10).map((g,i)=>{
    g.check();
+   if(g.unsupported)return {index:offset+i,state:'unsupported',reason:'unsupported_shared_resource_path',url:g.url,provenance:g.provenance};
    return {index:offset+i,state:'permitted',url:g.url,root:g.root,values:g.values,provenance:g.provenance,...(g.wikiSelectors?{wikiSelectors:g.wikiSelectors}:{})};
   });
-  const result={resources,total:grants.length,nextOffset:offset+10<grants.length?offset+10:null,group:{reference:group.reference,displayName:name},scope:'frozen_current_local_mirror',untrustedData:true,note:'仅本次Owner请求冻结的当前群本地消息镜像链接集合；不代表完整历史或资源正文已读取。元数据、目录和正文读取仍受各自范围及OAuth权限限制。'};
+  const result={resources,total:inventory.length,nextOffset:offset+10<inventory.length?offset+10:null,group:{reference:group.reference,displayName:name},scope:'frozen_current_local_mirror',untrustedData:true,note:'仅本次Owner请求冻结的当前群本地消息镜像链接集合；不代表完整历史或资源正文已读取。unsupported共享入口未取得精确资源ID，未授予读取许可，不可将共享标识当作app/table/form ID。元数据、目录和正文读取仍受各自范围及OAuth权限限制。'};
   if(Buffer.byteLength(JSON.stringify(result))>24000)incomplete();
   return result;
  }});
