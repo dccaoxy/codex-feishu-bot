@@ -1,4 +1,13 @@
-# 当前返工：PR #30 R2 多资源授权组合（2026-10-01）
+# 当前部署：PR #30 候选已更新，等待 Owner 重新授权（2026-10-02）
+
+- Task Source：Human 授权部署独立 PASS 的 `4d159c2d7f61a1bc3e4e548ef94164216bc13c99`，扩展已审核只读策略并进行真实只读验收；不 Merge，不新增 user 写权限。
+- Deployment：候选已安装上述精确审核代码。部署前备份源码、真实配置、服务配置和两份 SQLite；停机检查前后各业务表计数/摘要一致。真实配置和服务配置未改，Shared App Server 保持原进程；机器人重启后确认 Codex 与飞书长连接恢复，启动日志无新错误或 EMFILE。
+- Validation：候选 check、全量 **1067/1067**（0失败/跳过）、真实 Codex doctor/smoke 通过；Group **28** 次与 Knowledge **18** 次模拟 provider 隔离探针通过。未发真实群消息、未进行 Office 写操作。远端 CI 未验证。
+- Exception：首次安装后的测试为1066通过/1失败，原因是本地部署文件清单遗漏测试依赖的 `config.example.json`；自动回滚旧源码并验证连接正常。补齐同一审核版本中的示例文件后，第二次部署及全部验证通过；未修改审核业务代码或真实配置。
+- OAuth pending：核对现有加密授权与绑定 Owner 一致；本地准备合并策略（保留原13 APIs/6 scopes，新增20个固定只读 APIs/9个读取 scopes，合计33 APIs/15 scopes）。尚未应用到运行配置、尚未重新授权。应用侧还缺用户身份 `space:document:retrieve`、`sheets:spreadsheet:readonly`、`bitable:app:readonly`；开放平台仅准备勾选，未提交。须先开通并按平台要求发布，再启动新的 localhost Owner OAuth 流程，由 Human 本人确认授权。其余新增 scopes 已在应用用户权限中列出，仍需取得 Owner grant。
+- Remaining / Human Gate：Docx（此前tenant403）、Wiki、Sheets、Bitable及合适Drive样本的真实 user 只读验收 **未执行**，身份/结果类别/计数待授权后核对；失败不得tenant回退。不人为制造refresh轮换。部署验证通过不等于真实验收通过，本轮 Gate 尚未完成；不 Merge。
+
+# 历史返工：PR #30 R2 多资源授权组合（2026-10-01）
 
 - Task Source：[3ea2172 的高风险 NEEDS CHANGES](https://github.com/dccaoxy/codex-feishu-bot/pull/30#issuecomment-5923482731)。同一分支与PR，先退回Draft，不部署、不Merge、不改变线上配置/权限/服务/数据。
 - 根因：R1的平面目标集合只证明各个ID/范围出现过，丢失了资源与子资源的配对关系；上轮1017项未覆盖跨组拼接，不能证明多目标安全。
