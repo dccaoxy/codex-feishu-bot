@@ -5,6 +5,7 @@ import {DatabaseSync} from 'node:sqlite';
 import {spawn} from 'node:child_process';
 import {CredentialVault,OwnerOAuth,binding} from '../src/owner-oauth.mjs';
 import {startOwnerAuthorization} from '../src/owner-oauth-callback.mjs';
+import {OWNER_READ_SPECIAL} from '../src/owner-office-read-policy.mjs';
 import {OFFICE_CATALOG} from '../src/office.mjs';
 const argv=process.argv.slice(2),arg=k=>{const i=argv.indexOf(k);return i<0?undefined:argv[i+1];};
 async function main(){
@@ -21,7 +22,7 @@ async function main(){
   const provider=new OwnerOAuth(config,owner,{vault});const lease=await provider.lease(r.allowedApis[0],()=>{});await lease.access();console.log('Owner 用户凭据可用（未执行办公 API）；不会输出凭据。');return;
  }
  const policy=JSON.parse(fs.readFileSync(arg('--policy'),'utf8'));
- if(!Array.isArray(policy.apis)||!policy.apis.length||new Set(policy.apis).size!==policy.apis.length||policy.apis.some(a=>!OFFICE_CATALOG.some(t=>t.name===a&&t.tokens.includes('user'))))throw Error('策略必须明确列出支持user身份的固定Office接口');
+ if(!Array.isArray(policy.apis)||!policy.apis.length||new Set(policy.apis).size!==policy.apis.length||policy.apis.some(a=>!OWNER_READ_SPECIAL.includes(a)&&!OFFICE_CATALOG.some(t=>t.name===a&&t.tokens.includes('user'))))throw Error('策略必须明确列出支持user身份的固定Office接口');
  if(!Array.isArray(policy.scopes)||!policy.scopes.includes('offline_access')||policy.scopes.length>200||new Set(policy.scopes).size!==policy.scopes.length||policy.scopes.some(s=>typeof s!=='string'||!/^[-a-zA-Z0-9_.:]+$/.test(s)))throw Error('策略必须明确列出去重的用户scope及offline_access');
  const flow=await startOwnerAuthorization({config,getOwner:owner,policy,vault});
  process.once('SIGINT',flow.close);process.once('SIGTERM',flow.close);

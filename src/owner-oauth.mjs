@@ -1,5 +1,6 @@
 // Owner-only local OAuth. No chat login, automatic scope expansion or tenant fallback.
 import fs from 'node:fs';
+import {readError} from './owner-office-read-policy.mjs';
 import path from 'node:path';
 import {randomBytes,randomUUID,createHash,createCipheriv,createDecipheriv} from 'node:crypto';
 import {spawn} from 'node:child_process';
@@ -44,6 +45,7 @@ export class CredentialVault {
   if(fs.existsSync(this.directory)){privatePath(this.directory,true);return this.keychain.read();}
   fs.mkdirSync(this.directory,{mode:0o700});return this.keychain.create();
  }
+ snapshot(){privatePath(this.directory,true);const s=privatePath(this.file);if(s.size>65536)throw fail();return hash(fs.readFileSync(this.file));}
  async unlock(){privatePath(this.directory,true);return this.keychain.read();}
  read(key){
   privatePath(this.directory,true);const s=privatePath(this.file);if(s.size>65536)throw fail();
@@ -96,14 +98,15 @@ export async function verifyOwner(accessToken,owner,fetcher=fetch){
 export class OwnerOAuth {
  constructor(config,getOwner,{vault,fetcher=fetch,now=Date.now}={}){this.config=config;this.getOwner=getOwner;this.vault=vault||new CredentialVault(config.storageDir);this.fetcher=fetcher;this.now=now;this.serial=Promise.resolve();}
  enabled(api){return this.config.ownerOAuth?.enabled===true&&this.config.ownerOAuth.apis?.includes(api);}
- async lease(api,guard){
+ async lease(api,guard,requiredScopes=[]){
   guard();if(!this.enabled(api))throw fail();
   const owner=this.getOwner(),id=binding(this.config,owner),policy=JSON.stringify(this.config.ownerOAuth);
-  const key=await this.vault.unlock();guard();
+  const snapshot=this.vault.snapshot?.();
+  const key=await this.vault.unlock();guard();if(snapshot!==undefined&&this.vault.snapshot()!==snapshot)throw fail();
   const current=this.vault.read(key),generation=current.generation;
   const check=()=>{
    guard();if(!this.enabled(api)||JSON.stringify(this.config.ownerOAuth)!==policy||binding(this.config,this.getOwner())!==id)throw fail();
-   const r=this.vault.read(key);if(!generation||r.binding!==id||r.generation!==generation||r.disabled||!r.allowedApis?.includes(api))throw fail();
+   const r=this.vault.read(key);if(requiredScopes.length&&!requiredScopes.some(s=>r.scopes?.includes(s)))throw readError('scope_missing');if(!generation||r.binding!==id||r.generation!==generation||r.disabled||!r.allowedApis?.includes(api))throw fail();
   };
   check();
   return {identity:{kind:'owner-user',binding:id,generation},check,access:async()=>{

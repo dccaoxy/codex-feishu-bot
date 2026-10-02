@@ -1,0 +1,42 @@
+{
+  "apis": [
+    "docx.v1.document.get",
+    "docx.v1.document.rawContent",
+    "docx.v1.documentBlock.list",
+    "docx.v1.documentBlock.get",
+    "wiki.v2.space.get",
+    "wiki.v2.space.list",
+    "wiki.v2.space.getNode",
+    "wiki.v2.spaceNode.list",
+    "drive.v1.file.list",
+    "drive.v1.meta.batchQuery",
+    "sheets.v3.spreadsheet.get",
+    "sheets.v3.spreadsheetSheet.get",
+    "sheets.v3.spreadsheetSheet.query",
+    "bitable.v1.app.get",
+    "bitable.v1.appTable.list",
+    "bitable.v1.appTableField.list",
+    "bitable.v1.appTableView.list",
+    "bitable.v1.appTableView.get",
+    "bitable.v1.appTableRecord.list",
+    "bitable.v1.appTableRecord.get",
+    "bitable.v1.appTableForm.get",
+    "bitable.v1.appTableFormField.list",
+    "feishu_office_sheet_read",
+    "feishu_office_drive_search",
+    "docx.v1.documentBlockChildren.get"
+  ],
+  "scopes": [
+    "offline_access",
+    "docx:document:readonly",
+    "wiki:space:read",
+    "wiki:space:retrieve",
+    "wiki:node:read",
+    "wiki:node:retrieve",
+    "space:document:retrieve",
+    "drive:drive.metadata:readonly",
+    "search:docs:read",
+    "sheets:spreadsheet:readonly",
+    "bitable:app:readonly"
+  ]
+}
