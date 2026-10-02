@@ -51,6 +51,38 @@ test('all actual text and post URL fields are considered, not only eight preview
  const ids=(await f.create()).grants.map(g=>g.provenance.resourceId);assert.equal(ids.length,27);for(const id of ['title','href','body'])assert.ok(ids.includes(id));assert.ok(!ids.some(id=>id.startsWith('not')));
 });
 
+const localePost=id=>({title:'resource '+office(id),content:[[{tag:'a',text:'resource',href:office(id)}]]});
+const brokenLocales=[
+ ['null branch',null],['array branch',[]],['string branch',office('lost')],['missing content',{}],
+ ['string content',{content:office('lost')}],['object content',{content:{text:office('lost')}}],
+ ['non-array row',{content:[office('lost')]}],['null node',{content:[[null]]}],
+ ['array node',{content:[[[office('lost')]]]}],['missing node tag',{content:[[{text:office('lost')}]]}],
+ ['invalid text node',{content:[[{tag:'text',text:{url:office('lost')}}]]}],
+ ['invalid link href',{content:[[{tag:'a',text:'resource',href:{url:office('lost')}}]]}],
+ ['invalid title',{title:{url:office('lost')},content:[]}]
+];
+for(const [label,broken] of brokenLocales)test(`mixed locales reject the entire collection: ${label}`,async t=>{
+ const f=fixture(t);f.add('a','earlier',office('earlier'));
+ f.add('a','mixed',{en_us:localePost('valid'),zh_cn:broken},'post');
+ await assert.rejects(f.create(),/未建立完整集合/);
+});
+test('multiple valid locales contribute all references regardless of language order',async t=>{
+ const f=fixture(t);f.add('a','multi',{zh_cn:localePost('chinese'),en_us:localePost('english'),ja_jp:localePost('japanese')},'post');
+ const c=await f.create();assert.deepEqual(c.grants.map(g=>g.provenance.resourceId),['chinese','english','japanese']);
+ assert.ok(c.grants.every(g=>g.provenance.messageId==='multi'));
+});
+for(const [label,payload] of [
+ ['both valid',{...localePost('top'),en_us:localePost('locale')}],
+ ['broken top',{content:office('lost'),en_us:localePost('locale')}],
+ ['broken locale',{...localePost('top'),zh_cn:null}]
+])test(`mixed top-level and locale layouts reject the entire collection: ${label}`,async t=>{
+ const f=fixture(t);f.add('a','mixed',payload,'post');await assert.rejects(f.create(),/未建立完整集合/);
+});
+test('single top-level post and empty valid locale remain supported',async t=>{
+ const f=fixture(t);f.add('a','top',localePost('top'),'post');f.add('a','locales',{zh_cn:{content:[]},en_us:localePost('english')},'post');
+ assert.deepEqual((await f.create()).grants.map(g=>g.provenance.resourceId).sort(),['english','top']);
+});
+
 test('only complete normalized paths count; query/fragment nested URLs and forged hosts do not add grants',async t=>{
  const f=fixture(t);f.add('a','urls',`${office('root')}?next=${office('nested')}#${office('fragment')} ${office('other')}。 https://example.feishu.cn.evil.test/docx/evil https://evil.test/?u=${office('bad')} ${office('suffix')}/forged https://user:pass@example.feishu.cn/docx/credentials https://example.feishu.cn:443/docx/defaultport`);
  const ids=(await f.create()).grants.map(g=>g.provenance.resourceId);assert.deepEqual(ids,['root','other','defaultport']);

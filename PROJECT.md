@@ -1,4 +1,13 @@
-# 当前返工：PR #30 Collection-scoped Read Permit（2026-10-02）
+# 当前返工：PR #30 多语言富文本完整性（2026-10-02）
+
+- Task Source：[957bfc8 的独立 NEEDS CHANGES](https://github.com/dccaoxy/codex-feishu-bot/pull/30#issuecomment-5950597851)。同一 `codex/issue-29-owner-read` 分支与PR，返工前已退回Draft；不部署、不Merge、不扩大真实验收、不修改业务数据。
+- 根因：locale分支先按结构有效性filter，损坏分支在完整性检查前被丢弃；顶层content路径还会忽略并存的locale。此前1228项通过不覆盖此反例，不能证明所有原始分支都已验证。
+- Implementation：先枚举全部locale候选，再逐分支检查对象、content数组、行、节点及可见字段类型；任何损坏使整个群资源集合建立失败。顶层content与locale并存一律拒绝，多个合法locale全部提取，单顶层结构继续支持。不改资源授权、OAuth/API/scopes、tuple及生命周期边界。
+- Validation：check / diff检查通过；集合/permit/Bot专项 **218/218**，全量组合 **1255/1255**，0失败/跳过。本轮新增27项（单元18、集成9）；旧实现单元新案4通过/14失败、集成新案4通过/5失败，修复后全部通过。覆盖合法与损坏locale混合、分支/行/节点/可见字段错误、顶层与locale混合，以及多合法locale/单顶层正向。真实Bot测试使用模拟OAuth/SDK，确认错误时不返回部分集合，连其他合法消息目标也拒绝，0 OAuth lease / 0 token access / 0 SDK出站。
+- 环境与复核：无飞书凭据、无共享服务地址的开发配置下重跑真实Codex `0.159.0` doctor（握手、登录、8模型）及ephemeral只读smoke，均通过，未连接候选Shared App Server。此次仅解析校验变更，Group30次/Knowledge19次协议证据沿用957bfc8轮次，未重复运行；新增集成及生产diff经同任务补充复核，仍待新head独立审核。远端暂无CI结果。
+- Remaining：本轮修复随新提交推送同一PR，再Ready请求独立复审，不声明独立PASS。候选与生产数据不变，历史真实资源403/缺样本、自然刷新观察限制保留。
+
+# 历史返工：PR #30 Collection-scoped Read Permit（2026-10-02）
 
 - Task Source：Human报告真实候选产品阻断：已找到授权群24个Office链接，但逐链接permit要求Owner重新粘贴。按本轮明确要求在同一PR/分支增加受控群集合许可，返工前已退回Draft；不Merge，不部署、不扩大真实验收、不修改业务数据。
 - Implementation：当前Owner明确指定唯一授权群及全部/所有Office资源，宿主冻结本地可信消息镜像的资源集合，逐来源保存群/消息/类型/精确ID及子资源完整组合。增加集合分页工具，既有文档/Office读取统一使用该集合；不从模型参数、旧消息中的命令、文档正文二级链接、搜索或其他群扩权。

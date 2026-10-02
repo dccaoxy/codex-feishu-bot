@@ -116,6 +116,33 @@ test('raw rich text href and links beyond clipped message previews retain trustw
  const f=fixture(t);f.add('a','source',{zh_cn:{title:'resources',content:[[{tag:'text',text:'x'.repeat(15000)},{tag:'a',text:'document',href:link('docx','doc')}]]}},'post');
  assert.equal((await f.read('doc')).success,true);assert.equal((await f.call('feishu_office_collection')).data.resources[0].provenance.messageId,'source');
 });
+const collectionPost=id=>({title:'resources',content:[[{tag:'a',text:'document',href:link('docx',id)}]]});
+const malformedCollectionPosts=[
+ ['locale string content',{zh_cn:collectionPost('legit'),en_us:{content:'damaged'}}],
+ ['null locale branch',{zh_cn:collectionPost('legit'),en_us:null}],
+ ['locale object row',{zh_cn:collectionPost('legit'),en_us:{content:[{tag:'text',text:'damaged'}]}}],
+ ['locale null node',{zh_cn:collectionPost('legit'),en_us:{content:[[null]]}}],
+ ['locale array node',{zh_cn:collectionPost('legit'),en_us:{content:[[[]]]}}],
+ ['top-level post mixed with valid locale',{...collectionPost('legit'),en_us:collectionPost('secondary')}],
+ ['top-level post mixed with damaged locale',{...collectionPost('legit'),en_us:null}],
+];
+for(const [name,post] of malformedCollectionPosts)test(`collection rich-text rejects complete snapshot for ${name}`,async t=>{
+ const f=fixture(t);f.add('a','source',post,'post');f.add('a','other-valid-source',link('docx','otherValid'));
+ const page=await f.call('feishu_office_collection');assert.equal(page.success,false);assert.equal(page.data.resources,undefined);assert.match(page.data.error,/无法完整解析/);
+ for(const id of ['legit','otherValid']){const result=await f.read(id);assert.equal(result.success,false);assert.match(result.data.error,/无法完整解析/);}
+ assert.deepEqual(f.counts(),{calls:0,leases:0,accesses:0});
+ assert.ok(!JSON.stringify(f.responses).includes(sentinel));
+});
+for(const [name,post,ids] of [
+ ['all valid locale branches',{zh_cn:collectionPost('docZh'),en_us:collectionPost('docEn')},['docZh','docEn']],
+ ['single valid top-level post',collectionPost('docTop'),['docTop']],
+])test(`collection rich-text accepts ${name} without losing resources`,async t=>{
+ const f=fixture(t);f.add('a','source',post,'post');const page=await f.call('feishu_office_collection');
+ assert.equal(page.success,true);assert.equal(page.data.total,ids.length);assert.deepEqual(page.data.resources.map(x=>x.provenance.resourceId).sort(),[...ids].sort());
+ assert.deepEqual(f.counts(),{calls:0,leases:0,accesses:0});
+ for(const id of ids)assert.equal((await f.read(id)).success,true);
+ assert.deepEqual(f.counts(),{calls:ids.length,leases:ids.length,accesses:ids.length});
+});
 for(const kind of ['text','post'])test(`nested quoted URL in ${kind} query cannot become a collection read target`,async t=>{
  const f=fixture(t),url=link('docx','root',`?next="${link('docx','nested')}"`);
  f.add('a','source',kind==='text'?url:{zh_cn:{title:'resources',content:[[{tag:'a',text:'document',href:url}]]}},kind);

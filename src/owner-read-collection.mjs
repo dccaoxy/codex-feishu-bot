@@ -47,18 +47,28 @@ function groupMatches(label,directory){
 
 function messageStrings(kind,raw){
  let content;try{content=JSON.parse(raw);}catch{incomplete();}
- if(!content||typeof content!=='object')incomplete();
+ const object=value=>value!==null&&typeof value==='object'&&!Array.isArray(value);
+ if(!object(content))incomplete();
  if(kind==='text'){if(typeof content.text!=='string')incomplete();return [{value:content.text,href:false}];}
  if(kind!=='post')return [];
- const posts=Array.isArray(content.content)?[content]:Object.entries(content).filter(([locale,p])=>/^[a-z]{2}_[a-z]{2}$/u.test(locale)&&p&&typeof p==='object'&&Array.isArray(p.content)).map(([,p])=>p);
+ // Identify branches before validating them: a malformed locale must not
+ // disappear from a collection that claims to contain every visible link.
+ const locales=Object.entries(content).filter(([locale])=>/^[a-z]{2}_[a-z]{2}$/u.test(locale));
+ const top=Object.hasOwn(content,'content');
+ if(top&&locales.length)incomplete();
+ const posts=top?[content]:locales.map(([,post])=>post);
  if(!posts.length)incomplete();
  const values=[];
  for(const post of posts){
+  if(!object(post)||!Array.isArray(post.content))incomplete();
+  if(Object.hasOwn(post,'title')&&typeof post.title!=='string')incomplete();
   if(typeof post.title==='string')values.push({value:post.title,href:false});
   for(const row of post.content){
    if(!Array.isArray(row))incomplete();
    for(const node of row){
-    if(!node||typeof node!=='object')incomplete();
+    if(!object(node)||typeof node.tag!=='string'||!node.tag)incomplete();
+    if(node.tag==='text'&&typeof node.text!=='string')incomplete();
+    if(node.tag==='a'&&(typeof node.href!=='string'||(Object.hasOwn(node,'text')&&typeof node.text!=='string')))incomplete();
     if((node.tag==='text'||node.tag==='a')&&typeof node.text==='string')values.push({value:node.text,href:false});
     if(node.tag==='a'&&typeof node.href==='string')values.push({value:node.href,href:true});
    }
