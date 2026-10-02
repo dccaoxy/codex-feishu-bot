@@ -1,4 +1,13 @@
-# 当前返工：PR #30 中文边界后续链接完整性（2026-10-02）
+# 当前候选：PR #30 dee803a8 已部署，等待Human飞书私聊验收（2026-10-02）
+
+- Task Source：Human授权部署独立PASS的 `dee803a8def1a9755f777b3ac4ea09ba4b740035`，服务正常后提供真实验收步骤，暂不Merge。[独立审核](https://github.com/dccaoxy/codex-feishu-bot/pull/30#issuecomment-5953211552)的head已在部署前再次核对。
+- Deployment：北京时间21:33完成。89个受管文件与审核head逐项匹配；当前配置、OAuth scopes/API白名单、Owner/授权群、Office/Trusted Document、Knowledge、Shared Runtime均保持不变，Group/Knowledge继续使用既有固定0.159.0。仅短暂重启机器人，Shared进程未变。
+- Backup：本机Git忽略目录data/pr30-dee803a-backup-*保存旧源码、真实配置、LaunchAgent、加密OAuth文件和两库一致性备份。未导出密钥或token。配置/加密凭据/服务配置前后一致；停机验证两库逐表摘要一致，启动后仅history_sync/sqlite_sequence运行状态变化，业务表未变。
+- Validation：安装后的check、全量1287/1287（0失败/取消/跳过）、doctor共享连接检查、ephemeral smoke、Group30/Knowledge19模拟provider隔离探针均通过。最新启动日志Codex与飞书长连接正常，机器人及Shared均running，无新增error或EMFILE。部署记录data/pr30-dee803a-deployment.json。准备暂存目录时曾遇到重复复制test目录的本地错误，已修正准备步骤；发生在停机之前，未触碰候选服务，不涉及部署回滚。
+- Human验收：请在机器人私聊发送“读取 FY26 AEG新羽计划群里所有的飞书文档链接，包括多维表格”。检查无需逐个重贴链接、逐项区分正文/元数据/403/unsupported、共享入口不再静默遗漏；不追踪正文二级链接、不写资源、不跨群。实际数量以本次冻结镜像为准，不强行使用历史24作为固定值。
+- Remaining：本轮没有代发真实验收请求或Office读取。新版本真实集合效果等待Human反馈；共享入口仍不支持、Docx403/Sheet缺样本和长期refresh限制保留。本节为部署证据文档，不改变已部署源码。未Merge。
+
+# 历史返工：PR #30 中文边界后续链接完整性（2026-10-02）
 
 - Task Source：[c4f86b8独立NEEDS CHANGES](https://github.com/dccaoxy/codex-feishu-bot/pull/30#issuecomment-5952933530)。同一分支，先退回Draft，不部署、不Merge。
 - Root cause / Implementation：上一轮仅截取中文边界前的根URL，丢弃其后无空格文本。现在在顶层文本扫描时拆出已验证根，保留剩余正文并继续扫描下一完整URL；每个后续URL仍拥有完整query/fragment，结构化href不参与拆分。共享入口同样保留后续文本，仅列入unsupported清单，不成为grant。
