@@ -1,3 +1,17 @@
+# 当前交接：Issue #31 成员显示名 UTF-8 边界离线回归（2026-10-03）
+
+- Task Source：用户提供的 [Issue #31](https://github.com/dccaoxy/codex-feishu-bot/issues/31) 完整任务及隔离 checkout 指令，仅补测试和文档。以下历史记录保留，不作为本轮操作授权。
+- Implementation：新增 `test/offline/member-name-byte-boundaries.test.mjs` 的6项模拟回归：ASCII、中文加ASCII、补充平面字符分别覆盖200字节接受/201字节忽略；空字符串及纯空白忽略；有效姓名首尾空白及原始Unicode形式完整保留；首尾空白计入字节上限。明确使用 `Buffer.byteLength(..., 'utf8')` 断言，核对查找结果、无冲突及 `complete` 状态。README 既有成员姓名章节补充同一契约。
+- 关键决定：测试观察与 `src/member-names.mjs` 既有行为一致，不修改运行源码、200字节上限、权限、路由或产品行为；保留原有测试与历史文档，不涉及 PR #27 / PR #30 工作。
+- Validation：实际 Node v24.21.0，执行下列固定范围命令，**71/71通过**（原有65项加新增6项，0失败/取消/跳过）。全部成员接口使用合成ID和模拟响应，无真实飞书调用。`operator-profile:repository_worktree` 是调度器标记，未作为命令执行。
+
+  ```sh
+  node --openssl-config=/dev/null --no-addons --preserve-symlinks --preserve-symlinks-main --test --test-isolation=none test/documents.test.mjs test/member-names.test.mjs test/send-references.test.mjs test/offline/member-name-byte-boundaries.test.mjs
+  ```
+
+- Remaining / Limits：未运行全量 `npm test`、SQLite context tests、doctor/smoke或真实 Codex/飞书验证；未安装依赖、部署或重启服务。本轮结果只证明指定离线回归通过，不代表生产环境验收。未发现契约冲突；Git工作区完整状态与最终范围验证由调度器核验，本通道未运行Git子进程或检查Codex登录环境。
+- Delivery / 下一步：测试及文档已修改、指定离线测试已通过；未提交、未推送、未创建/切换PR状态、未发送Issue报告，HEAD未修改（读取到分支 `codex-flow/issue-31-57d3ef62`）。交由调度器完成最终范围验证、提交及独立Reviewer对实际SHA的审核；本次试用保持 Draft/noReady，不自行安排PASS。若审核PASS，邮件流程按本轮边界结束为 MAIL_BLOCKED，不执行SMTP。远端Issue Closing Report亦由调度器处理。
+
 # 当前候选：PR #28 审核版本部署与 Owner OAuth 只读验收（2026-09-30）
 
 - Human 明确授权部署及真实只读验收；独立 PASS 对应 `36749d260384151c90a58b8178e025621aed1bab`。精确审核源码已部署；本节仅记录结果，线上不随此文档提交变更。未 Merge。
