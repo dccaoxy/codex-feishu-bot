@@ -39,6 +39,7 @@
   },
   "ownerAccess": {
     "enabled": false,
-    "inheritRuntimeDefaults": false
+    "inheritRuntimeDefaults": false,
+    "projectRoots": []
   }
 }
