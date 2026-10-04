@@ -1,4 +1,44 @@
-# 当前候选：PR #28 审核版本部署与 Owner OAuth 只读验收（2026-09-30）
+# 当前阻塞：Issue #33 实际写入执行边界（2026-10-04，未完成）
+
+- 最新反馈仍为两项 P1：Owner Full Authority 未实现；projectRoots 未约束所有实际写入。本轮复核 `src/codex.mjs`、`src/thread-controller.mjs` 和 Bot 调用点：本仓库通过子进程或 Shared RPC 使用外部 App Server，`respond` 只发送审批结果，不控制执行文件操作的系统调用。现有接口没有在本仓库得到验证的单次操作/全部目标绑定机制，无法在批准之后由 Bot 原子复核并执行；Shell 也不必经过 fileChange 审批。
+- 本轮处理：未继续增加审批快照代码或放宽 sandbox；它们不能消除上述执行边界缺口。按用户要求重新运行三项允许基线及两项 offline 测试，**96/96 通过**，退出码0；无源代码修改，仅更新本阻塞记录。既有修改全部保留，未撤销；测试通过不代表两项 P1 已关闭。
+- 恢复开发所需：在实际 App Server/工具执行层提供并验证覆盖 Shell、文件工具及其他本机写入的强制边界；操作级授权须绑定 Owner/原请求/turn、具体操作与全部路径，执行时防止路径替换，拒绝后不能通过另一工具继续写入。需要相应运行时实现或可验证接口契约，以及允许执行该运行时集成测试的验证阶段。本 lane 禁止服务、Shell/Git 子进程与真实 API，不能在此验证该能力；不应重复把相同候选送审并期待 P1 消失。
+- 当前交付状态：Issue 阻塞且未完成，不能发布为 Full Authority 候选。未提交、推送、改 HEAD、部署或真实验收；最终调度器验证及独立审核未由本轮执行。以下保留此前实现和返工证据。
+
+- Task Source：用户再次提供 Issue #33 及三项 P1 审核反馈。继续同一隔离 checkout；未使用网络、凭据、Git 子进程或修改 HEAD。下节是上一轮记录，本节描述最新差异。
+- 最新 Task Source：用户随后提供两项未解决 P1 与文件审批通知 P2。已核对 `action` 实际控制流：旧实现的 decline 会先进入通用拒绝分支并返回，未复现“拒绝后收到批准通知”；所指文件专用分支的文案确为硬编码批准。本次将文件 accept/decline 合并到独立分支，按 decision 同时设置卡片关闭状态和结果通知，两者都在发送 RPC 前消费令牌。增加批准和拒绝消息的精确断言，实际 decline 与通知“已拒绝本次文件变更请求”一致。
+- 本轮 Validation：重新执行固定 Node 参数下的三项允许基线及两项 offline 文件，**96/96 通过**；仅修改上述审批分支及结果断言，未触及 sandbox、Shell 或实际写入执行层。两项 P1 仍未解决，不声称 Issue 已完成；不能从本地卡片复核推断外部 App Server 实际执行时具有原子路径绑定。未提交、推送、改 HEAD 或执行真实验收。
+- P1 路径执行边界：将 `classifyProjectWrite` 接入真实 `item/fileChange/requestApproval` 的审批路径；精确解析 add/update/delete 及 movePath，展示规范化路径和操作类型，移动同时分类源和目标。批准前复核路径解析、Owner、原消息快照/撤回、turn、steer、diff、项目根配置及外部绑定；未知格式/缺少可信来源拒绝开放卡片。**这只是审批复核，不是 syscall 执行边界**；RPC 批准之后至 App Server 写入之间的 symlink 竞态仍未解决，不能自动批准项目内变更，P1 尚未关闭。
+- P1 回合级权限：不再将可复用文件写权限集合回传为批准；自有请求返回空权限，共享外部请求不抢答，展示能力不支持原因；旧权限卡片在 action 入口也拒绝授予。保留原协议 `scope:'turn'` 的空拒绝响应，不虚构 `operation` scope。文件变更卡片令牌在发送响应前消耗，相同请求 ID 不重放，连接结果不确定不能重复提交。此改动封住了已指出的回合级文件写授权入口，但没有新增可替代它的操作级执行器，因此不是完整验收通过。
+- P1 Owner Full Authority：未把现有 sandbox 改为不受限，未自动批准任意 Shell/权限请求。当前命令审批协议不提供可验证的全部写入目标，外部 App Server 的执行行为也无法在本 lane 验证；凭命令文本或路径快照放开会违反 Issue 的保留 Gate。该项仍未解决，需要运行时执行层能力与集成验证。
+- Validation：固定 Node 24 和安全参数运行三项允许的基线测试，加 `test/offline/owner-authority.test.mjs`、`test/offline/file-review.test.mjs`，最终 **96/96 通过**。新增18项离线回归覆盖移动两端、symlink 外跳、未知权限格式、私有/Shared 权限请求、旧卡片、无来源/伪造 Owner、来源/turn/diff/路径变化、批准/拒绝后相同 ID 重放、RPC 结果不确定和 Shared 观察丢失。文件系统、RPC 和飞书均为内存夹具，测试未执行实际文件变更/服务/网络；不把等待期间路径复核称作消除执行时竞态。
+- Remaining / 风险：禁止回合级写权限会使依赖该协议的现有文件操作明确不可用；文件卡片现在要求可信 Owner 来源，不再代办没有飞书原请求的桌面回合审批。旧测试中对应授权/卡片预期仍需在后续允许的全量测试 lane 更新复验。只读/网络权限和 Shell 仍保留原审批，跨工具拒绝后防绕过及 projectRoots 配置文件防模型写入尚无统一执行层保障。三项 P1 均不宣称整体关闭；需要可限定单次 syscall/操作且防路径替换的执行层后再继续 Full Authority 收敛。
+- Delivery：源代码、离线测试及 README/PROJECT 已更新；未提交、推送、建 PR、部署或 Merge。全量/SQLite、真实 Codex/飞书/文件操作验收与独立 Reviewer PASS 未执行；最终 `operator-profile:repository_worktree` 验证由调度器执行，本轮未将标记当作命令。不可将此候选作为 Issue #33 完成版本发布。
+
+# 上轮开发断点：Issue #33 Owner Authority（2026-10-04，部分实现，未完成）
+
+- Task Source：用户提供的 Issue #33 完整正文；仅在调度器提供的隔离 checkout 修改源代码、离线测试和文档。未访问 GitHub 或真实配置。只读 `.git/HEAD` 显示 `codex-flow/issue-33-730a1c5e`；未执行 Git 子进程，未核对完整 Git 工作区状态。Node 实测 v24.21.0；未检查真实 Codex 登录/运行环境。
+- Implementation：Owner Office 非 GET、电子表格写入和文字样式修改取消重复确认卡片；不再以机器人创建记录/Trusted Document 作为资格前提。继续通过宿主当前可信消息签发一次性执行许可，绑定 Owner、应用、原消息快照、turn、参数摘要和请求 ID；保留10分钟期限、撤回/steer/回合结束失效、防重复、revision 和 unknown 不重试。更新模型工具说明与工具版本标记；创建记录仅保留为审计。Owner 私聊及已进入 Owner 主执行路径的授权群适用同一 Office 行为。
+- 项目边界准备：增加 `ownerAccess.projectRoots`（默认空数组），配置加载时要求现有目录、规范化绝对真实路径并去重；新增独立路径分类器，按真实祖先解析未创建目标、识别 symlink 外跳、拒绝 `..`/悬空链接/非目录祖先。数组冻结，无新增模型配置入口。**分类器未接入写入执行层，当前不改变 Codex sandbox/审批策略，也不能保证检查到执行之间路径不变化。**
+
+| 机制 | 本轮处理及剩余范围 |
+| --- | --- |
+| Owner Office 非 GET / 自建文档确认 | 去掉卡片和创建记录资格门，保留一次性执行校验 |
+| Office API 目录和 schema | 保留固定 SDK 路由及参数校验；不是任意 API 代理 |
+| OAuth API 名单 / user 与 tenant 路由 | 保留显式身份配置、scope/ACL 与失败不回退；未扩展接口名单 |
+| Owner Read / Collection / Trusted Document | 当前 checkout 的 Office 入口未发现独立 Read/Collection Permit；其他候选实现未读取、未合并；创建记录资格门已移除 |
+| Group / Knowledge / 普通成员 | 工具注册、独立执行环境、事件身份与群 allowlist 不变；本轮仅做合成事件身份测试 |
+| revision / unknown / 撤回与生命周期 | 保留；限定测试覆盖相关 Office 与文档路径，不宣称所有运行时路径已验证 |
+| 本机写入 / Shell / Shared Runtime | 保留原审批；尚无跨工具、精确一次操作的统一执行边界 |
+| Thread / Work / Gateway | 保留既有配置限制；未完成 Full Authority 收敛 |
+
+- Validation：使用固定 Node 参数 `--openssl-config=/dev/null --no-addons --preserve-symlinks --preserve-symlinks-main --test --test-isolation=none`，运行 `test/documents.test.mjs test/member-names.test.mjs test/send-references.test.mjs test/offline/owner-authority.test.mjs`，最终 **78/78 通过**。新增13项覆盖无卡片 Office 写入、重复执行、Owner/app/turn/steer/撤回/消息变化失效、伪造身份、只读无需写许可、未知写入不重试、OAuth 失败不回退、群事件身份和路径分类；既有文档测试覆盖 revision 与样式校验。
+- 测试限制：首次真实目录夹具测试因目录 rename 被 sandbox 拒绝，第二次因清理目录被拒绝，均为 EPERM；没有规避限制或请求提权。最终路径分类测试改为内存文件系统，未将其算作真实写入、删除、移动或 symlink 竞态验收。可能残留 `test/offline/paths-*` 空测试目录，由调度器清理。完整 npm test、SQLite 测试、doctor/smoke、服务和真实 API 调用按本执行 lane 限制未执行；旧全量测试中的 Office 确认卡片预期尚待后续更新和全量复验。`operator-profile:repository_worktree` 是调度器验证标记，未作为命令执行。
+- Remaining / 阻塞：现有 `item/commandExecution/requestApproval` 仅给出命令/工作目录等信息，不能证明命令的全部写入目标；`item/permissions/requestApproval` 的目录/turn 权限无法保证一次具体写操作、拒绝后不可换工具、或批准后 symlink 不变。直接自动批准会违反 Issue 的唯一保留 Gate，故未这样实现。需要在能拦截所有写入的运行时执行层实现操作级授权，再接入分类器、精确源/目标路径和当前 Owner/请求/turn；projectRoots 配置文件自身也须在该执行层禁止模型修改。该能力无法在本轮受限工具与协议验证范围内可靠完成。
+- 下一步：实现并验证上述执行层后，继续收敛 Thread/Work/Gateway 等剩余本地 Gate，运行全量/Group/Knowledge 隔离回归，由独立 Reviewer 审核，再按 Issue 的六步安全目标做候选部署验收。当前实现不能作为 Issue #33 完成版本部署或关闭 Issue。
+- Delivery：代码/文档已修改、限定离线测试已通过；真实 Codex/飞书/文件审批未验证；独立 Reviewer PASS 未取得。未提交、未推送、未建 PR、未部署、未 Merge、未改 HEAD。网络与远程回写由调度器负责，本节作为本地 Implementation / Validation / Remaining 交接记录，不冒充已发布的 Issue Closing Report。
+
+# 历史候选：PR #28 审核版本部署与 Owner OAuth 只读验收（2026-09-30）
 
 - Human 明确授权部署及真实只读验收；独立 PASS 对应 `36749d260384151c90a58b8178e025621aed1bab`。精确审核源码已部署；本节仅记录结果，线上不随此文档提交变更。未 Merge。
 - 基线复核：运行目录全部既有受管文件与 PR #24 部署记录一致、配置字节一致。新版本保留已上线 PR #19 自建文档能力；没有部署 PR #27 或扩大 Trusted Document。变更前无 active/queued 群或私聊请求，无运行中的 Knowledge job。

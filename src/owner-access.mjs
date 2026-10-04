@@ -1,7 +1,10 @@
+import {projectRoots} from './project-paths.mjs';
+
 // Authority comes from the authenticated event envelope, never message text.
 export function ownerAccessConfig(value = {}) {
   const c = {enabled:false, inheritRuntimeDefaults:false, ...value};
   if (typeof c.enabled !== 'boolean' || typeof c.inheritRuntimeDefaults !== 'boolean') throw Error('Owner Access 配置无效');
+  c.projectRoots = projectRoots(c.projectRoots);
   return c;
 }
 export class OwnerAccess {
