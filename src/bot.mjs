@@ -1,4 +1,5 @@
 import { Office } from './office.mjs';
+import {fileReview, isReadOnlyPermissionRequest} from './file-review.mjs';
 import {OwnerOAuth} from './owner-oauth.mjs';
 import { ThreadController } from './thread-controller.mjs';
 import { externalPermission } from './config.mjs';
@@ -807,6 +808,19 @@ ${this.ownerGroups?OWNER_GROUP_INSTRUCTIONS:''}` };
       else this.rpc.reject(m.id, '此交互暂不支持通过飞书完成');
       await this.feishu.text(run.chat, `Codex 请求了暂不支持的交互：${m.method}。请在本机处理相关配置或授权后重试。`); return;
     }
+    if (m.method === 'item/permissions/requestApproval' && !isReadOnlyPermissionRequest(p.permissions)) {
+      // An empty turn grant conveys no permission. Never echo write roots back
+      // as a reusable turn/session capability, even after a Human card click.
+      if (!(run.external && this.rpc.shared)) this.rpc.respond(m.id,{permissions:{},scope:'turn'});
+      await this.feishu.text(run.chat,'飞书不能授予回合级文件写权限：该协议无法限定为一次具体写操作。未授予权限；需要支持操作级执行边界的运行时。').catch(()=>{});
+      return;
+    }
+    if(m.method==='item/fileChange/requestApproval' && !(run.external && this.rpc.shared)){
+      const ids=run.fileReviewIds??=new Set();
+      if(ids.has(m.id))return;
+      if(ids.size>=32){this.rpc.respond(m.id,{decision:'decline'});return;}
+      ids.add(m.id);
+    }
     const fileDetails = m.method === 'item/fileChange/requestApproval'
       ? run.fileDetails?.get(JSON.stringify([p.turnId,p.itemId])) : null;
     if (m.method === 'item/fileChange/requestApproval' && !fileDetails) {
@@ -814,8 +828,44 @@ ${this.ownerGroups?OWNER_GROUP_INSTRUCTIONS:''}` };
       await this.feishu.text(run.chat,'无法完整核对该文件审批的路径及修改内容，飞书审批入口未开放，请在原客户端处理。').catch(() => {});
       return;
     }
+    let review, approvalCheck;
+    if (m.method === 'item/fileChange/requestApproval') {
+      try {
+        const roots=[...(this.config.ownerAccess?.projectRoots || [])];
+        review=fileReview(JSON.parse(fileDetails),roots);
+        const owner=this.owner, turn=run.turn, ids=[...(run.sourceIds||[])].sort();
+        if(!owner || run.officeOwner!==owner || !ids.length || !p.turnId || p.turnId!==turn)throw Error('文件审批身份或回合无效');
+        const readSources=()=>ids.map(id=>{
+          const row=this.store.db.prepare('SELECT payload,state FROM inbox WHERE chat=? AND id=?').get(run.chat,id);
+          if(!row || row.state==='cancelled')throw Error('原消息已失效');
+          const source=JSON.parse(row.payload);
+          if(source.kind!=='message' || source.user!==owner || source.message?.message_id!==id)throw Error('原消息身份无效');
+          return row.payload;
+        });
+        const sources=JSON.stringify(readSources());
+        const effectGuard=this.ownerEffectGuard(run.chat,run);
+        const snapshot=JSON.stringify(review), rootSnapshot=JSON.stringify(roots);
+        approvalCheck=()=>{
+          effectGuard();
+          if(this.closed || !this.available || this.owner!==owner || run.officeOwner!==owner || run.ending || run.ownerCancelled ||
+              this.runs.get(run.thread)!==run || run.turn!==turn ||
+              JSON.stringify(ids)!==JSON.stringify([...(run.sourceIds||[])].sort()) || sources!==JSON.stringify(readSources()) ||
+              rootSnapshot!==JSON.stringify(this.config.ownerAccess?.projectRoots || []) ||
+              run.fileDetails?.get(JSON.stringify([turn,p.itemId]))!==fileDetails ||
+              [...(run.sourceIds||[])].some(id=>this.ownerMessageCancelled(run.chat,id)) ||
+              (run.external && this.store.binding(run.chat)?.thread!==run.thread) ||
+              JSON.stringify(fileReview(JSON.parse(fileDetails),roots))!==snapshot)throw Error('文件审批目标或原请求已变化');
+        };
+        approvalCheck();
+      } catch(e) {
+        if (!(run.external && this.rpc.shared)) this.rpc.respond(m.id,{decision:'decline'});
+        await this.feishu.text(run.chat,'文件审批无法核对身份、路径或操作，未批准。').catch(()=>{});
+        return;
+      }
+    }
     const token = randomBytes(5).toString('hex');
-    const prompt = { id: m.id, method: m.method, params: p, chat: run.chat, thread: run.thread, turn: p.turnId || run.turn,
+    const prompt = { id: m.id, method: m.method, params: structuredClone(p), chat: run.chat, thread: run.thread, turn: p.turnId || run.turn, external:run.external,
+      approvalCheck, approvalOwner:approvalCheck ? this.owner : undefined,
       expires: Date.now() + 10*60*1000, answers: {} };
     this.prompts.set(token, prompt);
     prompt.timer = setTimeout(() => {
@@ -857,6 +907,7 @@ ${this.ownerGroups?OWNER_GROUP_INSTRUCTIONS:''}` };
         const details = [p.reason, p.command, p.cwd ? `工作目录：${p.cwd}` : '', p.permissions ? JSON.stringify(p.permissions) : '',
           p.grantRoot ? `文件授权目录：${p.grantRoot}` : '', p.additionalPermissions ? JSON.stringify(p.additionalPermissions) : '',
           p.networkApprovalContext ? JSON.stringify(p.networkApprovalContext) : '',
+          review ? `路径复核（不代表执行层已消除路径竞态）：\n${JSON.stringify(review)}` : '',
           fileDetails || ''].filter(Boolean).join('\n');
         if (Buffer.byteLength(details) > 10000) {
           this.unavailablePrompt(token,run);
@@ -869,7 +920,7 @@ ${this.ownerGroups?OWNER_GROUP_INSTRUCTIONS:''}` };
     } catch (e) { this.unavailablePrompt(token,run); await this.feishu.text(run.chat, `交互已关闭：${this.redact(e)}`).catch(() => {}); }
   }
   unavailablePrompt(token,run) {
-    if (this.rpc.shared && run.external) this.clearPrompt(token); else this.denyPrompt(token);
+    if (this.rpc.shared && (run.external || this.prompts.get(token)?.external)) this.clearPrompt(token); else this.denyPrompt(token);
   }
   officeCommandActor(chat,id,source,text) {
     if(!source||source.user!==this.owner||source.message?.message_id!==id)return undefined;
@@ -949,6 +1000,10 @@ ${this.ownerGroups?OWNER_GROUP_INSTRUCTIONS:''}` };
     const p = this.prompts.get(value.token);
     if(this.runs.get(p?.thread)?.ownerCancelled)throw Error('请求已撤回');
     if (!p || p.chat !== chat || p.expires < Date.now()) throw new Error('请求已失效。');
+    if(p.approvalCheck){
+      if(actor!==p.approvalOwner || actor!==this.owner)throw Error('仅原Owner可处理文件审批');
+      try{p.approvalCheck();}catch(e){this.unavailablePrompt(value.token,this.runs.get(p.thread)||{});throw e;}
+    }
     if(p.method==='office/write'){
       if(actor!==p.officeOwner||actor!==this.owner)throw Error('仅原Owner实时确认可授权办公写入');
       try{p.officeCheck();}catch(e){this.clearPrompt(value.token);throw e;}
@@ -984,6 +1039,19 @@ ${this.ownerGroups?OWNER_GROUP_INSTRUCTIONS:''}` };
       return;
     }
     if (!['accept','decline'].includes(value.decision)) throw new Error('审批操作无效。');
+    if(p.method==='item/fileChange/requestApproval'){
+      if(!p.approvalCheck){this.unavailablePrompt(value.token,this.runs.get(p.thread)||{});throw Error('文件审批缺少路径及原请求复核');}
+      // Consume before the transport write. An uncertain response must never
+      // leave a clickable token that could submit this operation again.
+      this.clearPrompt(value.token,'已提交处理');
+      this.rpc.respond(p.id,{decision:value.decision});
+      await this.feishu.text(chat,'已批准本次文件变更请求。');
+      return;
+    }
+    if (p.method === 'item/permissions/requestApproval' && !isReadOnlyPermissionRequest(p.params.permissions)) {
+      this.unavailablePrompt(value.token,this.runs.get(p.thread)||{});
+      throw Error('不能将文件写权限授予整个回合，请使用操作级执行边界');
+    }
     if (p.method === 'item/permissions/requestApproval') this.rpc.respond(p.id, { permissions: value.decision === 'accept' ? p.params.permissions : {}, scope: 'turn' });
     else this.rpc.respond(p.id, { decision: value.decision });
     this.clearPrompt(value.token, '已提交处理');

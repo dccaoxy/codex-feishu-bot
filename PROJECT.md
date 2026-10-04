@@ -1,4 +1,14 @@
-# 当前开发断点：Issue #33 Owner Authority（2026-10-04，部分实现，未完成）
+# 当前返工断点：Issue #33 三项 P1（2026-10-04，仍未完成）
+
+- Task Source：用户再次提供 Issue #33 及三项 P1 审核反馈。继续同一隔离 checkout；未使用网络、凭据、Git 子进程或修改 HEAD。下节是上一轮记录，本节描述最新差异。
+- P1 路径执行边界：将 `classifyProjectWrite` 接入真实 `item/fileChange/requestApproval` 的审批路径；精确解析 add/update/delete 及 movePath，展示规范化路径和操作类型，移动同时分类源和目标。批准前复核路径解析、Owner、原消息快照/撤回、turn、steer、diff、项目根配置及外部绑定；未知格式/缺少可信来源拒绝开放卡片。**这只是审批复核，不是 syscall 执行边界**；RPC 批准之后至 App Server 写入之间的 symlink 竞态仍未解决，不能自动批准项目内变更，P1 尚未关闭。
+- P1 回合级权限：不再将可复用文件写权限集合回传为批准；自有请求返回空权限，共享外部请求不抢答，展示能力不支持原因；旧权限卡片在 action 入口也拒绝授予。保留原协议 `scope:'turn'` 的空拒绝响应，不虚构 `operation` scope。文件变更卡片令牌在发送响应前消耗，相同请求 ID 不重放，连接结果不确定不能重复提交。此改动封住了已指出的回合级文件写授权入口，但没有新增可替代它的操作级执行器，因此不是完整验收通过。
+- P1 Owner Full Authority：未把现有 sandbox 改为不受限，未自动批准任意 Shell/权限请求。当前命令审批协议不提供可验证的全部写入目标，外部 App Server 的执行行为也无法在本 lane 验证；凭命令文本或路径快照放开会违反 Issue 的保留 Gate。该项仍未解决，需要运行时执行层能力与集成验证。
+- Validation：固定 Node 24 和安全参数运行三项允许的基线测试，加 `test/offline/owner-authority.test.mjs`、`test/offline/file-review.test.mjs`，最终 **96/96 通过**。新增18项离线回归覆盖移动两端、symlink 外跳、未知权限格式、私有/Shared 权限请求、旧卡片、无来源/伪造 Owner、来源/turn/diff/路径变化、批准/拒绝后相同 ID 重放、RPC 结果不确定和 Shared 观察丢失。文件系统、RPC 和飞书均为内存夹具，测试未执行实际文件变更/服务/网络；不把等待期间路径复核称作消除执行时竞态。
+- Remaining / 风险：禁止回合级写权限会使依赖该协议的现有文件操作明确不可用；文件卡片现在要求可信 Owner 来源，不再代办没有飞书原请求的桌面回合审批。旧测试中对应授权/卡片预期仍需在后续允许的全量测试 lane 更新复验。只读/网络权限和 Shell 仍保留原审批，跨工具拒绝后防绕过及 projectRoots 配置文件防模型写入尚无统一执行层保障。三项 P1 均不宣称整体关闭；需要可限定单次 syscall/操作且防路径替换的执行层后再继续 Full Authority 收敛。
+- Delivery：源代码、离线测试及 README/PROJECT 已更新；未提交、推送、建 PR、部署或 Merge。全量/SQLite、真实 Codex/飞书/文件操作验收与独立 Reviewer PASS 未执行；最终 `operator-profile:repository_worktree` 验证由调度器执行，本轮未将标记当作命令。不可将此候选作为 Issue #33 完成版本发布。
+
+# 上轮开发断点：Issue #33 Owner Authority（2026-10-04，部分实现，未完成）
 
 - Task Source：用户提供的 Issue #33 完整正文；仅在调度器提供的隔离 checkout 修改源代码、离线测试和文档。未访问 GitHub 或真实配置。只读 `.git/HEAD` 显示 `codex-flow/issue-33-730a1c5e`；未执行 Git 子进程，未核对完整 Git 工作区状态。Node 实测 v24.21.0；未检查真实 Codex 登录/运行环境。
 - Implementation：Owner Office 非 GET、电子表格写入和文字样式修改取消重复确认卡片；不再以机器人创建记录/Trusted Document 作为资格前提。继续通过宿主当前可信消息签发一次性执行许可，绑定 Owner、应用、原消息快照、turn、参数摘要和请求 ID；保留10分钟期限、撤回/steer/回合结束失效、防重复、revision 和 unknown 不重试。更新模型工具说明与工具版本标记；创建记录仅保留为审计。Owner 私聊及已进入 Owner 主执行路径的授权群适用同一 Office 行为。
