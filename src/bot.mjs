@@ -808,6 +808,27 @@ ${this.ownerGroups?OWNER_GROUP_INSTRUCTIONS:''}` };
       else this.rpc.reject(m.id, '此交互暂不支持通过飞书完成');
       await this.feishu.text(run.chat, `Codex 请求了暂不支持的交互：${m.method}。请在本机处理相关配置或授权后重试。`); return;
     }
+    if (m.method === 'item/permissions/requestApproval' && isReadOnlyPermissionRequest(p.permissions) && run.officeOwner === this.owner && this.owner &&
+        run.sourceIds?.size && [...run.sourceIds].every(id=>typeof id==='string' && id)) {
+      // Only an authenticated, still-current Feishu request can auto-grant
+      // reads/network. Observing a desktop turn does not confer Owner authority.
+      try {
+        this.ownerEffectGuard(run.chat,run)();
+        if (!p.turnId || p.turnId !== run.turn || (run.external && this.store.binding(run.chat)?.thread!==run.thread)) throw Error('缺少当前Owner请求');
+        for (const id of run.sourceIds) {
+          const row=this.store.db.prepare('SELECT payload,state FROM inbox WHERE chat=? AND id=?').get(run.chat,id);
+          const source=row && JSON.parse(row.payload);
+          if (!source || row.state==='cancelled' || source.kind!=='message' || source.user!==this.owner || source.message?.message_id!==id) throw Error('原请求已失效');
+        }
+      } catch { return; }
+      const ids=run.ownerPermissionIds??=new Set();
+      if (ids.has(m.id)) return;
+      if (ids.size>=32) { this.rpc.respond(m.id,{permissions:{},scope:'turn'}); return; }
+      // Consume before transport: an uncertain response is never replayed.
+      ids.add(m.id);
+      this.rpc.respond(m.id,{permissions:structuredClone(p.permissions),scope:'turn'});
+      return;
+    }
     if (m.method === 'item/permissions/requestApproval' && !isReadOnlyPermissionRequest(p.permissions)) {
       // An empty turn grant conveys no permission. Never echo write roots back
       // as a reusable turn/session capability, even after a Human card click.

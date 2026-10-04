@@ -1,3 +1,13 @@
+# 当前交接：Issue #33 fresh retry / PR #34（2026-10-04，部分完成，仍阻塞）
+
+- **Task Source**：本轮用户完整 Issue #33、两项 P1 与 fresh-attempt 指令；已实时读取 GitHub Issue 正文/评论、PR #34 状态。指定分支 `codex-flow/issue-33-730a1c5e`，起点 `572a0c67b0134abeaf64a3dbb1cfcbfa307f86aa`，开始时工作区干净、远端 head 一致、PR 为 Draft。此次授权允许本地测试、Commit/Push 与更新原 Draft PR，取代下面旧 lane 的工具限制；仍不 Merge、不部署、不转 Ready。
+- **Implementation**：已知格式的纯只读/网络权限请求在当前可信 Owner 消息和匹配 turn 下免确认，核对授权群与 Shared 绑定；请求 ID 在 RPC 响应前消费，未知响应不重放。无可信飞书原请求的桌面观察不取得自动授权；写权限和未知格式仍拒绝自动授予。保留 seed 的 Owner Office 免确认及一次性出站校验。将旧 Office 人工确认测试改为真实队列等待期间的撤回/撤权/Owner/turn/steer/原消息/期限失效测试；更新 Shared 文件审批夹具，使其具有可信来源与真实临时路径。默认 npm test 纳入此前遗漏的 offline 测试，并新增真实临时目录/symlink/move 两端/根替换分类回归。
+- **协议取证与未解决 P1**：本机 `/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex --version` 为 `codex-cli 0.160.0`。实际执行 `app-server generate-json-schema`；`PermissionsRequestApprovalResponse.PermissionGrantScope` 仅 turn/session，文件审批响应仅 decision，命令请求的 additionalPermissions 是权限范围，不是具体写操作清单。[官方 App Server 协议](https://learn.chatgpt.com/docs/app-server)与此一致。Bot 的 JSON-RPC 审批不能替外部执行器原子绑定系统调用路径。没有关闭 Shell/项目内写入免确认与项目外单次写入能力缺口，也没有消除批准后 symlink 替换或跨工具绕过；**两项 P1 仍未解决，不是 Full Authority 完成候选**。此次没有用放开 sandbox、命令字符串解析或额外快照假装修复。
+- **Validation**：Node `v24.21.0`；`npm ci --ignore-scripts --no-audit --no-fund` 成功。初始全量 753 项中 722 通过、31 失败，主要为 seed 尚未同步的旧确认卡片及工具版本预期；不是将其作为通过证据。最终 `npm run check` 退出0、`npm test` **802/802通过**（0失败/跳过，含全部 offline 与新增真实文件系统分类），`git diff --check` 通过。独立运行 Owner 专项290/290、Shared专项45/45通过；先前 Owner+offline专项303/303通过（发生在新增只读/网络专项之前，不与802累加）。
+- **真实环境边界**：用临时独立 Codex home、无飞书凭据的忽略配置执行 doctor/smoke，随后删除该临时配置。smoke 退出0，真实 initialize/ephemeral thread/dynamic tools 注册通过，未调用模型或飞书。doctor 退出1：握手成功、8个模型元数据、隔离环境未登录；不是 doctor PASS。Group/Knowledge 两个探针各退出1：版本锁要求0.159.0，实际0.160.0，在发起探针前停止；未改版本锁以制造通过，实际隔离协议验收未完成。
+- **Remaining / 下一步**：需要覆盖全部本机写工具的受控执行层，绑定单次操作全部源/目标、执行时防路径替换、保护 projectRoots 配置并阻止拒绝后换工具；完成后才能放开项目内写和 Shell。新版 filesystem entries 仍未适配，未知格式拒绝。Work/Gateway 原策略保留。独立 Reviewer PASS、匹配版本的隔离探针及六步真实验收未取得；按本轮指令不部署。Issue 保持开放，PR 保持 Draft；不将测试绿灯当作两个 P1 已关闭。
+- **交付**：修改保存在本分支；本轮提交与 PR/Issue 回写完成后，以 Git/PR 最新 head 为准。停止任务不撤销 seed 或本轮已有修改。
+
 # 当前阻塞：Issue #33 实际写入执行边界（2026-10-04，未完成）
 
 - 最新反馈仍为两项 P1：Owner Full Authority 未实现；projectRoots 未约束所有实际写入。本轮复核 `src/codex.mjs`、`src/thread-controller.mjs` 和 Bot 调用点：本仓库通过子进程或 Shared RPC 使用外部 App Server，`respond` 只发送审批结果，不控制执行文件操作的系统调用。现有接口没有在本仓库得到验证的单次操作/全部目标绑定机制，无法在批准之后由 Bot 原子复核并执行；Shell 也不必经过 fileChange 审批。

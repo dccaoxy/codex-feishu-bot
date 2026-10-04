@@ -532,9 +532,9 @@ Office 一次性执行许可绑定 Owner、应用、原消息集合及快照、�
 
 分类器现已接入 `item/fileChange/requestApproval` 的卡片核对路径：展示操作类型、规范化源/目标路径及项目内外分类，移动同时核对两端；批准前重新核对原 Owner、消息快照、turn、diff、projectRoots 和路径解析。缺少可信原消息、未知变更格式或解析失败时不开放批准。相同请求 ID 不重放，批准令牌在发送 RPC 响应前消耗，结果不确定不能重复点击。原审批所指路径在等待期间发生变化，旧批准失效；Shared 观察已丢失时只关闭飞书入口，不替对端作答。
 
-飞书侧不再授予 `item/permissions/requestApproval` 请求中的可复用文件写权限集合：自有回合返回空权限，共享外部回合不抢答；旧卡片也不能授予此类权限。只读/网络权限沿用原确认流程。空响应中的 `scope: "turn"` 不授予任何权限，不声称协议存在操作级 scope。
+飞书侧不再授予 `item/permissions/requestApproval` 请求中的可复用文件写权限集合：自有回合返回空权限，共享外部回合不抢答；旧卡片也不能授予此类权限。已知协议格式中的纯读取（`fileSystem.read`、无非空 `write`）及网络（`network.enabled`）请求，在核对当前 Owner、可信原消息、turn 和 Shared 绑定后直接回传 turn 范围权限，不弹卡；相同请求 ID 不重复响应，传输结果不确定不重放。没有可信飞书原请求的桌面观察仍沿用原交互流程。未知权限字段（包括尚未适配的新版 `entries`）不自动授权。空响应中的 `scope: "turn"` 不授予任何权限，不声称协议存在操作级 scope。
 
-**项目边界尚未接入实际写入执行层。** Shell、项目内文件及 Shared Runtime 未获得 Full Authority 免确认。审批响应发送后，外部 App Server 才执行写入，分类器不能阻止此间 symlink 被替换，也不能从任意 Shell 命令证明全部写入目标。本候选尚未实现“唯一审批为项目外写入”，不得作为 Issue #33 完成版本部署。下一步需要可约束所有写入工具的执行层，绑定操作及全部源/目标路径、拒绝后不可换工具绕过，并验证运行中替换路径的竞态。Work、Gateway 与非 Owner 隔离策略尚未调整。
+**项目边界尚未接入实际写入执行层。** Shell、项目内文件及 Shared Runtime 未获得 Full Authority 免确认。审批响应发送后，外部 App Server 才执行写入，分类器不能阻止此间 symlink 被替换，也不能从任意 Shell 命令证明全部写入目标。本候选尚未实现“唯一审批为项目外写入”，不得作为 Issue #33 完成版本部署。本机 Codex 0.160.0 导出的协议与[官方 App Server 说明](https://learn.chatgpt.com/docs/app-server)一致：权限 scope 仅 turn/session，文件批准响应不提供原子目标绑定。下一步需要可约束所有写入工具的执行层，绑定操作及全部源/目标路径、拒绝后不可换工具绕过，并验证运行中替换路径的竞态。Work、Gateway 与非 Owner 隔离策略尚未调整。`npm test` 现包含 `test/offline` 回归及真实临时目录的路径分类测试；通过这些测试不等于执行边界或候选部署验收通过。
 
 ## 本机一次性 Owner OAuth（默认关闭）
 

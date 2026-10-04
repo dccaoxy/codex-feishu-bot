@@ -276,7 +276,7 @@ test('card update failure cannot replay a locally approved permission request',a
   const bot=new Bot(config,store,rpc,{interactive:async()=>({message_id:'card'}),text:async()=>{},replaceInteractive:async()=>{updates++;throw Error('offline');}},()=>{});
   bot.runs.set('external',{external:true,chat:'chat',thread:'external',turn:'t'});
   try{
-    const permissions={fileSystem:{write:['/test-only']}};
+    const permissions={fileSystem:{read:['/test-only']}};
     await bot.serverRequest({id:92,method:'item/permissions/requestApproval',params:{threadId:'external',turnId:'t',permissions}});
     const token=[...bot.prompts.keys()][0];await bot.action('chat',{token,decision:'accept'});
     assert.equal(updates,1);assert.deepEqual(rpc.responses,[{id:92,result:{permissions,scope:'turn'}}]);
@@ -316,7 +316,7 @@ for (const cancellation of ['none','resolved','detach','close','disconnect','wro
   try{
     await opening;rpc.state='active';rpc.turn='peer-turn';
     bot.notification({method:'turn/started',params:{threadId:'external',turn:{id:rpc.turn}}});
-    const request={id:401,method:'item/permissions/requestApproval',params:{threadId:'external',turnId:cancellation==='wrong-turn'?'other-turn':rpc.turn,permissions:{fileSystem:{write:['/test-only']}}}};
+    const request={id:401,method:'item/permissions/requestApproval',params:{threadId:'external',turnId:cancellation==='wrong-turn'?'other-turn':rpc.turn,permissions:{fileSystem:{read:['/test-only']}}}};
     await bot.serverRequest(request);
     if(cancellation==='resolved')bot.notification({method:'serverRequest/resolved',params:{requestId:401}});
     if(cancellation==='detach')await bot.command('chat','/detach');
@@ -357,18 +357,19 @@ test('dispatch approval cache is bounded and never replays resolved duplicate ID
 });
 
 for (const scenario of ['during','after','missing','oversized','wrong-item','wrong-turn','resolved','detach','close','disconnect']) test(`file approval retains exact reviewable details: ${scenario}`,async t=>{
-  const {config,store,rpc,controller}=setup(t);rpc.shared=true;await controller.attach('chat','external');rpc.calls=[];
+  const {config,store,rpc,controller,dir}=setup(t);rpc.shared=true;await controller.attach('chat','external');rpc.calls=[];
   let release,opened;const gate=new Promise(r=>release=r),opening=new Promise(r=>opened=r);const cards=[];
   const bot=new Bot(config,store,rpc,{stream:async()=>{opened();await gate;return null;},text:async()=>{},interactive:async(...a)=>cards.push(a)},()=>{});
-  const sending=bot.run('chat',[]).then(()=>null,e=>e);
+  store.enqueue('source','chat',{kind:'message',user:'owner',message:{message_id:'source',chat_type:'p2p',chat_id:'chat'}});
+  const sending=bot.run('chat',[],'source').then(()=>null,e=>e);
   try {
     await opening;rpc.state='active';rpc.turn='peer-turn';
     bot.notification({method:'turn/started',params:{threadId:'external',turn:{id:rpc.turn}}});
     if(scenario==='after'){release();await sending;}
     const event=(turnId,id,path,diff)=>bot.notification({method:'item/started',params:{threadId:'external',turnId,item:{id,type:'fileChange',changes:[{path,kind:{type:'update'},diff}]}}});
-    if(scenario!=='missing')event(scenario==='wrong-turn'?'old-turn':rpc.turn,scenario==='wrong-item'?'other':'patch-1','/review/target.txt',scenario==='oversized'?'x'.repeat(11000):'+ intended change');
+    if(scenario!=='missing')event(scenario==='wrong-turn'?'old-turn':rpc.turn,scenario==='wrong-item'?'other':'patch-1',path.join(dir,'target.txt'),scenario==='oversized'?'x'.repeat(11000):'+ intended change');
     // A later unrelated item must never substitute for the requested item.
-    event(rpc.turn,'patch-2','/review/unrelated.txt','+ unrelated');
+    event(rpc.turn,'patch-2',path.join(dir,'unrelated.txt'),'+ unrelated');
     await bot.serverRequest({id:501,method:'item/fileChange/requestApproval',params:{threadId:'external',turnId:rpc.turn,itemId:'patch-1',reason:'Review patch'}});
     if(scenario==='resolved')bot.notification({method:'serverRequest/resolved',params:{requestId:501}});
     if(scenario==='detach')await bot.command('chat','/detach');
@@ -381,8 +382,8 @@ for (const scenario of ['during','after','missing','oversized','wrong-item','wro
     assert.equal(rpc.calls.filter(c=>c.method==='turn/start').length,0);
     assert.equal(rpc.calls.filter(c=>c.method==='turn/steer').length,['detach','close','disconnect'].includes(scenario)?0:1);
     if(valid){
-      assert.match(cards[0][2],/\/review\/target.txt/);assert.match(cards[0][2],/\+ intended change/);assert.doesNotMatch(cards[0][2],/unrelated/);
-      const token=[...bot.prompts.keys()][0];await bot.action('chat',{token,decision:'accept'});
+      assert.match(cards[0][2],/target.txt/);assert.match(cards[0][2],/\+ intended change/);assert.doesNotMatch(cards[0][2],/unrelated/);
+      const token=[...bot.prompts.keys()][0];await bot.action('chat',{token,decision:'accept'},'owner');
       assert.deepEqual(rpc.responses,[{id:501,result:{decision:'accept'}}]);
     }
   }finally{release();await sending;await bot.close();}

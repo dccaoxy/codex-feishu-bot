@@ -179,32 +179,34 @@ function officeFixture(t){
  s.bot.feishu.interactive=async(chat,title,text,buttons)=>{sent.push({chat,title,text,buttons});return {message_id:'approval-card'};};s.bot.feishu.replaceInteractive=async()=>{};s.bot.feishu.text=async()=>{};
  s.bot.office.feishu={client:{drive:{v1:{file:{delete:async payload=>{writes.push(payload);return {deleted:true};}}}}},call:async(fn,retry,g)=>{g();return fn();}};
  s.bot.rpc.respond=()=>{};s.bot.rpc.request=async()=>{};
- return {...s,run,sent,writes};
+ return {...s,run,sent,writes,started:Date.now()};
 }
 const deletion=()=>({api:'drive.v1.file.delete',payload:{params:{type:'docx'},path:{file_token:'exactTarget'}}});
 async function officePending(s,id=41,args=deletion()){
  const promise=s.bot.serverRequest({id,method:'item/tool/call',params:{threadId:'t',turnId:'turn',tool:'feishu_office_call',arguments:args}});
  await new Promise(r=>setImmediate(r));return {promise,token:s.sent.at(-1)?.buttons[0].value.token};
 }
-async function confirmOffice(s,token,user='owner',decision='accept'){
- const reply=s.bot.onAction({operator:{open_id:user},context:{open_chat_id:'group'},action:{value:{token,decision}}});
- if(reply.toast.type==='info')await s.bot.drain('group');return reply;
+// The queue gate models a real wait before SDK transport, not an obsolete
+// Human confirmation. Lifecycle tests must invalidate the request during it.
+function holdOffice(s) {
+ let release, enter;
+ const entered=new Promise(r=>enter=r), gate=new Promise(r=>release=r);
+ s.bot.office.feishu.call=async(fn,retry,g)=>{enter();await gate;g();return fn();};
+ return {entered,release};
 }
-test('history-induced deletion proposal requires real Owner callback; exact confirmed operation runs once',async t=>{
- const s=officeFixture(t),p=await officePending(s);assert.equal(s.writes.length,0);assert.match(s.sent[0].text,/drive.v1.file.delete/);assert.match(s.sent[0].text,/exactTarget/);assert.match(s.sent[0].text,/m1/);
- assert.equal((await confirmOffice(s,p.token,'member')).toast.type,'error');assert.equal(s.writes.length,0);
- await assert.rejects(s.bot.action('group',{token:p.token,decision:'accept'}),/原Owner/);assert.equal(s.writes.length,0);
- await confirmOffice(s,p.token);await p.promise;assert.equal(s.writes.length,1);assert.equal(s.writes[0].path.file_token,'exactTarget');
- await confirmOffice(s,p.token);await officePending(s,42);assert.equal(s.writes.length,1);assert.equal(s.sent.length,1);
+test('current Owner Office request runs once without confirmation',async t=>{
+ const s=officeFixture(t),p=await officePending(s);await p.promise;
+ assert.equal(s.writes.length,1);assert.equal(s.sent.length,0);assert.equal(s.bot.prompts.size,0);
+ assert.equal(s.writes[0].path.file_token,'exactTarget');
+ await (await officePending(s,42)).promise;assert.equal(s.writes.length,1);
 });
-test('changing caller payload after displaying proposal cannot change approved operation',async t=>{
- const s=officeFixture(t),args=deletion(),p=await officePending(s,41,args);args.api='task.v2.task.delete';args.payload.path.file_token='changed';
- await confirmOffice(s,p.token);await p.promise;assert.equal(s.writes[0].path.file_token,'exactTarget');
- const changed=await officePending(s,43,{...deletion(),payload:{params:{type:'docx'},path:{file_token:'otherTarget'}}});assert.equal(s.writes.length,1);assert.equal(s.sent.length,2);
- await confirmOffice(s,p.token);assert.equal(s.writes.length,1);await confirmOffice(s,changed.token,'owner','decline');await changed.promise;assert.equal(s.writes.length,1);
+test('queued Office operation uses its payload snapshot',async t=>{
+ const s=officeFixture(t),gate=holdOffice(s),args=deletion(),p=await officePending(s,41,args);await gate.entered;
+ args.api='task.v2.task.delete';args.payload.path.file_token='changed';
+ gate.release();await p.promise;assert.equal(s.writes[0].path.file_token,'exactTarget');assert.equal(s.sent.length,0);
 });
-for(const reason of ['recall','revoke','owner','turn','steer','ended','sourceChanged','expired'])test(`office consent invalid after ${reason}`,async t=>{
- const s=officeFixture(t),p=await officePending(s);
+for(const reason of ['recall','revoke','owner','turn','steer','ended','sourceChanged','expired'])test(`queued Office execution invalid after ${reason}`,async t=>{
+ const s=officeFixture(t),gate=holdOffice(s),p=await officePending(s);await gate.entered;
  if(reason==='recall')await s.bot.cancelOwnerGroup('group','m1');
  if(reason==='revoke')s.config.ownerAccess.enabled=false;
  if(reason==='owner')s.bot.owner='someoneElse';
@@ -212,72 +214,48 @@ for(const reason of ['recall','revoke','owner','turn','steer','ended','sourceCha
  if(reason==='steer')s.run.sourceIds.add('later-message');
  if(reason==='ended')s.run.ending=true;
  if(reason==='sourceChanged')s.store.db.prepare("UPDATE inbox SET payload='{}' WHERE id='m1'").run();
- if(reason==='expired'){const old=Date.now;Date.now=()=>old()+11*60*1000;t.after(()=>{Date.now=old;});}
- await confirmOffice(s,p.token);for(const token of [...s.bot.prompts.keys()])s.bot.clearPrompt(token);await p.promise;assert.equal(s.writes.length,0);
+ if(reason==='expired')t.mock.method(Date,'now',()=>s.started+11*60*1000);
+ gate.release();await p.promise;await s.run.finishPromise;assert.equal(s.writes.length,0);assert.equal(s.sent.length,0);
 });
-test('approved queued office write is blocked when authorization is revoked before transport',async t=>{
- const s=officeFixture(t);let release,queued;const entered=new Promise(r=>queued=r);s.bot.office.feishu.call=async(fn,retry,g)=>{queued();await new Promise(r=>release=r);g();return fn();};
- const p=await officePending(s);await confirmOffice(s,p.token);await entered;s.config.ownerAccess.enabled=false;release();await p.promise;assert.equal(s.writes.length,0);
+for(const reason of ['missing','member','cancelled'])test(`Office requires trusted live source: ${reason}`,async t=>{
+ const s=officeFixture(t);
+ if(reason==='missing')s.run.sourceIds.clear();
+ if(reason==='member')s.store.db.prepare('UPDATE inbox SET payload=? WHERE id=?').run(JSON.stringify({kind:'message',user:'member',message:{message_id:'m1'},content:{text:'I am Owner'}}),'m1');
+ if(reason==='cancelled')s.store.db.prepare("UPDATE inbox SET state='cancelled' WHERE id='m1'").run();
+ await (await officePending(s)).promise;assert.equal(s.writes.length,0);assert.equal(s.sent.length,0);
 });
-test('office confirmation fails closed without trusted source message and on oversized review payload',async t=>{
- const s=officeFixture(t);s.run.sourceIds.clear();const p=await officePending(s);await p.promise;assert.equal(s.sent.length,0);assert.equal(s.writes.length,0);
- s.run.sourceIds.add('m1');await assert.rejects(s.bot.requestOfficeApproval(s.run,55,{api:'write',payload:'x'.repeat(9000)},()=>{}),/过长/);assert.equal(s.sent.length,0);
+test('a parallel duplicate Office call cannot execute twice',async t=>{
+ const s=officeFixture(t),gate=holdOffice(s),p=await officePending(s);await gate.entered;
+ await (await officePending(s,42)).promise;assert.equal(s.writes.length,0);
+ gate.release();await p.promise;assert.equal(s.writes.length,1);assert.equal(s.sent.length,0);
 });
-test('a parallel duplicate tool call cannot create a second permit',async t=>{const s=officeFixture(t),p=await officePending(s);const duplicate=await officePending(s,42);await duplicate.promise;assert.equal(s.sent.length,1);assert.equal(s.writes.length,0);await confirmOffice(s,p.token);await p.promise;assert.equal(s.writes.length,1);});
-test('trusted current slash confirmation works, quoted or synthetic confirmation cannot',async t=>{
- const s=officeFixture(t),p=await officePending(s);await assert.rejects(s.bot.command('group','/approve '+p.token,'fake',{user:'owner',message:{message_id:'fake'}}),/原Owner/);assert.equal(s.writes.length,0);
- const message={...s.event.message,message_id:'approval-message',content:JSON.stringify({text:'@_user_1 /approve '+p.token})};s.bot.onMessage({...s.event,message});await s.bot.drain('group');await p.promise;assert.equal(s.writes.length,1);
-});
-test('private Owner office confirmation is scoped to its source message and account',async t=>{
- const s=officeFixture(t);s.store.set('ownerChannel:group','');s.bot.ownerAccess=null;
- s.store.db.prepare('UPDATE inbox SET payload=? WHERE id=?').run(JSON.stringify({kind:'message',user:'owner',message:{...s.event.message,chat_type:'p2p'},content:{text:'only read'}}),'m1');
- const p=await officePending(s);assert.equal(s.writes.length,0);await confirmOffice(s,p.token,'member');assert.equal(s.writes.length,0);await confirmOffice(s,p.token);await p.promise;assert.equal(s.writes.length,1);
-});
-test('approval of markup-containing payload displays escaped full JSON and never executes before confirmation',async t=>{
- const s=officeFixture(t),pending=s.bot.requestOfficeApproval(s.run,55,{api:'fixture.write',payload:{text:'```\n[spoof](https://example.com) <b>'}},()=>{});await new Promise(r=>setImmediate(r));
- assert.match(s.sent[0].text,/\\u0060/);assert.match(s.sent[0].text,/\\u003c/);const token=s.sent[0].buttons[0].value.token;const denied=assert.rejects(pending);await confirmOffice(s,token,'owner','decline');await denied;
-});
-test('office consent is rechecked at final RPC delivery after tool completion',async t=>{
+test('Office permit is rechecked at final RPC delivery after completion',async t=>{
  const s=officeFixture(t),responses=[];s.bot.rpc.respond=(...args)=>responses.push(args);
  s.bot.office.execute=async(name,args,guard,authorize)=>{const permit=await authorize({api:'fixture.write',payload:{target:'x'}});permit.consume();s.run.sourceIds.add('new-message');return {private:'must-not-deliver'};};
- const p=await officePending(s);await confirmOffice(s,p.token);await p.promise;assert.equal(responses.length,0);
+ await (await officePending(s)).promise;assert.equal(responses.length,0);
 });
-
 function privateOfficeFixture(t){
  const s=officeFixture(t);s.store.set('ownerChannel:group','');s.run.chat='private';
  s.store.db.prepare("DELETE FROM inbox WHERE id='m1'").run();
  s.event={...s.event,message:{...s.event.message,chat_type:'p2p',chat_id:'private',mentions:[],content:JSON.stringify({text:'delete exactTarget'})}};
- s.bot.onMessage(s.event);s.store.mark('m1','done');
- return s;
+ s.bot.onMessage(s.event);s.store.mark('m1','done');return s;
 }
-async function privateConfirm(s,token){
- s.bot.onAction({operator:{open_id:'owner'},context:{open_chat_id:'private'},action:{value:{token,decision:'accept'}}});
- await s.bot.drain('private');
-}
-for(const method of ['button','slash'])test(`production recall invalidates private office consent before ${method}`,async t=>{
- const s=privateOfficeFixture(t),p=await officePending(s),interrupts=[];s.bot.rpc.request=async(...a)=>interrupts.push(a);
- await s.bot.cancelOwnerGroup('private','m1');
- assert.equal(s.store.db.prepare("SELECT state FROM inbox WHERE id='m1'").get().state,'cancelled');
- assert.equal(s.bot.prompts.has(p.token),false);assert.equal(s.run.ownerCancelled,true);
- if(method==='button')await privateConfirm(s,p.token);
- else{s.bot.onMessage({...s.event,message:{...s.event.message,message_id:'confirm',content:JSON.stringify({text:'/approve '+p.token})}});await s.bot.drain('private');}
- await p.promise;await s.run.finishPromise;assert.equal(s.writes.length,0);
- assert.ok(interrupts.some(([m])=>m==='turn/interrupt'));
+test('private Owner Office request also needs no confirmation',async t=>{
+ const s=privateOfficeFixture(t);await (await officePending(s)).promise;
+ assert.equal(s.writes.length,1);assert.equal(s.sent.length,0);
 });
-test('private recall after approval prevents queued SDK write',async t=>{
- const s=privateOfficeFixture(t);let release,entered;const queued=new Promise(r=>entered=r);
- s.bot.office.feishu.call=async(fn,retry,g)=>{entered();await new Promise(r=>release=r);g();return fn();};
- const p=await officePending(s);await privateConfirm(s,p.token);await queued;
- await s.bot.cancelOwnerGroup('private','m1');release();await p.promise;await s.run.finishPromise;assert.equal(s.writes.length,0);
+test('private recall prevents queued SDK write and interrupts its turn',async t=>{
+ const s=privateOfficeFixture(t),gate=holdOffice(s),p=await officePending(s),interrupts=[];await gate.entered;s.bot.rpc.request=async(...a)=>interrupts.push(a);
+ await s.bot.cancelOwnerGroup('private','m1');gate.release();await p.promise;await s.run.finishPromise;
+ assert.equal(s.writes.length,0);assert.equal(s.run.ownerCancelled,true);assert.ok(interrupts.some(([m])=>m==='turn/interrupt'));
 });
-test('unrelated private recall and untrusted recall leave pending consent intact',async t=>{
- const s=privateOfficeFixture(t),p=await officePending(s);
+test('unrelated and untrusted recall leave queued Office operation intact',async t=>{
+ const s=privateOfficeFixture(t),gate=holdOffice(s),p=await officePending(s);await gate.entered;
  s.bot.onMessage({...s.event,message:{...s.event.message,message_id:'unrelated'}});s.store.mark('unrelated','done');
  for(const id of [undefined,'missing','unrelated'])await s.bot.cancelOwnerGroup('private',id);
  s.store.enqueue('foreign','private',{kind:'message',user:'member',message:{...s.event.message,message_id:'foreign'}});s.store.mark('foreign','done');
  await s.bot.cancelOwnerGroup('private','foreign');await s.bot.cancelOwnerGroup('other','m1');
- assert.equal(s.run.ownerCancelled,undefined);assert.equal(s.bot.prompts.has(p.token),true);
- await privateConfirm(s,p.token);await p.promise;assert.equal(s.writes.length,1);
+ assert.equal(s.run.ownerCancelled,undefined);gate.release();await p.promise;assert.equal(s.writes.length,1);
 });
 
 async function createdOfficeFixture(t,kind='group'){
@@ -298,20 +276,20 @@ for(const kind of ['group','private'])test(`recorded bot document content edits 
  const again=await officePending(s,102,deleteContent());await again.promise;assert.equal(s.writes.length,1);
  const reopened=new Store(s.config.codex.cwd);assert.equal(reopened.get('createdDoc:created1'),s.store.get('createdDoc:created1'));reopened.close();
 });
-for(const reason of ['unknown','wrongOwner','wrongApp','malformed'])test(`document content consent still prompts for ${reason}`,async t=>{
+for(const reason of ['unknown','wrongOwner','wrongApp','malformed'])test(`document edits do not depend on creation audit record: ${reason}`,async t=>{
  const s=await createdOfficeFixture(t);
  if(reason==='wrongOwner')s.store.set('createdDoc:created1',JSON.stringify({app:'app1',owner:'someone'}));
  if(reason==='wrongApp')s.config.feishu.appId='app2';
  if(reason==='malformed')s.store.set('createdDoc:created1','{}');
  const p=await officePending(s,101,deleteContent(reason==='unknown'?'external1':'created1'));
- assert.equal(s.sent.length,1);assert.equal(s.writes.length,0);await confirmOffice(s,p.token,'owner','decline');await p.promise;
+ await p.promise;assert.equal(s.sent.length,0);assert.equal(s.writes.length,1);
 });
-test('whole file deletion remains confirmed for a recorded bot document',async t=>{
+test('explicit whole file deletion needs no creation record or card',async t=>{
  const s=await createdOfficeFixture(t),a=deletion();a.payload.path.file_token='created1';const p=await officePending(s,101,a);
- assert.equal(s.sent.length,1);assert.equal(s.writes.length,0);await confirmOffice(s,p.token,'owner','decline');await p.promise;
- for(const api of ['drive.v1.permissionMember.create','drive.v1.permissionPublic.patch','task.v2.task.delete','docx.v1.document.create'])assert.equal(s.bot.createdDocumentConsent({api,payload:{path:{document_id:'created1',token:'created1'}}}),null);
+ await p.promise;assert.equal(s.sent.length,0);assert.equal(s.writes.length,1);
+
 });
-for(const reason of ['recall','revoke','owner','app','record'])test(`automatic content permit cancels before queued transport on ${reason}`,async t=>{
+for(const reason of ['recall','revoke','owner','app'])test(`automatic content permit cancels before queued transport on ${reason}`,async t=>{
  const s=await createdOfficeFixture(t);let release,enter;const entered=new Promise(r=>enter=r);
  s.bot.office.feishu.call=async(fn,retry,g)=>{enter();await new Promise(r=>release=r);g();return fn();};
  const p=await officePending(s,101,deleteContent());await entered;
@@ -319,7 +297,6 @@ for(const reason of ['recall','revoke','owner','app','record'])test(`automatic c
  if(reason==='revoke')s.config.ownerAccess.enabled=false;
  if(reason==='owner')s.bot.owner='other';
  if(reason==='app')s.config.feishu.appId='other';
- if(reason==='record')s.store.set('createdDoc:created1','');
  release();await p.promise;await s.run.finishPromise;assert.equal(s.writes.length,0);assert.equal(s.sent.length,0);
 });
 test('style tool on recorded document edits directly and preserves host permit',async t=>{
@@ -328,39 +305,67 @@ test('style tool on recorded document edits directly and preserves host permit',
  await s.bot.serverRequest({id:101,method:'item/tool/call',params:{threadId:'t',turnId:'turn',tool:'feishu_doc_format_text',arguments:{documentId:'created1',blockId:'b',revisionId:1,matchText:'name',style:{bold:true}}}});
  assert.equal(s.sent.length,0);assert.equal(s.writes.length,1);
 });
-test('approved catalog document creation records API result, not a caller supplied ID',async t=>{
+test('catalog document creation records API result, not a caller supplied ID',async t=>{
  const s=officeFixture(t);s.config.feishu.appId='app1';s.bot.office.feishu.client.docx={v1:{document:{create:async()=>({document:{document_id:'catalogCreated'}})}}};
- const p=await officePending(s,100,{api:'docx.v1.document.create',payload:{data:{title:'external1'}}});await confirmOffice(s,p.token);await p.promise;
+ const p=await officePending(s,100,{api:'docx.v1.document.create',payload:{data:{title:'external1'}}});await p.promise;
  assert.ok(s.store.get('createdDoc:catalogCreated'));assert.equal(s.store.get('createdDoc:external1'),undefined);
 });
 
 test('failed or merely read catalog document never becomes bot-created',async t=>{
  const s=officeFixture(t);s.config.feishu.appId='app1';s.bot.office.feishu.client.docx={v1:{document:{create:async()=>{throw Error('failed');},get:async()=>({document:{document_id:'external1'}})}}};
- const p=await officePending(s,100,{api:'docx.v1.document.create',payload:{data:{title:'external1'}}});await confirmOffice(s,p.token);await p.promise;
+ const p=await officePending(s,100,{api:'docx.v1.document.create',payload:{data:{title:'external1'}}});await p.promise;
  const read=await officePending(s,101,{api:'docx.v1.document.get',payload:{path:{document_id:'external1'}}});await read.promise;
  assert.equal(s.store.get('createdDoc:external1'),undefined);
- assert.equal(s.bot.createdDocumentConsent(deleteContent('external1')),null);
+ assert.equal(s.sent.length,0);
 });
 
 function userOffice(s){
  const lease={identity:{kind:'owner-user',binding:'fixture',generation:'1'},check(){},access:async()=> 'fixture-user-token'};
  s.bot.office.ownerOAuth={enabled:()=>true,lease:async()=>lease};return lease;
 }
-test('user identity cannot borrow tenant bot-created document consent',async t=>{
+test('Owner user identity writes without a tenant creation-record gate',async t=>{
  const s=await createdOfficeFixture(t);userOffice(s);
- const p=await officePending(s,101,deleteContent());assert.equal(s.sent.length,1);assert.equal(s.writes.length,0);
- await confirmOffice(s,p.token,'owner','decline');await p.promise;assert.equal(s.writes.length,0);
+ const p=await officePending(s,101,deleteContent());await p.promise;assert.equal(s.sent.length,0);assert.equal(s.writes.length,1);
 });
 test('user-created document is not registered as tenant bot-created',async t=>{
  const s=officeFixture(t);s.config.feishu.appId='app1';userOffice(s);
  s.bot.office.feishu.client.docx={v1:{document:{create:async()=>({document:{document_id:'userCreated'}})}}};
- const p=await officePending(s,100,{api:'docx.v1.document.create',payload:{data:{title:'fixture'}}});await confirmOffice(s,p.token);await p.promise;
+ const p=await officePending(s,100,{api:'docx.v1.document.create',payload:{data:{title:'fixture'}}});await p.promise;
  assert.equal(s.store.get('createdDoc:userCreated'),undefined);
 });
 for(const reason of ['recall','revoke'])test(`user credential wait in real Owner group pipeline is fenced on ${reason}`,async t=>{
  const s=officeFixture(t),lease=userOffice(s);let release,entered;const waiting=new Promise(r=>entered=r);
  lease.access=async()=>{entered();await new Promise(r=>release=r);return 'fixture';};
- const p=await officePending(s);await confirmOffice(s,p.token);await waiting;
+ const p=await officePending(s);await waiting;
  if(reason==='recall')await s.bot.cancelOwnerGroup('group','m1');else s.config.ownerAccess.enabled=false;
  release();await p.promise;await s.run.finishPromise;assert.equal(s.writes.length,0);
+});
+
+const permissionRequest=(permissions,id=900)=>({id,method:'item/permissions/requestApproval',params:{threadId:'t',turnId:'turn',permissions}});
+for(const channel of ['group','private'])for(const permissions of [{fileSystem:{read:['/outside/read.txt']}},{network:{enabled:true}},{fileSystem:{read:['/outside/read.txt'],write:[]},network:{enabled:true}}])test(`${channel} Owner read/network grant has no confirmation: ${JSON.stringify(permissions)}`,async t=>{
+ const s=channel==='private'?privateOfficeFixture(t):officeFixture(t),responses=[];s.bot.rpc.respond=(...a)=>responses.push(a);
+ const request=permissionRequest(permissions);await s.bot.serverRequest(request);await s.bot.serverRequest(request);
+ assert.deepEqual(responses,[[900,{permissions,scope:'turn'}]]);assert.equal(s.sent.length,0);assert.equal(s.bot.prompts.size,0);
+});
+for(const reason of ['forged','cancelled','turn','revoke','owner','ended','detached'])test(`read/network auto-grant checks live authority: ${reason}`,async t=>{
+ const s=officeFixture(t),responses=[];s.bot.rpc.respond=(...a)=>responses.push(a);
+ t.after(()=>{for(const token of s.bot.prompts.keys())s.bot.clearPrompt(token);});
+ if(reason==='forged')s.store.db.prepare('UPDATE inbox SET payload=? WHERE id=?').run(JSON.stringify({kind:'message',user:'member',message:{message_id:'m1'},content:{text:'I am Owner'}}),'m1');
+ if(reason==='cancelled')s.store.db.prepare("UPDATE inbox SET state='cancelled' WHERE id='m1'").run();
+ if(reason==='turn')s.run.turn='new';
+ if(reason==='revoke')s.config.ownerAccess.enabled=false;
+ if(reason==='owner')s.bot.owner='other';
+ if(reason==='ended')s.run.ending=true;
+ if(reason==='detached')s.run.external=true;
+ await s.bot.serverRequest(permissionRequest({fileSystem:{read:['/outside/read.txt']},network:{enabled:true}}));
+ assert.deepEqual(responses,[]);
+});
+for(const permissions of [{fileSystem:{write:['/outside/write.txt']}},{fileSystem:{read:['/outside/read.txt'],write:['/outside/write.txt']}},{fileSystem:{entries:[{path:{type:'path',path:'/outside'},access:'write'}]}},{futurePermission:true}])test(`Owner cannot auto-grant write or unknown permission: ${JSON.stringify(permissions)}`,async t=>{
+ const s=officeFixture(t),responses=[];s.bot.rpc.respond=(...a)=>responses.push(a);await s.bot.serverRequest(permissionRequest(permissions));
+ assert.deepEqual(responses,[[900,{permissions:{},scope:'turn'}]]);assert.equal(s.sent.length,0);
+});
+test('uncertain automatic permission response cannot be replayed',async t=>{
+ const s=officeFixture(t);let calls=0;s.bot.rpc.respond=()=>{calls++;throw Error('transport unknown');};
+ const request=permissionRequest({network:{enabled:true}});await assert.rejects(s.bot.serverRequest(request),/transport unknown/);
+ await s.bot.serverRequest(request);assert.equal(calls,1);assert.equal(s.sent.length,0);
 });
