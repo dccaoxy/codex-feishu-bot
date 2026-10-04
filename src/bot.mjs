@@ -1012,6 +1012,17 @@ ${this.ownerGroups?OWNER_GROUP_INSTRUCTIONS:''}` };
       else this.clearPrompt(value.token,'已拒绝办公操作');
       return;
     }
+    if(p.method==='item/fileChange/requestApproval'){
+      if (!['accept','decline'].includes(value.decision)) throw new Error('审批操作无效。');
+      if(!p.approvalCheck){this.unavailablePrompt(value.token,this.runs.get(p.thread)||{});throw Error('文件审批缺少路径及原请求复核');}
+      const status=value.decision==='accept'?'已批准本次文件变更请求':'已拒绝本次文件变更请求';
+      // Consume before the transport write. An uncertain response must never
+      // leave a clickable token that could submit this operation again.
+      this.clearPrompt(value.token,status);
+      this.rpc.respond(p.id,{decision:value.decision});
+      await this.feishu.text(chat,`${status}。`);
+      return;
+    }
     if (value.decision === 'decline') {
       this.denyPrompt(value.token); await this.feishu.text(chat, '已拒绝本次请求。'); return;
     }
@@ -1039,15 +1050,6 @@ ${this.ownerGroups?OWNER_GROUP_INSTRUCTIONS:''}` };
       return;
     }
     if (!['accept','decline'].includes(value.decision)) throw new Error('审批操作无效。');
-    if(p.method==='item/fileChange/requestApproval'){
-      if(!p.approvalCheck){this.unavailablePrompt(value.token,this.runs.get(p.thread)||{});throw Error('文件审批缺少路径及原请求复核');}
-      // Consume before the transport write. An uncertain response must never
-      // leave a clickable token that could submit this operation again.
-      this.clearPrompt(value.token,'已提交处理');
-      this.rpc.respond(p.id,{decision:value.decision});
-      await this.feishu.text(chat,'已批准本次文件变更请求。');
-      return;
-    }
     if (p.method === 'item/permissions/requestApproval' && !isReadOnlyPermissionRequest(p.params.permissions)) {
       this.unavailablePrompt(value.token,this.runs.get(p.thread)||{});
       throw Error('不能将文件写权限授予整个回合，请使用操作级执行边界');

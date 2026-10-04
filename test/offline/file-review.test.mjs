@@ -72,6 +72,7 @@ test('file card displays canonical target and operation; approval is consumed on
   await f.bot.serverRequest(f.request);
   assert.equal(f.cards.length,1);
   assert.deepEqual(f.responses,[{id:1,result:{decision:'accept'}}]);
+  assert.deepEqual(f.messages,['已批准本次文件变更请求。']);
 });
 
 test('missing or non-Owner source fails before a file approval card is created',async t=>{
@@ -93,6 +94,7 @@ test('rejected file request cannot be replayed with the same request ID',async t
   await f.bot.serverRequest(f.request);
   assert.equal(f.cards.length,1);
   assert.deepEqual(f.responses,[{id:1,result:{decision:'decline'}}]);
+  assert.deepEqual(f.messages,['已拒绝本次文件变更请求。']);
 });
 
 for(const [name,change] of [
