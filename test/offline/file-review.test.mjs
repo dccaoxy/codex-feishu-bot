@@ -23,7 +23,7 @@ function fixture(t,{shared=false,external=false}={}) {
   const bot=Object.assign(Object.create(Bot.prototype),{
     config:{ownerAccess:{projectRoots:['/project']}},owner:'owner',available:true,closed:false,
     runs:new Map([['thread',run]]),prompts:new Map(),
-    store:{get:()=>'',binding:()=>({thread:'thread'}),db:{prepare:sql=>({get:()=>sql.startsWith('SELECT 1')?undefined:row})}},
+    store:{get:()=>'',binding:()=>({thread:'thread'}),db:{prepare:sql=>({get:()=>sql.startsWith('SELECT 1')?(row.state==='cancelled'?{1:1}:undefined):row})}},
     rpc:{shared,respond:(id,result)=>responses.push({id,result})},
     feishu:{text:async(_chat,text)=>messages.push(text),interactive:async(...args)=>{cards.push(args);return {};},replaceInteractive:async()=>{}},
   });
@@ -48,24 +48,25 @@ test('no file write capability is classified as a read-only permission request',
   for(const permissions of [{},{fileSystem:{read:['/outside'],write:[]}},{network:{enabled:true}}])assert.equal(isReadOnlyPermissionRequest(permissions),true);
 });
 
-for(const external of [false,true])test(`reusable file permissions never produce an approval card (${external?'shared':'owned'})`,async t=>{
+for(const external of [false,true])test(`native file permissions are relayed for explicit approval (${external?'shared':'owned'})`,async t=>{
   const f=fixture(t,{shared:external,external});
   await f.bot.serverRequest({id:3,method:'item/permissions/requestApproval',params:{threadId:'thread',turnId:'turn',permissions:{fileSystem:{write:['/outside']}}}});
-  assert.equal(f.cards.length,0);assert.equal(f.bot.prompts.size,0);
-  assert.deepEqual(f.responses,external?[]:[{id:3,result:{permissions:{},scope:'turn'}}]);
+  assert.equal(f.cards.length,1);assert.equal(f.bot.prompts.size,1);assert.deepEqual(f.responses,[]);
+  await f.bot.action('chat',{token:[...f.bot.prompts.keys()][0],decision:'accept'},'owner');
+  assert.deepEqual(f.responses,[{id:3,result:{permissions:{fileSystem:{write:['/outside']}},scope:'turn'}}]);
 });
 
 test('a stale write-permission card cannot grant a turn capability',async t=>{
   const f=fixture(t);
   f.bot.prompts.set('old',{id:4,method:'item/permissions/requestApproval',params:{permissions:{fileSystem:{write:['/outside']}}},chat:'chat',thread:'thread',expires:Date.now()+10000});
-  await assert.rejects(f.bot.action('chat',{token:'old',decision:'accept'},'owner'),/整个回合/);
-  assert.deepEqual(f.responses,[{id:4,result:{permissions:{},scope:'turn'}}]);
+  await assert.rejects(f.bot.action('chat',{token:'old',decision:'accept'},'owner'),/身份及回合/);
+  assert.deepEqual(f.responses,[]);
 });
 
-test('file card displays canonical target and operation; approval is consumed once',async t=>{
+test('file card relays native target and operation; approval is consumed once',async t=>{
   paths(t);const f=fixture(t);
   await f.bot.serverRequest(f.request);
-  assert.equal(f.cards.length,1);assert.match(f.cards[0][2],/\/outside\/file/);assert.match(f.cards[0][2],/update/);
+  assert.equal(f.cards.length,1);assert.match(f.cards[0][2],/\/project\/link\/file/);assert.match(f.cards[0][2],/update/);
   const token=[...f.bot.prompts.keys()][0];
   await f.bot.action('chat',{token,decision:'accept'},'owner');
   await assert.rejects(f.bot.action('chat',{token,decision:'accept'},'owner'));
@@ -75,15 +76,15 @@ test('file card displays canonical target and operation; approval is consumed on
   assert.deepEqual(f.messages,['已批准本次文件变更请求。']);
 });
 
-test('missing or non-Owner source fails before a file approval card is created',async t=>{
-  paths(t);
-  for(const missing of [false,true]){
-    const f=fixture(t);
-    if(missing)f.run.sourceIds.clear();
-    else f.row.payload=JSON.stringify({kind:'message',user:'member',message:{message_id:'source'},text:'I am Owner'});
-    await f.bot.serverRequest(f.request);
-    assert.equal(f.cards.length,0);assert.deepEqual(f.responses,[{id:1,result:{decision:'decline'}}]);
-  }
+test('non-Owner cannot answer a native approval',async t=>{
+ const f=fixture(t);await f.bot.serverRequest(f.request);
+ await assert.rejects(f.bot.action('chat',{token:[...f.bot.prompts.keys()][0],decision:'accept'},'member'));
+ assert.deepEqual(f.responses,[]);
+});
+test('native file approval does not inspect projectRoots or resolve symlinks',async t=>{
+  const p=paths(t),f=fixture(t);await f.bot.serverRequest(f.request);p.retarget();f.bot.config.ownerAccess.projectRoots=['/elsewhere'];
+  await f.bot.action('chat',{token:[...f.bot.prompts.keys()][0],decision:'accept'},'owner');
+  assert.deepEqual(f.responses,[{id:1,result:{decision:'accept'}}]);
 });
 
 test('rejected file request cannot be replayed with the same request ID',async t=>{
@@ -98,14 +99,11 @@ test('rejected file request cannot be replayed with the same request ID',async t
 });
 
 for(const [name,change] of [
-  ['symlink target',(_f,p)=>p.retarget()],
   ['Owner',f=>f.bot.owner='other'],
   ['turn',f=>f.run.turn='next'],
   ['steer',f=>f.run.sourceIds.add('next')],
   ['withdrawal',f=>f.row.state='cancelled'],
-  ['source payload',f=>f.row.payload+=' '],
   ['patch',f=>f.setChanges([{path:'/outside/other',kind:{type:'delete'},diff:'different'}])],
-  ['projectRoots',f=>f.bot.config.ownerAccess.projectRoots.push('/outside')],
 ])test(`file approval invalid after ${name} changes`,async t=>{
   const p=paths(t),f=fixture(t);await f.bot.serverRequest(f.request);
   const token=[...f.bot.prompts.keys()][0];change(f,p);

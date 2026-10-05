@@ -24,6 +24,7 @@ class FakeRpc extends EventEmitter {
       { type: 'userMessage', content: [{ type: 'text', text: '旧问题' }] },
       { type: 'agentMessage', text: '旧结论' }, { type: 'reasoning', content: ['private'] },
     ] }], nextCursor: 'older' };
+    if (method === 'thread/list') return {data:(this.store?.threads(params.searchTerm || '') || []).map(t=>({id:t.id,name:t.title})),nextCursor:null};
     if (method === 'model/list') return { data: [{ model: 'test-model', displayName: 'Test', isDefault: true, supportedReasoningEfforts: [{ reasoningEffort: 'low' }] }] };
     return {};
   }
@@ -47,6 +48,7 @@ function setup(t) {
     storageDir: dir, streamIntervalMs: 100000, maxAttachmentMB: 1 };
   fs.mkdirSync(config.codex.cwd);
   const store = new Store(dir), rpc = new FakeRpc(), feishu = new FakeFeishu();
+  rpc.store=store;
   const bot = new Bot(config,store,rpc,feishu,() => {});
   t.after(async () => {
     await bot.close();
@@ -218,9 +220,9 @@ test('approval is bound to chat, one-shot, preserves rejection', async t => {
   await bot.serverRequest({id:10,method:'item/commandExecution/requestApproval',params:{threadId:'t1',command:'echo test'}});
   const value = feishu.messages.at(-1).buttons[1].value;
   await assert.rejects(bot.action('wrong-chat',value),/失效/);
-  await bot.action('chat',value);
+  await bot.action('chat',value,'owner');
   assert.deepEqual(rpc.responses.at(-1),{id:10,result:{decision:'decline'}});
-  await assert.rejects(bot.action('chat',value),/失效/);
+  await assert.rejects(bot.action('chat',value,'owner'),/失效/);
 });
 
 test('multi-question clarification waits for every answer', async t => {
@@ -230,8 +232,8 @@ test('multi-question clarification waits for every answer', async t => {
     {id:'q1',question:'颜色',options:[{label:'蓝色'}]}, {id:'q2',question:'尺寸',options:[]},
   ]}});
   const token = [...bot.prompts.keys()][0];
-  await bot.action('chat',{token,question:'q1',answer:'蓝色'}); assert.equal(rpc.responses.length,0);
-  await bot.command('chat',`/answer ${token} q2 A4`);
+  await bot.action('chat',{token,question:'q1',answer:'蓝色'},'owner'); assert.equal(rpc.responses.length,0);
+  await bot.action('chat',{token,question:'q2',answer:'A4'},'owner');
   assert.deepEqual(rpc.responses.at(-1).result,{answers:{q1:{answers:['蓝色']},q2:{answers:['A4']}}});
 });
 
@@ -283,14 +285,12 @@ test('oversized answer is returned as complete artifact', async t => {
   assert.equal(feishu.uploads.length,1); assert.equal(fs.readFileSync(feishu.uploads[0].file,'utf8'),full);
 });
 
-test('export refuses traversal and symlinks escaping workspace', async t => {
-  const {bot,dir,config,feishu}=setup(t);
-  const secret=path.join(dir,'secret'); fs.writeFileSync(secret,'secret');
-  fs.symlinkSync(secret,path.join(config.codex.cwd,'link'));
-  await assert.rejects(bot.sendFile('chat','../secret'),/只能发送/);
-  await assert.rejects(bot.sendFile('chat','link'),/只能发送/);
-  const file=path.join(config.codex.cwd,'result.txt'); fs.writeFileSync(file,'hello');
-  await bot.sendFile('chat',file); assert.equal(feishu.uploads.length,1);
+test('Owner file delivery has no extra project boundary but requires a regular file', async t => {
+ const {bot,feishu,dir,config}=setup(t);const outside=path.join(dir,'artifact');fs.writeFileSync(outside,'test artifact');
+ fs.symlinkSync(outside,path.join(config.codex.cwd,'link'));
+ await bot.sendFile('chat','../artifact');await bot.sendFile('chat','link');
+ assert.deepEqual(feishu.uploads.map(x=>x.file),[fs.realpathSync(outside),fs.realpathSync(outside)]);
+ await assert.rejects(bot.sendFile('chat',dir),/普通文件/);
 });
 
 test('restart marks uncertain work and never repeats a model call', async t => {
@@ -354,16 +354,16 @@ test('MCP form requires explicit submit, validates typed fields, and is chat-bou
   await bot.run('chat',[{type:'text',text:'test'}]);
   await bot.serverRequest({id:901,method:'mcpServer/elicitation/request',params:{threadId:'t1',serverName:'test',mode:'form',message:'Allow operation?',requestedSchema:{type:'object',properties:{allow:{type:'boolean'},count:{type:'integer',minimum:1}},required:['allow','count']}}});
   const token = [...bot.prompts.keys()][0];
-  await assert.rejects(bot.action('other',{token,decision:'accept'}));
-  await assert.rejects(bot.action('chat',{token,decision:'accept'}),/必填/);
-  await assert.rejects(bot.action('chat',{token,question:'allow',answer:'yes'}));
-  await bot.action('chat',{token,question:'allow',answer:'false'});
-  await assert.rejects(bot.action('chat',{token,question:'count',answer:'0'}));
-  await bot.action('chat',{token,question:'count',answer:'2'});
+  await assert.rejects(bot.action('other',{token,decision:'accept'},'owner'));
+  await assert.rejects(bot.action('chat',{token,decision:'accept'},'owner'),/必填/);
+  await assert.rejects(bot.action('chat',{token,question:'allow',answer:'yes'},'owner'));
+  await bot.action('chat',{token,question:'allow',answer:'false'},'owner');
+  await assert.rejects(bot.action('chat',{token,question:'count',answer:'0'},'owner'));
+  await bot.action('chat',{token,question:'count',answer:'2'},'owner');
   assert.equal(rpc.responses.length,0);
-  await bot.action('chat',{token,decision:'accept'});
+  await bot.action('chat',{token,decision:'accept'},'owner');
   assert.deepEqual(rpc.responses.at(-1),{id:901,result:{action:'accept',content:{allow:false,count:2}}});
-  await assert.rejects(bot.action('chat',{token,decision:'accept'}));
+  await assert.rejects(bot.action('chat',{token,decision:'accept'},'owner'));
 });
 
 test('MCP URL confirmation and decline use correct response shapes; unsafe and native requests fail closed', async t => {
@@ -372,10 +372,10 @@ test('MCP URL confirmation and decline use correct response shapes; unsafe and n
   let id=910;
   const request = async params => bot.serverRequest({id:++id,method:'mcpServer/elicitation/request',params:{threadId:'t1',serverName:'test',message:'Authorize',...params}});
   await request({mode:'url',url:'https://example.com/auth',elicitationId:'x'});
-  await bot.action('chat',{token:[...bot.prompts.keys()][0],decision:'accept'});
+  await bot.action('chat',{token:[...bot.prompts.keys()][0],decision:'accept'},'owner');
   assert.deepEqual(rpc.responses.at(-1).result,{action:'accept',content:null});
   await request({mode:'form',requestedSchema:{type:'object',properties:{}}});
-  await bot.action('chat',{token:[...bot.prompts.keys()][0],decision:'decline'});
+  await bot.action('chat',{token:[...bot.prompts.keys()][0],decision:'decline'},'owner');
   assert.deepEqual(rpc.responses.at(-1).result,{action:'decline',content:null});
   for (const params of [{mode:'url',url:'javascript:alert(1)'},{mode:'openai/userVerification',challenge:'private'},{mode:'form',requestedSchema:{type:'object',properties:{password:{type:'string'}}}}]) {
     const before = rpc.responses.length;
@@ -386,27 +386,47 @@ test('MCP URL confirmation and decline use correct response shapes; unsafe and n
   }
 });
 
-test('legacy conversations migrate once with history reference and all new tools', async t => {
+test('legacy tool versions keep the selected Thread and native settings', async t => {
   const {bot,store,rpc}=setup(t);
-  store.addThread('legacy','旧任务'); store.updateChat('chat',{thread:'legacy'});
-  await bot.run('chat',[{type:'text',text:'继续'}]);
-  const start=rpc.calls.find(c=>c.method==='thread/start');
-  assert.ok(start.params.dynamicTools.some(t=>t.name==='feishu_doc_create'));
-  const turn=rpc.calls.find(c=>c.method==='turn/start');
-  assert.match(turn.params.input[0].text,/legacy/);
-  assert.match(turn.params.input[0].text,/旧结论/);
-  assert.ok(store.ownThread('legacy'));
-  assert.equal(store.get(`tools:${store.chat('chat').thread}`),'office-owner-v2:docs-v1');
+  store.addThread('legacy','旧任务');store.updateChat('chat',{thread:'legacy'});store.set('tools:legacy','old:runtime-defaults');
+  const input=[{type:'text',text:'继续'}];await bot.run('chat',input);
+  assert.equal(store.chat('chat').thread,'legacy');assert.equal(rpc.calls.some(c=>c.method==='thread/start'),false);
+  assert.deepEqual(rpc.calls.find(c=>c.method==='thread/resume').params,{threadId:'legacy',excludeTurns:true});
+  const turn=rpc.calls.find(c=>c.method==='turn/start');assert.equal(turn.params.threadId,'legacy');assert.deepEqual(turn.params.input,input);
+  for(const key of ['sandbox','sandboxPolicy','approvalPolicy','approvalsReviewer'])assert.equal(Object.hasOwn(turn.params,key),false);
 });
 
 test('extended MCP forms validate named enums, arrays, nested data and format before submit', async t=>{
   const {bot,rpc}=setup(t);await bot.run('chat',[{type:'text',text:'test'}]);
   await bot.serverRequest({id:1001,method:'mcpServer/elicitation/request',params:{threadId:'t1',serverName:'test',mode:'openai/form',message:'确认',requestedSchema:{type:'object',properties:{choice:{type:'string',oneOf:[{const:'yes',title:'同意'},{const:'no',title:'拒绝'}]},values:{type:'array',items:{type:'string',enum:['a','b']},minItems:1}},required:['choice','values']}}});
   const token=[...bot.prompts.keys()][0];
-  await bot.action('chat',{token,question:'choice',answer:'invalid'});
-  await bot.action('chat',{token,question:'values',answer:'["a"]'});
-  await assert.rejects(bot.action('chat',{token,decision:'accept'}),/表单/);
-  await bot.action('chat',{token,question:'choice',answer:'yes'});
-  await bot.action('chat',{token,decision:'accept'});
+  await bot.action('chat',{token,question:'choice',answer:'invalid'},'owner');
+  await bot.action('chat',{token,question:'values',answer:'["a"]'},'owner');
+  await assert.rejects(bot.action('chat',{token,decision:'accept'},'owner'),/表单/);
+  await bot.action('chat',{token,question:'choice',answer:'yes'},'owner');
+  await bot.action('chat',{token,decision:'accept'},'owner');
   assert.deepEqual(rpc.responses.at(-1).result.content,{choice:'yes',values:['a']});
+});
+
+for(const permissions of [{network:{enabled:true}},{fileSystem:{write:['/outside/test-only']} }])test('explicit native denial returns no permission grant',async t=>{
+ const {bot,rpc}=setup(t);await bot.run('chat',[{type:'text',text:'test'}]);
+ await bot.serverRequest({id:777,method:'item/permissions/requestApproval',params:{threadId:'t1',turnId:'turn1',permissions}});
+ assert.equal(rpc.responses.length,0);
+ await bot.action('chat',{token:[...bot.prompts.keys()][0],decision:'decline'},'owner');
+ assert.deepEqual(rpc.responses,[{id:777,result:{permissions:{},scope:'turn'}}]);
+});
+test('authenticated answer command relays native question; text alone cannot impersonate Owner',async t=>{
+ const {bot,rpc,store}=setup(t);await bot.run('chat',[{type:'text',text:'test'}]);
+ await bot.serverRequest({id:778,method:'item/tool/requestUserInput',params:{threadId:'t1',turnId:'turn1',questions:[{id:'q',question:'choose',options:[]}]}});
+ const token=[...bot.prompts.keys()][0],text=`/answer ${token} q answer`;
+ await assert.rejects(bot.command('chat',text));assert.equal(rpc.responses.length,0);
+ const source={kind:'message',user:'owner',message:{message_id:'answer',chat_type:'p2p'},content:{text}};
+ store.enqueue('answer','chat',source);await bot.command('chat',text,'answer',source);
+ assert.deepEqual(rpc.responses,[{id:778,result:{answers:{q:{answers:['answer']}}}}]);
+});
+
+test('Owner changed before native approval arrives cannot inherit the previous run',async t=>{
+ const {bot,rpc}=setup(t);await bot.run('chat',[{type:'text',text:'test'}]);bot.owner='new-owner';
+ await bot.serverRequest({id:779,method:'item/permissions/requestApproval',params:{threadId:'t1',turnId:'turn1',permissions:{network:{enabled:true}}}});
+ assert.equal(bot.prompts.size,0);assert.equal(rpc.responses.length,0);
 });

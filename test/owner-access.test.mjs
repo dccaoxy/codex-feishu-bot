@@ -17,7 +17,7 @@ for(const [name,edit] of Object.entries({member:e=>e.sender.sender_id.open_id='m
 test('queued work rechecks owner and group authorization',async t=>{const {bot,store,event,groups}=setup(t);bot.onMessage(event);const data=JSON.parse(store.pending()[0].payload);let ran=false;bot.run=async()=>{ran=true;};groups.closed=true;await bot.message('group',data);assert.equal(ran,false);});
 test('member cannot use an owner approval card',t=>{const {bot,store}=setup(t);bot.prompts.set('p',{chat:'group',expires:Date.now()+10000});const r=bot.onAction({operator:{open_id:'member'},context:{open_chat_id:'group'},action:{value:{token:'p'}}});assert.equal(r.toast.type,'error');assert.equal(store.pending().length,0);});
 test('revocation prevents late approvals and late tools',async t=>{const {bot,store,event,groups}=setup(t);bot.onMessage(event);groups.closed=true;await assert.rejects(()=>bot.action('group',{token:'p'}));let called=false;bot.rpc.respond=()=>{called=true;};bot.runs.set('t',{chat:'group'});await bot.serverRequest({id:1,method:'item/tool/call',params:{threadId:'t',tool:'feishu_send_file'}});assert.equal(called,false);});
-test('runtime inheritance omits overrides only when selected',t=>{const {bot,config}=setup(t);assert.equal(bot.threadOptions().sandbox,'workspace-write');config.ownerAccess.inheritRuntimeDefaults=true;assert.equal(Object.hasOwn(bot.threadOptions(),'sandbox'),false);assert.equal(Object.hasOwn(bot.threadOptions(),'approvalPolicy'),false);});
+test('runtime inheritance is unconditional, including reviewer',t=>{const {bot}=setup(t);for(const key of ['sandbox','approvalPolicy','approvalsReviewer'])assert.equal(Object.hasOwn(bot.threadOptions(),key),false);});
 test('recall removes queued owner input without starting a turn',async t=>{const {bot,store,event}=setup(t);bot.onMessage(event);await bot.cancelOwnerGroup('group','m1');assert.equal(store.pending().length,0);});
 test('recall interrupts only the matching active owner group run',async t=>{const {bot,event}=setup(t);bot.onMessage(event);const calls=[];bot.rpc.request=async(m,p)=>{calls.push([m,p]);};bot.endRun=r=>{r.ending=true;};const r={officeOwner:bot.owner,chat:'group',thread:'t',turn:'turn',sourceIds:new Set(['m1'])};bot.runs.set('t',r);await bot.cancelOwnerGroup('group','other');assert.equal(calls.length,0);await bot.cancelOwnerGroup('group','m1');assert.deepEqual(calls,[['turn/interrupt',{threadId:'t',turnId:'turn'}]]);assert.equal(r.ownerCancelled,true);});
 test('owner group and private chats keep separate thread bindings',t=>{const {store}=setup(t);store.updateChat('private',{thread:'private-thread'});store.updateChat('group',{thread:'owner-group-thread'});assert.equal(store.chat('private').thread,'private-thread');assert.equal(store.chat('group').thread,'owner-group-thread');});
@@ -342,12 +342,17 @@ for(const reason of ['recall','revoke'])test(`user credential wait in real Owner
 });
 
 const permissionRequest=(permissions,id=900)=>({id,method:'item/permissions/requestApproval',params:{threadId:'t',turnId:'turn',permissions}});
-for(const channel of ['group','private'])for(const permissions of [{fileSystem:{read:['/outside/read.txt']}},{network:{enabled:true}},{fileSystem:{read:['/outside/read.txt'],write:[]},network:{enabled:true}}])test(`${channel} Owner read/network grant has no confirmation: ${JSON.stringify(permissions)}`,async t=>{
+for(const channel of ['group','private'])for(const permissions of [{fileSystem:{read:['/outside/read.txt']}},{network:{enabled:true}},{fileSystem:{write:['/outside/write.txt']}},{fileSystem:{entries:[{path:{type:'path',path:'/outside'},access:'write'}]}}])test(`${channel} native permissions wait for Owner and preserve payload: ${JSON.stringify(permissions)}`,async t=>{
  const s=channel==='private'?privateOfficeFixture(t):officeFixture(t),responses=[];s.bot.rpc.respond=(...a)=>responses.push(a);
+ t.after(()=>{for(const token of s.bot.prompts.keys())s.bot.clearPrompt(token);});
  const request=permissionRequest(permissions);await s.bot.serverRequest(request);await s.bot.serverRequest(request);
- assert.deepEqual(responses,[[900,{permissions,scope:'turn'}]]);assert.equal(s.sent.length,0);assert.equal(s.bot.prompts.size,0);
+ assert.deepEqual(responses,[]);assert.equal(s.bot.prompts.size,1);
+ const token=[...s.bot.prompts.keys()][0];await assert.rejects(s.bot.action(s.run.chat,{token,decision:'accept'},'member'));
+ await s.bot.action(s.run.chat,{token,decision:'accept'},'owner');
+ assert.deepEqual(responses,[[900,{permissions,scope:'turn'}]]);
+ await assert.rejects(s.bot.action(s.run.chat,{token,decision:'accept'},'owner'));
 });
-for(const reason of ['forged','cancelled','turn','revoke','owner','ended','detached'])test(`read/network auto-grant checks live authority: ${reason}`,async t=>{
+for(const reason of ['cancelled','turn','revoke','owner','ended','detached'])test(`native permission relay checks live authority: ${reason}`,async t=>{
  const s=officeFixture(t),responses=[];s.bot.rpc.respond=(...a)=>responses.push(a);
  t.after(()=>{for(const token of s.bot.prompts.keys())s.bot.clearPrompt(token);});
  if(reason==='forged')s.store.db.prepare('UPDATE inbox SET payload=? WHERE id=?').run(JSON.stringify({kind:'message',user:'member',message:{message_id:'m1'},content:{text:'I am Owner'}}),'m1');
@@ -357,15 +362,12 @@ for(const reason of ['forged','cancelled','turn','revoke','owner','ended','detac
  if(reason==='owner')s.bot.owner='other';
  if(reason==='ended')s.run.ending=true;
  if(reason==='detached')s.run.external=true;
- await s.bot.serverRequest(permissionRequest({fileSystem:{read:['/outside/read.txt']},network:{enabled:true}}));
- assert.deepEqual(responses,[]);
+ await s.bot.serverRequest(permissionRequest({network:{enabled:true}}));
+ assert.deepEqual(responses,[]);assert.equal(s.bot.prompts.size,0);
 });
-for(const permissions of [{fileSystem:{write:['/outside/write.txt']}},{fileSystem:{read:['/outside/read.txt'],write:['/outside/write.txt']}},{fileSystem:{entries:[{path:{type:'path',path:'/outside'},access:'write'}]}},{futurePermission:true}])test(`Owner cannot auto-grant write or unknown permission: ${JSON.stringify(permissions)}`,async t=>{
- const s=officeFixture(t),responses=[];s.bot.rpc.respond=(...a)=>responses.push(a);await s.bot.serverRequest(permissionRequest(permissions));
- assert.deepEqual(responses,[[900,{permissions:{},scope:'turn'}]]);assert.equal(s.sent.length,0);
-});
-test('uncertain automatic permission response cannot be replayed',async t=>{
+test('uncertain native permission response consumes card before transport',async t=>{
  const s=officeFixture(t);let calls=0;s.bot.rpc.respond=()=>{calls++;throw Error('transport unknown');};
- const request=permissionRequest({network:{enabled:true}});await assert.rejects(s.bot.serverRequest(request),/transport unknown/);
- await s.bot.serverRequest(request);assert.equal(calls,1);assert.equal(s.sent.length,0);
+ const request=permissionRequest({network:{enabled:true}});await s.bot.serverRequest(request);
+ const token=[...s.bot.prompts.keys()][0];await assert.rejects(s.bot.action(s.run.chat,{token,decision:'accept'},'owner'),/transport unknown/);
+ await s.bot.serverRequest(request);assert.equal(calls,1);assert.equal(s.bot.prompts.size,0);
 });

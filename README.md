@@ -4,11 +4,11 @@
 
 ## Phase 2 收口状态
 
-PR #5已收敛main `9de0926`（包括已合并PR #14 Group Knowledge、PR #15 Owner Group Gateway，以及群历史、持久群任务、Owner Resource Gateway、FIFO）。共享Work入口与群/Knowledge独立执行环境并存，外部Work不注入Owner群工具，Full仍明确拒绝。
+PR #5已收敛main `9de0926`（包括已合并PR #14 Group Knowledge、PR #15 Owner Group Gateway，以及群历史、持久群任务、Owner Resource Gateway、FIFO）。共享Work入口与群/Knowledge独立执行环境并存，外部Work不注入Owner群工具，当前Owner授权语义以本文Issue #33修订节为准。
 
 2026-09-25 Human接受既有长期稳定性证据及持续真实使用结果，免重复8小时soak和双端同步人工验收。已完成本组合check、236项全量测试、doctor/smoke及真实Work/审批协议回归，提交Ready供新head独立审核；旧PASS不代替新审核。未Merge、未进入Phase 3。本轮未重新部署或操作真实群，历史验收与本轮验证范围见PROJECT.md。
 
-共享输入等待卡片或发送结果期间，支持的交互按请求ID有界暂存，确认同一回合后展示一次；对端已处理、解绑、断线或关闭会使暂存失效。每个观察最多32个交互ID，单条10KB、累计64KB，超限提示回原客户端处理，不自动批准/拒绝。文件审批还必须按原回合及修改项匹配完整路径与diff；详情缓存最多32项，单项10KB、累计64KB，缺失或超限时不开放飞书审批按钮，转原客户端处理。该竞态修复经自动回归，尚未部署；真实协议复核通过但初始接口/时序波动保留，详见PROJECT.md最新返工记录。
+共享输入等待卡片或发送结果期间，支持的交互按请求ID有界暂存，确认同一回合后展示一次；对端已处理、解绑、断线或关闭会使暂存失效。每个观察最多32个交互ID，单条10KB、累计64KB，超限提示回原客户端处理，不自动批准/拒绝。文件diff按原回合及修改项匹配并有界缓存，缺失时仅展示原生请求提供的信息，不借此添加项目路径授权。该竞态修复经自动回归，尚未部署；真实协议复核通过但初始接口/时序波动保留，详见PROJECT.md最新返工记录。
 
 ## 在另一台 Mac 上复刻
 
@@ -101,17 +101,7 @@ codex login
 - `feishu_threads_search`：查找会话标题。
 - `feishu_thread_read`：按页读取历史，每页最近 8 个回合，每条消息最多 5000 字；返回来源 ID、翻页游标和截断标记。
 
-默认只能读取本机器人创建的会话。若希望读本机 Codex 的其他会话，在 `config.local.json` 修改：
-
-```json
-"allowExternalThreadRead": true
-```
-
-然后重启。这样绑定账号可以查找当前 Codex 实例能读取的本地历史（包括其他项目）；读取结果可能被发送至模型和飞书，因此仅在你希望开放这些历史时开启。
-
-开启外部读取后，列表按 Codex 会话更新时间从新到旧返回，显示北京时间，并向模型提供 UTC 时间。这里的“最后更新”不保证等于最后一条聊天消息的时间；未开启外部读取时，本地登记列表不提供这一时间。
-
-Read 模式下，外部会话仅作**读取与引用**。显式开启 Work 后可按下节进入同一共享 App Server 上的外部会话。跨会话搜索按标题进行，并非全部正文的语义检索。默认不搜索归档。机器人会话可以正常切换、恢复和分支。
+可信绑定Owner可以搜索当前Codex实例可读取的会话并引用历史；无需额外read/work配置。列表按Codex更新时间排序，显示北京时间，“最后更新”不保证等于最后一条消息时间。历史是参考资料，不是新指令。进入外部Thread仍须连接它实际所在的同一共享App Server，不能用另一个实例的磁盘记录冒充实时状态。
 
 无法保证访问另一设备、云端或所有新版会话存储格式；读取失败会明确报错，不会将“无法读取”解释成“没有历史”。历史会话不等于当前指令，工具结果只作为参考资料。
 
@@ -124,15 +114,14 @@ Read 模式下，外部会话仅作**读取与引用**。显式开启 Work 后�
 在本机 `config.local.json` 的 `codex` 中设置以下字段，保留其他配置：
 
 ```json
-"externalThreadPermission": "work",
 "appServerUrl": "ws://127.0.0.1:4500"
 ```
 
-也可以省略/清空 `appServerUrl`，改用 `"appServerSocket": "/实际路径/app-server.sock"`。这是**目标 Thread 所在的同一个运行中 App Server** 的地址，不是另起一个能读取相同历史文件的服务器。地址从该实例的实际启动配置取得；机器人不会扫描、猜测或自动更换桌面实例。仅修改权限而不配置共享地址会明确报错。
+也可以省略/清空 `appServerUrl`，改用 `"appServerSocket": "/实际路径/app-server.sock"`。这是**目标 Thread 所在的同一个运行中 App Server** 的地址，不是另起一个能读取相同历史文件的服务器。地址从该实例的实际启动配置取得；机器人不会扫描、猜测或自动更换桌面实例。未配置共享地址时不能控制另一实例的Thread。
 
 可为集成环境启动 `codex app-server --listen ws://127.0.0.1:4500`，然后让工作客户端与机器人均连接它。桌面端是否能使用这个地址取决于桌面端的实际运行方式；本项目不自动迁移桌面正在执行的会话。Unix socket 连接的是 Codex 的 WebSocket 控制接口。
 
-默认示例继续保留 `allowExternalThreadRead: false`，不扩大新安装权限。旧 true/false 配置仍有效；新字段 read/work 优先。回到旧的完全关闭状态时，移除新字段并设置旧字段为 false。`full` 会被配置校验拒绝，Phase 3 未实现。
+旧 `allowExternalThreadRead`、`externalThreadPermission` 字段已退役，不再形成Owner的第二套权限策略。原生权限由所连接Codex及Thread决定。
 
 ### 操作行为
 
@@ -186,10 +175,7 @@ Attach 使用真实 `thread/resume`，不拼接历史创建替代 Thread，不�
 | `codex.cwd` | 默认 `./workspace`，附件、执行工作目录及文件返回边界 |
 | `codex.model` | 留空使用 Codex 默认模型；也可通过飞书 `/model` 设置 |
 | `codex.effort` | 留空使用默认强度；填值需被所选模型支持 |
-| `codex.sandbox` | `workspace-write` 或 `read-only` |
-| `codex.approvalPolicy` | `on-request` 或 `untrusted`，审批交给用户 |
-| `codex.allowExternalThreadRead` | 兼容旧配置：默认 false；true 相当于 read |
-| `codex.externalThreadPermission` | 可选 read / work；设置后优先于旧字段。full 在 Phase 2 中拒绝 |
+| `codex.sandbox` / `codex.approvalPolicy` | 已退役并忽略；不覆盖Thread有效设置 |
 | `codex.appServerUrl` | 可选本机 `ws://127.0.0.1:端口`（也支持 `[::1]`），连接已运行的共享服务器 |
 | `codex.appServerSocket` | 可选已运行共享服务器的 Unix socket 绝对路径；与 appServerUrl 二选一 |
 | `storageDir` | 默认 `./data`，保存账号绑定、消息收件箱和会话映射 |
@@ -483,7 +469,7 @@ Owner 在授权群 @ 机器人后发送：
 
 Owner 路径复用私聊的命令、文件、文档、Shared Runtime Work/Attach、工具注册和人工审批；活动回合的新 Owner 消息沿用私聊 steer 语义，不是普通群助手的 FIFO。普通成员 FIFO 不变。已有 `/owner` 与 `/group-doc` 显式命令继续走原群入口，以保留受控数据库、私人摘要和文档查询能力。撤回待处理 Owner 消息取消入队，撤回当前输入或机器人离群尝试中断对应回合，不撤销已执行的操作。权限关闭或 Owner 变化后不接受新请求/审批；重启前的群输入因 live 时间校验不自动重放。
 
-`ownerAccess.inheritRuntimeDefaults=true` 让新建/升级的 Owner 任务不覆盖共享服务器的 sandbox/approval 默认值；否则沿用 `codex.sandbox` 和 `codex.approvalPolicy`。不自动授权审批。已有外部 Desktop Thread 仍通过 `/attach` 继续，不覆盖其工作目录、模型、审批或工具配置。
+Owner创建Thread继承运行时默认权限，恢复/续接/分支不覆盖已有Thread权限和审批人。`inheritRuntimeDefaults`、`projectRoots`不再参与授权；已有工具版本变化不会自动创建替代Thread，需要新增工具时由Owner明确 `/new`。
 
 能力对齐不等于复制 Desktop 的所有工具：宿主 UI、浏览器、插件连接器等仍取决于目标 Thread 的工具宿主注册。Bot 不代理未知 Desktop 动态工具、不做任意 RPC 透传、不增加外部 Thread 管理权限。仅有 Desktop 客户端实现的工具需要该客户端在线处理，不声称离线可用。飞书平台权限另行生效。尚未新增多维表格写入工具。
 
@@ -524,22 +510,17 @@ Task Source：Human 要求为本人私聊及已有授权群里的本人账号补
 
 删除原文档中的段落/表格使用 `docx.v1.documentBlockChildren.batchDelete`，与删除整个云盘文件不同。先读取具体版本及父块的 children 顺序，核对待删块ID；传入非负整数 start_index、严格更大的 end_index（左闭右开）及具体 document_revision_id。删除后回读确认；版本冲突或结果不确定先重新核对，不自动重试，不以另建文档代替修改原文档。应用编辑scope已具备也不保证每份目标文档的协作者权限。
 
-### Issue #33：Office 执行校验与项目边界准备（部分实现）
+### Issue #33：Owner指令转发（2026-10-05修订）
 
-独立卷实验 `scripts/owner-volume-check.mjs` 已验证跨卷硬链接隔离、detached后代只写副本而宿主测试文件未变，以及普通卸载后只读重挂。它不是生产运行时，也未实现宿主写回；采用该方案会改变Shell原位路径和执行中变更可见性，具体技术断点见PROJECT.md。
+Bot转发可信Owner的当前指令，并回传结果和Codex原生交互。新Thread继承运行时权限默认值；绑定Thread恢复、续接和分支不发送sandbox、approvalPolicy或approvalsReviewer覆盖，不因工具版本变化换Thread。Owner可读取当前Codex实例可访问的历史；外部续接仍核对同一共享连接、实际Thread和活动turn。
 
-Human 已选择独立 Owner 专用受控运行时。当前新增的 `test/fixtures/owner-runtime-prototype.mjs` 和 `scripts/owner-runtime-check.mjs` 仅为隔离实验，没有生产启动入口；原型不满足安全边界。`test/owner-runtime.test.mjs` 中两个 `KNOWN GAP` 测试特意复现 detached 子进程与预先存在的硬链接缺口，通过表示缺口存在。协议探针使用真实 Codex 0.160.0、临时无凭据环境及本地合成 provider，不调用真实模型或飞书。具体结果和待补齐的运行时工具兼容性输入见 PROJECT.md 最新交接。
+原生读/写/网络权限、命令、文件变更审批都等待Owner明确答复；Bot不自动批准，也不按projectRoots额外批准或拒绝。权限卡展示原始请求，许可按原生turn范围返回，不新增会话级持久许可。卡片绑定Owner、chat、Thread、turn，撤回、steer、对端处理、断线或身份变化使旧交互失效；回复结果不确定不重放。超出飞书展示能力的交互明确提示原客户端处理，不伪造支持。
 
+Office不再要求重复确认或Trusted Document资格；参数/schema、revision、幂等及当前请求生命周期保留。user/tenant正确路由及OAuth/scope/ACL不变；Group/Knowledge工具集和身份隔离不扩大。Bot后台必要的状态持久化维持原实现。
 
-Office 一次性执行许可绑定 Owner、应用、原消息集合及快照、回合、精确接口与参数摘要。相同回合/消息/参数及工具请求 ID 不能重复执行。许可在实际出站和返回前复核；撤回、steer、换 Owner、结束回合或超过10分钟均失效。原创建记录仅作审计，不再决定写入资格。user/tenant 路由、OAuth scope 与资源 ACL 仍照常校验，用户身份失败不回退 tenant。
+旧 `codex.sandbox`、`codex.approvalPolicy`、`allowExternalThreadRead`、`externalThreadPermission` 和 `ownerAccess.projectRoots`、`inheritRuntimeDefaults` 配置不再作为Owner授权事实源；配置示例已移除。不会修改原生Codex配置或系统权限。
 
-本机配置可设置 `ownerAccess.projectRoots` 为现有项目目录的绝对路径数组；默认 `[]`。加载时解析真实路径并去重，不接受相对路径、`..` 或非目录。路径分类器解析现有祖先和 symlink，项目外目标标记为需审批，悬空 symlink 或解析错误拒绝分类，不按字符串前缀或强制小写判断归属。仅本机管理员维护配置，没有模型工具可添加项目根目录。
-
-分类器现已接入 `item/fileChange/requestApproval` 的卡片核对路径：展示操作类型、规范化源/目标路径及项目内外分类，移动同时核对两端；批准前重新核对原 Owner、消息快照、turn、diff、projectRoots 和路径解析。缺少可信原消息、未知变更格式或解析失败时不开放批准。相同请求 ID 不重放，批准令牌在发送 RPC 响应前消耗，结果不确定不能重复点击。原审批所指路径在等待期间发生变化，旧批准失效；Shared 观察已丢失时只关闭飞书入口，不替对端作答。
-
-飞书侧不再授予 `item/permissions/requestApproval` 请求中的可复用文件写权限集合：自有回合返回空权限，共享外部回合不抢答；旧卡片也不能授予此类权限。已知协议格式中的纯读取（`fileSystem.read`、无非空 `write`）及网络（`network.enabled`）请求，在核对当前 Owner、可信原消息、turn 和 Shared 绑定后直接回传 turn 范围权限，不弹卡；相同请求 ID 不重复响应，传输结果不确定不重放。没有可信飞书原请求的桌面观察仍沿用原交互流程。未知权限字段（包括尚未适配的新版 `entries`）不自动授权。空响应中的 `scope: "turn"` 不授予任何权限，不声称协议存在操作级 scope。
-
-**项目边界尚未接入实际写入执行层。** Shell、项目内文件及 Shared Runtime 未获得 Full Authority 免确认。审批响应发送后，外部 App Server 才执行写入，分类器不能阻止此间 symlink 被替换，也不能从任意 Shell 命令证明全部写入目标。本候选尚未实现“唯一审批为项目外写入”，不得作为 Issue #33 完成版本部署。本机 Codex 0.160.0 导出的协议与[官方 App Server 说明](https://learn.chatgpt.com/docs/app-server)一致：权限 scope 仅 turn/session，文件批准响应不提供原子目标绑定。下一步需要可约束所有写入工具的执行层，绑定操作及全部源/目标路径、拒绝后不可换工具绕过，并验证运行中替换路径的竞态。Work、Gateway 与非 Owner 隔离策略尚未调整。`npm test` 现包含 `test/offline` 回归及真实临时目录的路径分类测试；通过这些测试不等于执行边界或候选部署验收通过。
+原独立执行器、detached/硬链接和APFS实验保留在测试夹具与研究脚本中，未接入产品；其已知缺口仍为历史事实，但不再是已撤销方案的当前验收项。`scripts/owner-relay-check.mjs` 使用真实隔离App Server和本地合成provider验证默认及Thread自有权限的续接，不调用真实模型或飞书；最新测试、独立审查和未实测范围见PROJECT.md。
 
 ## 本机一次性 Owner OAuth（默认关闭）
 

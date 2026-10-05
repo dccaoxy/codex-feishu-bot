@@ -99,12 +99,8 @@ for(const mode of ['upgrade','restart'])test(`${mode}: real Bot restores trusted
   if(mode==='restart')await f.restart();
   const run=await f.start();assert.ok(run);
   const input=f.rpc.calls.find(c=>c.method==='turn/start').params.input;
-  if(mode==='upgrade'){
-    assert.notEqual(run.thread,'old-thread');assert.ok(JSON.stringify(input).includes(DOC));
-    assert.ok(!JSON.stringify(input).includes('source-message'),'source IDs stay host-side');
-  }else{
-    assert.equal(run.thread,'old-thread');assert.equal(f.rpc.calls.filter(c=>c.method==='thread/start').length,0);
-  }
+  assert.equal(run.thread,'old-thread');assert.equal(f.rpc.calls.filter(c=>c.method==='thread/start').length,0);
+  assert.ok(!JSON.stringify(input).includes('source-message'),'source IDs stay host-side');
   assert.deepEqual(f.gateway.sendContext.recent(run.groupContext).map(r=>({request:r.request,answer:r.answer})),[{request:SOURCE_TEXT,answer:ANSWER}]);
   const first=await f.send(run);assert.equal(first.success,true);assert.equal(first.value.status,'sent');
   const second=await f.send(run);assert.equal(second.success,true);assert.equal(second.value.alreadyHandled,true);

@@ -1,4 +1,3 @@
-import { externalPermission } from './config.mjs';
 
 // Work is deliberately limited to a live, shared App Server. Disk metadata from
 // a different server cannot prove that a thread is idle.
@@ -7,9 +6,8 @@ export class ThreadController {
     this.config = config; this.store = store; this.rpc = rpc;
     this.loaded = new Set(); this.busy = new Set();
   }
-  permission() { return externalPermission(this.config); }
+  permission() { return this.rpc.shared ? 'work' : 'read'; }
   requireWork() {
-    if (this.permission() !== 'work') throw new Error('外部会话操作需要 externalThreadPermission=work。');
     if (!(this.config.codex.appServerUrl && this.rpc.url === this.config.codex.appServerUrl) && !(this.config.codex.appServerSocket && this.rpc.socketPath === this.config.codex.appServerSocket)) throw new Error('Work 必须连接目标会话所在的共享 App Server。');
   }
   async exclusive(id, fn) {
@@ -67,7 +65,6 @@ export class ThreadController {
   detach(chat) { this.store.detachThread(chat); }
   async status(chat) {
     const b = this.store.binding(chat); if (!b) return null;
-    if (this.permission() === 'off') throw new Error('外部读取已关闭，请 /detach。');
     const s = await this.inspect(b.thread); this.store.updateBinding(chat,s); return s;
   }
   target(chat) {

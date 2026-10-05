@@ -106,7 +106,7 @@ test('project paths resolve symlinks and missing ancestors without prefix/traver
   assert.throws(()=>canonicalWritePath(root+'/../project-other/file'));
   assert.throws(()=>canonicalWritePath(path.join(root,'dangling')));
   assert.throws(()=>canonicalWritePath(path.join(root,'file/child')));
-  assert.throws(()=>ownerAccessConfig({projectRoots:['relative']}));
+  assert.equal(ownerAccessConfig({projectRoots:['relative']}).projectRoots,undefined); // retired policy is ignored
   assert.throws(()=>projectRoots([path.join(root,'file')]));
   assert.equal(classifyProjectWrite(path.join(root,'file'),[]).requiresApproval,true);
   // Rename requires classifying BOTH paths; destination outside is external.

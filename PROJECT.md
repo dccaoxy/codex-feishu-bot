@@ -1,3 +1,14 @@
+# 当前交接：Issue #33 Owner Relay（2026-10-05 修订需求）
+
+- **权威需求**：`owner-relay-requirements-20261005`，来自用户当前明确指令及修订Issue正文。它替代下方所有冲突的“Full Authority/projectRoots/独立执行器/事务副本”方案要求；那些实验和旧审核保持历史原貌，不声明已修复或旧head获PASS。本轮只继续原分支与Draft PR #34，不Merge、不部署、不替换线上运行时、不改变OAuth或OS权限。
+- **实现**：Owner创建Thread继承App Server默认权限；恢复/续接/分支不发送sandbox、approvalPolicy或approvalsReviewer覆盖。既有工具版本不同不再自动新建替代Thread，保持同一Thread及当前输入；需要新工具集由Owner明确新建会话。read/work及外部历史旧开关不再形成Owner第二套权限，外部转发仍确认同一共享连接、可输入状态和活动turn。配置示例移除已退役字段，旧配置加载时忽略它们，不写原生配置。
+- **原生交互**：撤销读/网络自动授予和写权限一律拒绝，命令/文件/读写网络权限请求均转交Owner；权限payload按原请求返回，原生权限许可为turn范围，不自动新增持久许可。移除projectRoots分类/路径审批快照Gate，保留原生diff展示及有界缓存。卡片绑定任务创建时Owner、chat、Thread及turn；身份变更、撤回、steer、对端解决或连接失效不能复用旧卡片。明确响应前消费令牌，传输不确定不重放。普通文件交付不再另加项目目录边界，相对路径按当前Thread cwd解析；仍检查普通文件、当前任务和OS访问结果。
+- **保留的边界**：飞书事件身份、Owner绑定、Group/Knowledge隔离、原生有效权限、user/tenant正确路由、OAuth/scope/ACL及OS权限均保留。Owner Office不重复弹确认；schema、revision、幂等和请求生命周期保留。无法在飞书表达的原生交互说明真实限制并提示原客户端；未把所有Thread或全局配置设为full-access/never。
+- **测试与实际环境**：见本节后续Validation记录。新增真实隔离 `scripts/owner-relay-check.mjs`：App Server 0.160.0，临时无凭据home，本地合成provider；验证默认read-only及显式workspace-write两个原生Thread在同ID恢复时保留sandbox、approvalPolicy和审批人，无真实模型/飞书调用。最初探测发现0.160不再接受旧untrusted配置、无rollout空Thread不能resume；最终探针用on-request及合成完成turn验证，不隐瞒原始失败、不更改产品原生配置。
+- **最终提交前Validation**：Node24.21.0，语法检查、diff空白检查通过；全量822/822通过、0跳过（仍包含2个旧执行器缺口复现实验，它们不属于当前产品执行路径）；原生Owner relay探针通过。测试期间发现并修正了新文件交付测试在macOS /var规范化路径上的夹具差异。上述结果属于当前代码，提交后准确head由fresh Reviewer复核。
+- **评审返工**：早期独立审核指出工具版本触发换Thread、read/work重复门以及Owner先变化后收到旧run审批三个问题，均已修正并补回归。提交后另做准确head的fresh独立审核，结论与SHA回写原PR/Issue，不能把早期静态复核当最终PASS。
+- **未实测/已知限制**：未进行真实飞书UI/真实模型/生产双客户端验收；未运行生产doctor或访问秘密配置。Group/Knowledge真实隔离探针在启动前因固定0.159.0与本机0.160.0不符而退出1，未弱化版本锁；全量Node回归中的身份和工具隔离模拟不冒充该原生验收。外部Thread管理命令仍只有客户端已实现的接口，未知状态不猜测重试。旧执行器和卷实验不参与本次产品执行路径。
+
 # 当前技术断点：Issue #33 原位执行与事务工作区（2026-10-05）
 
 - **Task Source**：Human 提供部署源码及非秘密实例元数据位置，要求继续处理两个已知执行边界缺口，不得再以工具清单缺失代替修复。已只读核对指定部署目录 `src/bot.mjs` 的条件工具组合、`src/repository.mjs` 的固定远端路由及 shared-lab 的非秘密环境记录。没有读取秘密配置、凭据、进程环境或业务会话；未连接或操作正在运行的共享服务。静态注册与实际每个thread启用项仍作区分，但清单未知不再作为当前开发阻塞理由。

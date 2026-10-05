@@ -25,13 +25,11 @@ export function loadConfig(filename = path.join(ROOT, 'config.local.json'), requ
     throw new Error('请先在 config.local.json 填写飞书 appId 和 appSecret。');
   }
   if (c.feishu.appId && !/^cli_[0-9a-fA-F]{16}$/.test(c.feishu.appId)) throw new Error('飞书 appId 格式应为 cli_ 加 16 位十六进制字符。');
-  if (!['workspace-write', 'read-only'].includes(c.codex.sandbox)) throw new Error('sandbox 只支持 workspace-write / read-only。');
-  if (!['on-request', 'untrusted'].includes(c.codex.approvalPolicy)) throw new Error('approvalPolicy 只支持 on-request / untrusted。');
   if (typeof c.codex.binary !== 'string' || !c.codex.binary) throw new Error('请填写 codex.binary。');
   if (typeof c.codex.cwd !== 'string' || !c.codex.cwd) throw new Error('请填写 codex.cwd。');
   if(c.codex.isolatedBinary!==undefined && (typeof c.codex.isolatedBinary!=='string'||!path.isAbsolute(c.codex.isolatedBinary)))throw Error('isolatedBinary 必须是绝对路径');
-  const permission = externalPermission(c);
-  c.codex.allowExternalThreadRead = permission !== 'off';
+  // Legacy read/work flags do not override the connected Owner thread.
+  for(const key of ['allowExternalThreadRead','externalThreadPermission','sandbox','approvalPolicy'])delete c.codex[key];
   if (c.codex.appServerUrl) {
     let u;
     try { u = new URL(c.codex.appServerUrl); } catch { throw new Error('appServerUrl 必须是本机 WebSocket 地址。'); }
@@ -39,7 +37,6 @@ export function loadConfig(filename = path.join(ROOT, 'config.local.json'), requ
   }
   if (c.codex.appServerSocket && (typeof c.codex.appServerSocket !== 'string' || !path.isAbsolute(c.codex.appServerSocket))) throw new Error('appServerSocket 必须是本机 socket 的绝对路径。');
   if (c.codex.appServerUrl && c.codex.appServerSocket) throw new Error('appServerUrl 与 appServerSocket 只能配置一个。');
-  if (permission === 'work' && !c.codex.appServerUrl && !c.codex.appServerSocket) throw new Error('Work 需要 appServerUrl 或 appServerSocket 连接目标会话所在的共享 App Server。');
   if (!Number.isFinite(c.streamIntervalMs) || c.streamIntervalMs < 500) throw new Error('streamIntervalMs 不能小于 500。');
   if (!Number.isFinite(c.maxAttachmentMB) || c.maxAttachmentMB < 1 || c.maxAttachmentMB > 30) throw new Error('maxAttachmentMB 必须为 1–30。');
   c.codex.cwd = path.resolve(base, c.codex.cwd);
@@ -48,14 +45,4 @@ export function loadConfig(filename = path.join(ROOT, 'config.local.json'), requ
   fs.mkdirSync(c.storageDir, { recursive: true, mode: 0o700 });
   fs.chmodSync(filename, 0o600);
   return c;
-}
-
-export function externalPermission(config) {
-  const c = config.codex;
-  if (c.externalThreadPermission !== undefined) {
-    if (!['read', 'work'].includes(c.externalThreadPermission)) throw new Error('externalThreadPermission 仅支持 read / work；Full 尚未实现。');
-    return c.externalThreadPermission;
-  }
-  if (c.allowExternalThreadRead !== undefined && typeof c.allowExternalThreadRead !== 'boolean') throw new Error('allowExternalThreadRead 必须是布尔值。');
-  return c.allowExternalThreadRead ? 'read' : 'off';
 }
