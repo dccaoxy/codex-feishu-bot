@@ -174,7 +174,7 @@ Attach 使用真实 `thread/resume`，不拼接历史创建替代 Thread，不�
 | `codex.binary` | `codex` 或绝对路径；本机通常为 `/Applications/ChatGPT.app/Contents/Resources/codex` |
 | `codex.cwd` | 默认 `./workspace`，附件、执行工作目录及文件返回边界 |
 | `codex.model` | 留空使用 Codex 默认模型；也可通过飞书 `/model` 设置 |
-| `codex.effort` | 留空使用默认强度；填值需被所选模型支持 |
+| `codex.effort` | 新建 Thread 的默认强度，聊天级 `/effort` 优先；留空继承原生默认，续接既有 Thread 不覆盖其有效设置；填值需被所选模型支持 |
 | `codex.sandbox` / `codex.approvalPolicy` | 已退役并忽略；不覆盖Thread有效设置 |
 | `codex.appServerUrl` | 可选本机 `ws://127.0.0.1:端口`（也支持 `[::1]`），连接已运行的共享服务器 |
 | `codex.appServerSocket` | 可选已运行共享服务器的 Unix socket 绝对路径；与 appServerUrl 二选一 |

@@ -386,13 +386,26 @@ test('MCP URL confirmation and decline use correct response shapes; unsafe and n
   }
 });
 
+for (const selected of [undefined, 'low']) test(`new Thread applies configured effort with chat preference ${selected}`, async t => {
+  const {bot,store,rpc,config}=setup(t);config.codex.effort='high';
+  if(selected)store.updateChat('chat',{effort:selected});
+  await bot.run('chat',[{type:'text',text:'新任务'}]);
+  assert.deepEqual(rpc.calls.find(c=>c.method==='thread/start').params.config,{model_reasoning_effort:selected || 'high'});
+  assert.equal(rpc.calls.find(c=>c.method==='turn/start').params.effort,selected);
+});
+
+test('unset effort leaves new Thread native default intact',async t=>{
+  const {bot,rpc}=setup(t);await bot.createThread('chat','默认');
+  assert.equal(rpc.calls.find(c=>c.method==='thread/start').params.config,undefined);
+});
+
 test('legacy tool versions keep the selected Thread and native settings', async t => {
-  const {bot,store,rpc}=setup(t);
+  const {bot,store,rpc,config}=setup(t);config.codex.effort='high';
   store.addThread('legacy','旧任务');store.updateChat('chat',{thread:'legacy'});store.set('tools:legacy','old:runtime-defaults');
   const input=[{type:'text',text:'继续'}];await bot.run('chat',input);
   assert.equal(store.chat('chat').thread,'legacy');assert.equal(rpc.calls.some(c=>c.method==='thread/start'),false);
   assert.deepEqual(rpc.calls.find(c=>c.method==='thread/resume').params,{threadId:'legacy',excludeTurns:true});
-  const turn=rpc.calls.find(c=>c.method==='turn/start');assert.equal(turn.params.threadId,'legacy');assert.deepEqual(turn.params.input,input);
+  const turn=rpc.calls.find(c=>c.method==='turn/start');assert.equal(turn.params.threadId,'legacy');assert.deepEqual(turn.params.input,input);assert.equal(turn.params.effort,undefined);
   for(const key of ['sandbox','sandboxPolicy','approvalPolicy','approvalsReviewer'])assert.equal(Object.hasOwn(turn.params,key),false);
 });
 

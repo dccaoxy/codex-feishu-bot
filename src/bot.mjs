@@ -408,6 +408,7 @@ ${this.ownerGroups?OWNER_GROUP_INSTRUCTIONS:''}` };
     this.requireAvailable();
     const c = this.store.chat(chat);
     const r = await this.rpc.request('thread/start', { ...this.threadOptions(),
+      config: (c.effort || this.config.codex.effort) ? { model_reasoning_effort: c.effort || this.config.codex.effort } : undefined,
       model: c.model || this.config.codex.model || undefined, dynamicTools: this.dynamicTools() });
     const id = r.thread.id;
     this.store.addThread(id, title); this.store.updateChat(chat, { thread: id }); this.loaded.add(id); this.store.set(`tools:${id}`, this.toolVersion);

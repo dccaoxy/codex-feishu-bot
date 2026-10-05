@@ -1,3 +1,10 @@
+# 当前返工：Issue #33 新建 Thread 思考强度默认值（2026-10-05）
+
+- **Task Source**：新版 Owner Relay 需求及本轮 P2，继续原 Draft PR #34。仅修复新建会话忽略 `codex.effort` 的回归。
+- **Implementation**：新建 Thread 通过原生 `config.model_reasoning_effort` 应用聊天级选择或配置默认；两者未设置则省略。既有 Thread 的 resume/turn/fork 不增加配置回退，不修改权限策略或全局配置。README 已说明默认值作用范围。
+- **Validation**：核心回归34/34通过，覆盖配置high、聊天选择优先、未配置及既有Thread不覆盖；语法与diff空白检查通过。真实隔离Codex0.160.0探针验证新建high及同ID恢复后high保留，原生权限继承仍通过；仅本地合成provider，未调用真实模型或飞书。本轮全量825/825通过、0失败/跳过；保留历史实验但不把其通过作为产品执行边界验收。
+- **交接**：未部署、未替换运行时、未扩大权限；提交推送后针对准确head做fresh独立审核，结论及SHA回写PR/Issue。此前0602b5c的独立审核对新版relay给出PASS，但独立全量821/822（历史未接产品的取消实验kill EPERM）；该结果保留，不冒充本轮验证。
+
 # 当前交接：Issue #33 Owner Relay（2026-10-05 修订需求）
 
 - **权威需求**：`owner-relay-requirements-20261005`，来自用户当前明确指令及修订Issue正文。它替代下方所有冲突的“Full Authority/projectRoots/独立执行器/事务副本”方案要求；那些实验和旧审核保持历史原貌，不声明已修复或旧head获PASS。本轮只继续原分支与Draft PR #34，不Merge、不部署、不替换线上运行时、不改变OAuth或OS权限。

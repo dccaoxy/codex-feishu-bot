@@ -22,13 +22,13 @@ let timer;
 try {
  await rpc.start();
  for(const overrides of [{},{sandbox:'workspace-write'}]) {
- const started=await rpc.request('thread/start',{cwd:dir,...overrides,model:'gpt-5.4',modelProvider:'fixture',config:{model_providers:{fixture:{name:'Offline fixture',base_url:`http://127.0.0.1:${server.address().port}/v1`,wire_api:'responses',requires_openai_auth:false}}}});
- assert.equal(started.approvalPolicy,'on-request');assert.equal(started.sandbox.type,overrides.sandbox?'workspaceWrite':'readOnly');
+ const started=await rpc.request('thread/start',{cwd:dir,...overrides,model:'gpt-5.4',modelProvider:'fixture',config:{model_reasoning_effort:'high',model_providers:{fixture:{name:'Offline fixture',base_url:`http://127.0.0.1:${server.address().port}/v1`,wire_api:'responses',requires_openai_auth:false}}}});
+ assert.equal(started.reasoningEffort,'high');assert.equal(started.approvalPolicy,'on-request');assert.equal(started.sandbox.type,overrides.sandbox?'workspaceWrite':'readOnly');
  const completed=new Promise((resolve,reject)=>{timer=setTimeout(()=>reject(Error('synthetic turn timed out')),30000);rpc.on('notification',m=>{if(m.method==='turn/completed' && m.params.threadId===started.thread.id)resolve(m);});});
  await rpc.request('turn/start',{threadId:started.thread.id,input:[{type:'text',text:'fixture',text_elements:[]}]});
  const result=await completed;clearTimeout(timer);assert.equal(result.params.turn.status,'completed');
  const resumed=await rpc.request('thread/resume',{threadId:started.thread.id,excludeTurns:true});
- assert.equal(resumed.thread.id,started.thread.id);
+ assert.equal(resumed.thread.id,started.thread.id);assert.equal(resumed.reasoningEffort,'high');
  assert.deepEqual(resumed.approvalPolicy,started.approvalPolicy);
  assert.deepEqual(resumed.sandbox,started.sandbox);
  assert.deepEqual(resumed.approvalsReviewer,started.approvalsReviewer);
