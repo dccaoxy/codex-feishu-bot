@@ -1,3 +1,14 @@
+# 当前技术断点：Issue #33 执行器方案选择（2026-10-05）
+
+- **Task Source**：Human 保持需求不变，要求自行查阅官方源码/文档，先说明其他组件的改造方案与影响，再提出需要决定的问题。本轮不再要求 Human 提供公开资料；仅研究和隔离验证，未修改生产权限、服务或运行时代码。
+- **纠正前述判断的范围**：审批 RPC 本身不能原子约束写入，并不意味着 Codex 没有执行层边界。已查阅官方 `openai/codex` 固定源码 `7f892275e31002f0422477c6219189284560e689`；这是本轮取得的官方 main，不是本机0.160.0的源码对应版本，也未编译或替换本机程序。
+- **可复用组件**：[macOS Seatbelt](https://github.com/openai/codex/blob/7f892275e31002f0422477c6219189284560e689/codex-rs/sandboxing/src/seatbelt.rs)生成实际文件写策略、处理受保护子路径并拒绝可变 symlink 写根；[apply_patch 运行时](https://github.com/openai/codex/blob/7f892275e31002f0422477c6219189284560e689/codex-rs/core/src/tools/runtimes/apply_patch.rs)向文件执行器传递沙盒上下文；[LocalFileSystem](https://github.com/openai/codex/blob/7f892275e31002f0422477c6219189284560e689/codex-rs/exec-server/src/local_file_system.rs)按该上下文选择 sandboxed/unsandboxed 实现；[SandboxedFileSystem](https://github.com/openai/codex/blob/7f892275e31002f0422477c6219189284560e689/codex-rs/exec-server/src/sandboxed_file_system.rs)通过沙盒 helper 执行文件操作。应复用此类 OS 边界，而不是解析 Shell 文本或只在卡片端多做一次路径检查。
+- **必须改造的部分**：[ToolOrchestrator](https://github.com/openai/codex/blob/7f892275e31002f0422477c6219189284560e689/codex-rs/core/src/tools/orchestrator.rs)存在按条件选择无沙盒执行/升级重试的路径；单次命令批准不等于单次文件写入授权。Owner 模式不能把外部写许可变成普通命令的不受限执行。需增加受控操作执行器：将写操作类型、内容摘要、全部源/目标、Owner/原消息/turn 绑定为一次性许可；在执行器而非 Bot 内复核并消费许可，使用精确 OS 权限和防链接跟随的文件操作实现，未知结果不重放。普通 Shell/文件工具保持仅项目目录可写；拒绝后不能通过不受控执行路径绕开。projectRoots 配置及其替换/父目录移动入口须由运行时保护。
+- **全部工具覆盖**：[官方权限说明](https://learn.chatgpt.com/docs/permissions)明确：命令沙盒不自动涵盖 MCP、浏览器、Computer Use 或批准后的升级执行。这些本机写入路径必须由受控进程/适配器共同执行相同策略，不能把仅 Shell/patch 的验证宣称为“所有工具”。外部 API、OAuth/ACL/TCC 不变；Group/Knowledge 不注入 Owner 能力。普通网络调用不应被当作启动另一个不受控本机执行器的通道。
+- **候选方案与影响**：推荐维护独立 Owner 专用 Codex App Server/exec-server 构建，固定经过验证的上游版本；Bot 保留飞书与 Office 实现，所有 Owner 本机写入统一经该受控运行时。Owner Work/Shared 需连接该实例，不能自动借用现有任意桌面实例的权限。需维护 Rust 构建、协议能力协商及各写入型工具适配器，承担上游升级回归。另一方案是改造 Desktop 与 Bot 共用的现有运行时，需确认桌面所需协议与工具适配，回归范围更大。两者都属于待实现的工程方案，不是已证实全量可用的功能；选择后先做单次批准与竞态集成原型，再推进全部工具覆盖。没有建议删减 Issue 的权限边界或通过关闭工具宣称完成。
+- **本轮 Validation**：在真实 macOS 临时目录运行7个原生 Seatbelt 场景：项目内创建/追加/删除成功、项目外读取成功；项目外写入/删除、symlink 在命令中由项目内重定向到项目外后的写入、跨出项目的移动、受保护配置文件覆盖均被拒绝。复核项目外原文件内容及受保护文件未变，外部新目标未产生；仅本轮测试目录被创建/清理。此探针为手工构造的 OS 策略，未通过 Codex 模型或 Bot 发起，**不是 App Server 单次批准、并发路径竞态或全部工具验收**。本轮文档 diff 检查通过；运行代码未变，未重复全量测试。此前802项属于上一实现的测试结果，不计入本轮新验证。
+- **需要 Human 决定的技术范围**：采用独立 Owner 受控运行时（推荐），还是必须继续与现有 Desktop 共用同一运行时？该决定确定需要改造和验证的客户端、工具适配器及长期维护范围；不是部署或权限批准。技术选择明确前不替换任何现有服务。两项P1仍未关闭，PR #34保持Draft、Issue #33保持开放，未取得独立Reviewer PASS、未部署或Merge。
+
 # 当前交接：Issue #33 fresh retry / PR #34（2026-10-04，部分完成，仍阻塞）
 
 - **Task Source**：本轮用户完整 Issue #33、两项 P1 与 fresh-attempt 指令；已实时读取 GitHub Issue 正文/评论、PR #34 状态。指定分支 `codex-flow/issue-33-730a1c5e`，起点 `572a0c67b0134abeaf64a3dbb1cfcbfa307f86aa`，开始时工作区干净、远端 head 一致、PR 为 Draft。此次授权允许本地测试、Commit/Push 与更新原 Draft PR，取代下面旧 lane 的工具限制；仍不 Merge、不部署、不转 Ready。
