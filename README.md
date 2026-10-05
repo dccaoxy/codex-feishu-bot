@@ -526,6 +526,9 @@ Task Source：Human 要求为本人私聊及已有授权群里的本人账号补
 
 ### Issue #33：Office 执行校验与项目边界准备（部分实现）
 
+Human 已选择独立 Owner 专用受控运行时。当前新增的 `test/fixtures/owner-runtime-prototype.mjs` 和 `scripts/owner-runtime-check.mjs` 仅为隔离实验，没有生产启动入口；原型不满足安全边界。`test/owner-runtime.test.mjs` 中两个 `KNOWN GAP` 测试特意复现 detached 子进程与预先存在的硬链接缺口，通过表示缺口存在。协议探针使用真实 Codex 0.160.0、临时无凭据环境及本地合成 provider，不调用真实模型或飞书。具体结果和待补齐的运行时工具兼容性输入见 PROJECT.md 最新交接。
+
+
 Office 一次性执行许可绑定 Owner、应用、原消息集合及快照、回合、精确接口与参数摘要。相同回合/消息/参数及工具请求 ID 不能重复执行。许可在实际出站和返回前复核；撤回、steer、换 Owner、结束回合或超过10分钟均失效。原创建记录仅作审计，不再决定写入资格。user/tenant 路由、OAuth scope 与资源 ACL 仍照常校验，用户身份失败不回退 tenant。
 
 本机配置可设置 `ownerAccess.projectRoots` 为现有项目目录的绝对路径数组；默认 `[]`。加载时解析真实路径并去重，不接受相对路径、`..` 或非目录。路径分类器解析现有祖先和 symlink，项目外目标标记为需审批，悬空 symlink 或解析错误拒绝分类，不按字符串前缀或强制小写判断归属。仅本机管理员维护配置，没有模型工具可添加项目根目录。
