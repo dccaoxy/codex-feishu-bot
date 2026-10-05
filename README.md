@@ -526,6 +526,8 @@ Task Source：Human 要求为本人私聊及已有授权群里的本人账号补
 
 ### Issue #33：Office 执行校验与项目边界准备（部分实现）
 
+独立卷实验 `scripts/owner-volume-check.mjs` 已验证跨卷硬链接隔离、detached后代只写副本而宿主测试文件未变，以及普通卸载后只读重挂。它不是生产运行时，也未实现宿主写回；采用该方案会改变Shell原位路径和执行中变更可见性，具体技术断点见PROJECT.md。
+
 Human 已选择独立 Owner 专用受控运行时。当前新增的 `test/fixtures/owner-runtime-prototype.mjs` 和 `scripts/owner-runtime-check.mjs` 仅为隔离实验，没有生产启动入口；原型不满足安全边界。`test/owner-runtime.test.mjs` 中两个 `KNOWN GAP` 测试特意复现 detached 子进程与预先存在的硬链接缺口，通过表示缺口存在。协议探针使用真实 Codex 0.160.0、临时无凭据环境及本地合成 provider，不调用真实模型或飞书。具体结果和待补齐的运行时工具兼容性输入见 PROJECT.md 最新交接。
 
 
