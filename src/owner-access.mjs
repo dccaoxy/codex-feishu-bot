@@ -1,7 +1,11 @@
+
 // Authority comes from the authenticated event envelope, never message text.
 export function ownerAccessConfig(value = {}) {
-  const c = {enabled:false, inheritRuntimeDefaults:false, ...value};
-  if (typeof c.enabled !== 'boolean' || typeof c.inheritRuntimeDefaults !== 'boolean') throw Error('Owner Access 配置无效');
+  const c = {enabled:false, ...value};
+  if (typeof c.enabled !== 'boolean') throw Error('Owner Access 配置无效');
+  // Legacy project policy fields are ignored by Owner relay.
+  delete c.projectRoots;
+  delete c.inheritRuntimeDefaults;
   return c;
 }
 export class OwnerAccess {

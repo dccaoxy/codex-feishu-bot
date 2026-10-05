@@ -9,10 +9,7 @@
     "appServerUrl": "",
     "cwd": "./workspace",
     "model": "",
-    "effort": "",
-    "sandbox": "workspace-write",
-    "approvalPolicy": "on-request",
-    "allowExternalThreadRead": false
+    "effort": ""
   },
   "storageDir": "./data",
   "streamIntervalMs": 1000,
@@ -38,7 +35,6 @@
     "resources": []
   },
   "ownerAccess": {
-    "enabled": false,
-    "inheritRuntimeDefaults": false
+    "enabled": false
   }
 }

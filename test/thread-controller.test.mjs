@@ -7,7 +7,7 @@ import path from 'node:path';
 import {Store} from '../src/store.mjs';
 import {ThreadController} from '../src/thread-controller.mjs';
 import {Bot} from '../src/bot.mjs';
-import {loadConfig,externalPermission} from '../src/config.mjs';
+import {loadConfig} from '../src/config.mjs';
 
 class Rpc extends EventEmitter {
   url='ws://127.0.0.1:9999'; calls=[]; responses=[]; state='idle'; turn='active-turn'; direct=true; failResume=false;
@@ -33,13 +33,10 @@ function setup(t,permission='work') {
   t.after(()=>{store.close();fs.rmSync(dir,{recursive:true,force:true});});
   return {dir,store,rpc,config,controller};
 }
-test('read cannot attach or write; Work requires the shared transport',async t=>{
-  const {controller,rpc,config}=setup(t,'read');
-  await assert.rejects(controller.attach('chat','external'),/work/);
-  assert.equal(rpc.calls.length,0);
-  config.codex.externalThreadPermission='work';rpc.url=null;
-  await assert.rejects(controller.attach('chat','external'),/共享/);
-  assert.equal(rpc.calls.length,0);
+test('legacy read flag does not gate Owner; matching shared transport is required',async t=>{
+ const {controller,rpc}=setup(t,'read');await controller.attach('chat','external');
+ rpc.url=null;await assert.rejects(controller.send('chat',[]),/共享/);
+ assert.equal(rpc.calls.some(c=>c.method==='turn/start'),false);
 });
 test('idle attach resumes original ID without overriding settings and sends to same thread',async t=>{
   const {controller,store,rpc}=setup(t);
@@ -106,17 +103,12 @@ test('same thread cannot be attached to two chats or receive overlapping local o
   await assert.rejects(controller.send('one',[]),/操作进行中/);release();await pending;
   assert.equal(store.binding('two'),undefined);assert.equal(rpc.calls.filter(c=>c.method==='turn/start').length,1);
 });
-test('configuration keeps legacy read/off, accepts Work and rejects Full and remote endpoints',t=>{
-  const {dir,config}=setup(t);const file=path.join(dir,'config.json');
-  const load=c=>{fs.writeFileSync(file,JSON.stringify(c));return loadConfig(file,false);};
-  for(const value of [true,false]){
-    const c=structuredClone(config);delete c.codex.externalThreadPermission;c.codex.allowExternalThreadRead=value;
-    assert.equal(externalPermission(load(c)),value?'read':'off');
-  }
-  assert.equal(externalPermission(load(config)),'work');
-  const full=structuredClone(config);full.codex.externalThreadPermission='full';assert.throws(()=>load(full),/Full/);
-  const remote=structuredClone(config);remote.codex.appServerUrl='ws://example.com:9999';assert.throws(()=>load(remote),/本机/);
-  const isolated=structuredClone(config);delete isolated.codex.appServerUrl;assert.throws(()=>load(isolated),/共享/);
+test('legacy authority fields do not alter relay; remote endpoints remain invalid',t=>{
+ const {dir,config}=setup(t);const file=path.join(dir,'config.json');
+ const load=c=>{fs.writeFileSync(file,JSON.stringify(c));return loadConfig(file,false);};
+ for(const value of [true,false]){const c=structuredClone(config);delete c.codex.externalThreadPermission;c.codex.allowExternalThreadRead=value;assert.equal(load(c).codex.allowExternalThreadRead,undefined);}
+ const remote=structuredClone(config);remote.codex.appServerUrl='ws://example.com:9999';assert.throws(()=>load(remote),/本机/);
+ const isolated=structuredClone(config);delete isolated.codex.appServerUrl;assert.doesNotThrow(()=>load(isolated));
 });
 test('Bot Work commands cannot compact, change models or migrate external history to new thread',async t=>{
   const {config,store,rpc}=setup(t);const messages=[];
@@ -157,11 +149,10 @@ test('only unsupported pagination falls back; general protocol errors stop write
   await assert.rejects(controller.send('chat',[]),/unavailable/);
   assert.ok(!rpc.calls.some(c=>c.method==='turn/start'));
 });
-test('permission downgrade prevents writes on an existing attachment',async t=>{
-  const {controller,rpc,config}=setup(t);await controller.attach('chat','external');rpc.calls=[];
-  config.codex.externalThreadPermission='read';
-  for(const operation of [()=>controller.send('chat',[]),()=>controller.interrupt('chat'),()=>controller.fork('chat'),()=>controller.resume('external')])await assert.rejects(operation(),/work/);
-  assert.equal(rpc.calls.length,0);controller.detach('chat');
+test('legacy read flag cannot override native permissions on a bound Thread',async t=>{
+ const {controller,rpc,config}=setup(t);await controller.attach('chat','external');rpc.calls=[];
+ config.codex.externalThreadPermission='read';await controller.send('chat',[]);
+ assert.deepEqual(rpc.calls.find(c=>c.method==='turn/start').params,{threadId:'external',input:[],clientUserMessageId:undefined});
 });
 test('reattach and fork preserve an empty previous binding for detach',async t=>{
   const {controller,store}=setup(t);
@@ -199,29 +190,29 @@ test('a new turn from the other client is observed after an idle attachment',asy
 });
 test('shared desktop tool requests are not rejected by the Feishu observer',async t=>{
   const {config,store,rpc}=setup(t);rpc.shared=true;
-  const bot=new Bot(config,store,rpc,{},()=>{});bot.runs.set('external',{external:true,chat:'chat',turn:'turn'});
+  const bot=new Bot(config,store,rpc,{},()=>{});bot.runs.set('external',{external:true,officeOwner:'owner',chat:'chat',turn:'turn'});
   try{await bot.serverRequest({id:123,method:'item/tool/call',params:{threadId:'external',tool:'desktop_owned_tool',arguments:{}}});assert.equal(rpc.responses.length,0);}finally{await bot.close();}
 });
 test('approval resolved by another client invalidates the Feishu action',async t=>{
-  const {config,store,rpc}=setup(t);rpc.shared=true;const messages=[];
-  const bot=new Bot(config,store,rpc,{text:async(c,s)=>messages.push(s),interactive:async()=>{}},()=>{});bot.runs.set('external',{external:true,chat:'chat',turn:'turn'});
+  const {config,store,rpc,controller}=setup(t);rpc.shared=true;await controller.attach('chat','external');const messages=[];
+  const bot=new Bot(config,store,rpc,{text:async(c,s)=>messages.push(s),interactive:async()=>{}},()=>{});bot.runs.set('external',{external:true,officeOwner:'owner',chat:'chat',thread:'external',turn:'turn'});
   try{
     await bot.serverRequest({id:17,method:'item/commandExecution/requestApproval',params:{threadId:'external',turnId:'turn',command:'printf test'}});
     const token=[...bot.prompts.keys()][0];assert.ok(token);
     bot.notification({method:'serverRequest/resolved',params:{requestId:17}});
-    await assert.rejects(bot.action('chat',{token,decision:'accept'}),/失效/);assert.equal(rpc.responses.length,0);assert.equal(messages.length,1);
+    await assert.rejects(bot.action('chat',{token,decision:'accept'},'owner'),/失效/);assert.equal(rpc.responses.length,0);assert.equal(messages.length,1);
   }finally{await bot.close();}
 });
 test('detaching a shared observer does not deny the other client approval',async t=>{
   const {config,store,rpc,controller}=setup(t);rpc.shared=true;await controller.attach('chat','external');
   const bot=new Bot(config,store,rpc,{text:async()=>{},interactive:async()=>{}},()=>{});
-  bot.runs.set('external',{external:true,chat:'chat',thread:'external',turn:'t',sequence:0,text:'',flush:Promise.resolve()});
+  bot.runs.set('external',{external:true,officeOwner:'owner',chat:'chat',thread:'external',turn:'t',sequence:0,text:'',flush:Promise.resolve()});
   try{await bot.serverRequest({id:18,method:'item/commandExecution/requestApproval',params:{threadId:'external',turnId:'t',command:'printf test'}});await bot.command('chat','/detach');assert.equal(bot.prompts.size,0);assert.equal(rpc.responses.length,0);}finally{await bot.close();}
 });
 test('shared observer presentation failures never decide the peer approval (R1)',async t=>{
   const {config,store,rpc}=setup(t);rpc.shared=true;
   const bot=new Bot(config,store,rpc,{interactive:async()=>{throw new Error('offline');},text:async()=>{}},()=>{});
-  bot.runs.set('external',{external:true,chat:'chat',turn:'turn'});
+  bot.runs.set('external',{external:true,officeOwner:'owner',chat:'chat',turn:'turn'});
   try{
     for(const [method,params] of [
       ['item/commandExecution/requestApproval',{command:'printf test'}],
@@ -257,30 +248,30 @@ test('detach during card creation closes late card exactly once (R3)',async t=>{
 });
 
 test('resolved approval cards close even when their initial send finishes late',async t=>{
-  const {config,store,rpc}=setup(t);rpc.shared=true;
+  const {config,store,rpc,controller}=setup(t);rpc.shared=true;await controller.attach('chat','external');
   let release;const edits=[];
   const bot=new Bot(config,store,rpc,{interactive:()=>new Promise(r=>release=r),text:async()=>{},replaceInteractive:async(...a)=>edits.push(a)},()=>{});
-  bot.runs.set('external',{external:true,chat:'chat',thread:'external',turn:'t'});
+  bot.runs.set('external',{external:true,officeOwner:'owner',chat:'chat',thread:'external',turn:'t'});
   try{
     const send=bot.serverRequest({id:91,method:'item/permissions/requestApproval',params:{threadId:'external',turnId:'t',permissions:{}}});
     const token=[...bot.prompts.keys()][0];
     bot.notification({method:'serverRequest/resolved',params:{requestId:91}});
     release({message_id:'late-card'});await send;
     assert.equal(edits.length,1);assert.equal(edits[0][0],'late-card');assert.match(edits[0][1],/已由客户端处理/);
-    await assert.rejects(bot.action('chat',{token,decision:'accept'}),/失效/);
+    await assert.rejects(bot.action('chat',{token,decision:'accept'},'owner'),/失效/);
     assert.equal(rpc.responses.length,0);
   }finally{await bot.close();}
 });
 test('card update failure cannot replay a locally approved permission request',async t=>{
-  const {config,store,rpc}=setup(t);rpc.shared=true;let updates=0;
+  const {config,store,rpc,controller}=setup(t);rpc.shared=true;await controller.attach('chat','external');let updates=0;
   const bot=new Bot(config,store,rpc,{interactive:async()=>({message_id:'card'}),text:async()=>{},replaceInteractive:async()=>{updates++;throw Error('offline');}},()=>{});
-  bot.runs.set('external',{external:true,chat:'chat',thread:'external',turn:'t'});
+  bot.runs.set('external',{external:true,officeOwner:'owner',chat:'chat',thread:'external',turn:'t'});
   try{
-    const permissions={fileSystem:{write:['/test-only']}};
+    const permissions={fileSystem:{read:['/test-only']}};
     await bot.serverRequest({id:92,method:'item/permissions/requestApproval',params:{threadId:'external',turnId:'t',permissions}});
-    const token=[...bot.prompts.keys()][0];await bot.action('chat',{token,decision:'accept'});
+    const token=[...bot.prompts.keys()][0];await bot.action('chat',{token,decision:'accept'},'owner');
     assert.equal(updates,1);assert.deepEqual(rpc.responses,[{id:92,result:{permissions,scope:'turn'}}]);
-    await assert.rejects(bot.action('chat',{token,decision:'accept'}),/失效/);assert.equal(rpc.responses.length,1);
+    await assert.rejects(bot.action('chat',{token,decision:'accept'},'owner'),/失效/);assert.equal(rpc.responses.length,1);
   }finally{await bot.close();}
 });
 
@@ -316,7 +307,7 @@ for (const cancellation of ['none','resolved','detach','close','disconnect','wro
   try{
     await opening;rpc.state='active';rpc.turn='peer-turn';
     bot.notification({method:'turn/started',params:{threadId:'external',turn:{id:rpc.turn}}});
-    const request={id:401,method:'item/permissions/requestApproval',params:{threadId:'external',turnId:cancellation==='wrong-turn'?'other-turn':rpc.turn,permissions:{fileSystem:{write:['/test-only']}}}};
+    const request={id:401,method:'item/permissions/requestApproval',params:{threadId:'external',turnId:cancellation==='wrong-turn'?'other-turn':rpc.turn,permissions:{fileSystem:{read:['/test-only']}}}};
     await bot.serverRequest(request);
     if(cancellation==='resolved')bot.notification({method:'serverRequest/resolved',params:{requestId:401}});
     if(cancellation==='detach')await bot.command('chat','/detach');
@@ -331,8 +322,8 @@ for (const cancellation of ['none','resolved','detach','close','disconnect','wro
     if(cancellation==='none'){
       const [token,prompt]=[...bot.prompts][0];assert.equal(prompt.turn,'peer-turn');
       await bot.serverRequest(request);assert.equal(cards.length,1);
-      await bot.action('chat',{token,decision:'accept'});
-      await assert.rejects(bot.action('chat',{token,decision:'accept'}),/失效/);
+      await bot.action('chat',{token,decision:'accept'},'owner');
+      await assert.rejects(bot.action('chat',{token,decision:'accept'},'owner'),/失效/);
       assert.equal(rpc.responses.length,1);
     }else assert.equal(rpc.responses.length,0);
   }finally{release();await sending;await bot.close();}
@@ -357,32 +348,33 @@ test('dispatch approval cache is bounded and never replays resolved duplicate ID
 });
 
 for (const scenario of ['during','after','missing','oversized','wrong-item','wrong-turn','resolved','detach','close','disconnect']) test(`file approval retains exact reviewable details: ${scenario}`,async t=>{
-  const {config,store,rpc,controller}=setup(t);rpc.shared=true;await controller.attach('chat','external');rpc.calls=[];
+  const {config,store,rpc,controller,dir}=setup(t);rpc.shared=true;await controller.attach('chat','external');rpc.calls=[];
   let release,opened;const gate=new Promise(r=>release=r),opening=new Promise(r=>opened=r);const cards=[];
   const bot=new Bot(config,store,rpc,{stream:async()=>{opened();await gate;return null;},text:async()=>{},interactive:async(...a)=>cards.push(a)},()=>{});
-  const sending=bot.run('chat',[]).then(()=>null,e=>e);
+  store.enqueue('source','chat',{kind:'message',user:'owner',message:{message_id:'source',chat_type:'p2p',chat_id:'chat'}});
+  const sending=bot.run('chat',[],'source').then(()=>null,e=>e);
   try {
     await opening;rpc.state='active';rpc.turn='peer-turn';
     bot.notification({method:'turn/started',params:{threadId:'external',turn:{id:rpc.turn}}});
     if(scenario==='after'){release();await sending;}
     const event=(turnId,id,path,diff)=>bot.notification({method:'item/started',params:{threadId:'external',turnId,item:{id,type:'fileChange',changes:[{path,kind:{type:'update'},diff}]}}});
-    if(scenario!=='missing')event(scenario==='wrong-turn'?'old-turn':rpc.turn,scenario==='wrong-item'?'other':'patch-1','/review/target.txt',scenario==='oversized'?'x'.repeat(11000):'+ intended change');
+    if(scenario!=='missing')event(scenario==='wrong-turn'?'old-turn':rpc.turn,scenario==='wrong-item'?'other':'patch-1',path.join(dir,'target.txt'),scenario==='oversized'?'x'.repeat(11000):'+ intended change');
     // A later unrelated item must never substitute for the requested item.
-    event(rpc.turn,'patch-2','/review/unrelated.txt','+ unrelated');
+    event(rpc.turn,'patch-2',path.join(dir,'unrelated.txt'),'+ unrelated');
     await bot.serverRequest({id:501,method:'item/fileChange/requestApproval',params:{threadId:'external',turnId:rpc.turn,itemId:'patch-1',reason:'Review patch'}});
     if(scenario==='resolved')bot.notification({method:'serverRequest/resolved',params:{requestId:501}});
     if(scenario==='detach')await bot.command('chat','/detach');
     if(scenario==='close')await bot.close();
     if(scenario==='disconnect')rpc.emit('disconnected');
     release();await sending;
-    const valid=['during','after'].includes(scenario);
+    const valid=['during','after','missing','oversized','wrong-item','wrong-turn'].includes(scenario);
     assert.equal(cards.length,valid?1:0);assert.equal(bot.prompts.size,valid?1:0);
     assert.equal(rpc.responses.length,0);
     assert.equal(rpc.calls.filter(c=>c.method==='turn/start').length,0);
     assert.equal(rpc.calls.filter(c=>c.method==='turn/steer').length,['detach','close','disconnect'].includes(scenario)?0:1);
     if(valid){
-      assert.match(cards[0][2],/\/review\/target.txt/);assert.match(cards[0][2],/\+ intended change/);assert.doesNotMatch(cards[0][2],/unrelated/);
-      const token=[...bot.prompts.keys()][0];await bot.action('chat',{token,decision:'accept'});
+      if(['during','after'].includes(scenario)){assert.match(cards[0][2],/target.txt/);assert.match(cards[0][2],/\+ intended change/);}assert.doesNotMatch(cards[0][2],/unrelated/);
+      const token=[...bot.prompts.keys()][0];await bot.action('chat',{token,decision:'accept'},'owner');
       assert.deepEqual(rpc.responses,[{id:501,result:{decision:'accept'}}]);
     }
   }finally{release();await sending;await bot.close();}

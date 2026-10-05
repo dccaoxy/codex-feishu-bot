@@ -9,7 +9,7 @@
   "scripts": {
     "start": "node src/main.mjs",
     "doctor": "node src/main.mjs --doctor",
-    "test": "node --test test/*.test.mjs",
+    "test": "node --test test/*.test.mjs test/offline/*.test.mjs",
     "check": "node scripts/check.mjs",
     "smoke": "node scripts/smoke.mjs",
     "work:check": "node scripts/work-check.mjs",
