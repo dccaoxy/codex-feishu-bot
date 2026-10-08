@@ -1,3 +1,11 @@
+# 当前返工：Issue #37 编辑前读取与礼貌前缀（2026-10-08）
+
+- **Task Source**：用户对PR #38的两项P2：明确编辑请求被只读命令语法拒绝；“请帮我读取”只剥离“请”后解析失败。继续原分支及Draft PR，不Merge、不部署；不将88af293的旧PASS套用到新head。
+- **Implementation**：完整礼貌前缀优先匹配。宿主从当前可信单行编辑命令开头提取一个明确Docx/Wiki根目标，允许同目标元数据/正文/块/子块准备读取及revision获取；Wiki只派生官方返回的Docx。同一目标内块读取不扩大到其他文档；替换内容里的链接不成为授权，固定准备读取名单不含写API。未知、否定、条件、引用及带query/fragment或明确子范围而无法可靠解析的编辑请求保持拒绝，不靠模型猜测。现有来源快照、Owner、steer、撤回、turn及OAuth检查保留；不改变Office写入流程。
+- **作者Validation**：check/diff通过；permit+Owner集成557/557，全量 **1422/1422**，零失败/取消/跳过。最终permit专项补充断言通过，覆盖同文档块读取、其他目标0出站、替换URL不扩权、Wiki解析、准备许可拒绝写API及排队/响应期间撤回、steer、换Owner。仅本地合成飞书/OAuth接口。
+- **环境验证**：无飞书凭据/无Shared地址的临时副本doctor和无模型smoke退出0（Codex0.162.0-alpha.2，握手、登录状态与7模型元数据可用）。Group/Knowledge原生探针各退出1：固定要求0.159.0，与安装版本不符；未更改锁定版本，不把离线回归当作原生隔离通过。
+- **交接与Remaining**：本轮不读取真实飞书、改scopes、改生产配置、发送消息、部署或Merge；真实403及候选验收仍未验证。实现与文档在本分支保存；提交推送后更新Draft PR #38和Issue报告，新head独立复审证据以PR的准确SHA回执为准。其他上一轮边界保持。
+
 # 当前交接：Issue #37 Docx/Wiki Owner 用户读取（2026-10-08）
 
 - **Task Source**：Issue #37 与用户技术答复：在指定开发分支整合未合并PR #30，保留main已完成的#33权限转发；创建/更新Draft PR并保持Draft，不Merge、不部署。基线main为 f407453a5efb3653e88e7ce592fc5ad3e059c63b，整合PR #30 head 553ae4b4f2595b6eb03737a47ca9ca9191003f94；历史审核以当时head为准。

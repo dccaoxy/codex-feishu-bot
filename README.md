@@ -638,3 +638,9 @@ Owner可以直接说：`读取新羽群里的所有飞书文档`，或 `读取 F
 诊断字段为API、身份类别、scope判定、阶段、是否开始HTTP请求、实际HTTP状态及数字错误码。SDK底层HTTP观测与直连响应提供状态；未取得状态时为null，不推测200/403。已知错误码可分类为资源拒绝，未知403仍为unknown；缺scope、API能力、本地目标校验、凭据不可用与超时分别报告。不会根据“浏览器能打开”承诺OpenAPI成功，也不会自动扩大OAuth权限或建议无证据的飞书侧操作。官方接口依据：[Docx blocks](https://open.feishu.cn/document/server-docs/docs/docs/docx-v1/document/list)、[Wiki节点解析](https://open.feishu.cn/document/server-docs/docs/wiki-v2/space-node/get_node)。
 
 本轮没有真实飞书文档读取、配置/scopes变更、服务重启、部署或合并。已安装Codex与Group/Knowledge固定版本不符时原生隔离探针会拒绝运行；离线身份隔离回归不能代替该探针或候选部署后的真实验收。交付PR按当前任务指令保持Draft。
+
+### Issue #37 审核返工：明确编辑请求的准备读取
+
+当前可信Owner的单行请求如“请将 https://example.feishu.cn/docx/doc 的标题改为新标题”或“请帮我修改 https://example.feishu.cn/docx/doc 的内容”，可读取同一目标的元数据、正文、块及子块，以取得编辑前内容和revision；专用文档工具与Office Call一致。也支持以“编辑/更新/重命名/追加”开头并紧跟明确Docx/Wiki根链接或document_id/token的请求。“请帮我”按完整前缀优先匹配。
+
+这只授予准备读取，不批准写API；写入仍走既有执行、版本与生命周期约束。编辑目标仅取命令开头的单个明确根，替换文字中的其他URL不会获得许可；Wiki只接受官方解析得到的Docx。引用、否定、条件式、未知目标及无法可靠识别的语句不产生许可；带query/fragment或显式子范围的编辑目标不自动扩成整篇文档读取。原消息撤回/变化、steer、换Owner和回合失效仍会中止读取与交付。

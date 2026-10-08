@@ -482,3 +482,16 @@ for(const oauthEnabled of [false,true])test(`Issue37 keeps trusted Owner post Of
  await toolCall(s.bot,'feishu_office_find',{query:'docx'});assert.equal(results.at(-1).success,true);
  await toolCall(s.bot,'feishu_office_schema',{api:'docx.v1.document.get'});assert.equal(results.at(-1).success,true);
 });
+
+for(const text of ['请帮我读取 https://example.feishu.cn/docx/private','请将 https://example.feishu.cn/docx/private 的标题改为新标题'])for(const tool of ['feishu_doc_read','feishu_office_call'])test(`Issue37 current Owner preparation ${tool}: ${text}`,async t=>{
+ const s=targetFixture(t,text);await toolCall(s.bot,tool,tool==='feishu_doc_read'?{documentId:'private'}:{api:'docx.v1.documentBlock.list',payload:{path:{document_id:'private'}}});
+ assert.equal(s.responses.at(-1)[1].success,true);assert.equal(s.counts().calls,tool==='feishu_doc_read'?2:1);
+ const before=s.counts();await toolCall(s.bot,'feishu_office_call',{api:'docx.v1.documentBlock.list',payload:{path:{document_id:'other'}}});assert.equal(s.responses.at(-1)[1].success,false);assert.deepEqual(s.counts(),before);
+});
+for(const stage of ['queue','response'])for(const change of ['steer','recall','owner'])test(`Issue37 edit preparation invalidated by ${change} during ${stage}`,async t=>{
+ const s=targetFixture(t,'请将 https://example.feishu.cn/docx/private 的标题改为新标题',stage);
+ const pending=toolCall(s.bot,'feishu_office_call',{api:'docx.v1.documentBlock.get',payload:{path:{document_id:'private',block_id:'block'}}});await s.waiting;
+ if(change==='steer'){s.store.enqueue('m2','group',{kind:'message',user:'owner',content:{text:'停止'},message:{message_id:'m2',chat_id:'group',chat_type:'group',message_type:'text'}});s.run.sourceIds.add('m2');}
+ if(change==='recall')s.store.mark('m1','cancelled');if(change==='owner')s.bot.owner='other';s.release();await pending;
+ assert.equal(s.counts().calls,stage==='queue'?0:1);assert.ok(!JSON.stringify(s.responses).includes('PRIVATE_TARGET_SENTINEL'));
+});

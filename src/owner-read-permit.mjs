@@ -11,11 +11,30 @@ export function readTarget(url){
  const m=/^\/(docx|wiki|sheets|base|file|drive\/folder)\/([a-zA-Z0-9_-]{1,200})\/?$/.exec(u.pathname);
  return m?{key:types[m[1]],value:m[2],type:m[1]}:null;
 }
+// Pre-edit reads are a read-only capability for one explicit document, never
+// a write approval or permission to follow links appearing in replacement text.
+const editReadApis=new Set(['wiki.v2.space.getNode','docx.v1.document.get','docx.v1.document.rawContent','docx.v1.documentBlock.list','docx.v1.documentBlock.get','docx.v1.documentBlockChildren.get']);
+function parseEdit(text){
+ const prefix=/^(?:将|把|修改|编辑|更新|重命名|追加)\s*/u.exec(text);if(!prefix)return null;
+ const rest=text.slice(prefix[0].length);
+ const match=/^(https:\/\/[a-zA-Z0-9.-]+\/(?:docx|wiki)\/[a-zA-Z0-9_-]{1,200}\/?|(?:document_id|token)\s*[:=：]?\s*[a-zA-Z0-9_-]{1,200})(?=\s|的|$)/u.exec(rest);
+ if(!match)return null;
+ const tail=rest.slice(match[0].length).trim();
+ if(/^(?:block_id|range|范围|不要|禁止|别)(?:\s|[:=：]|读取|读)/u.test(tail))return null;
+ // 把/将 requires an actual edit action, not a reference, question or condition.
+ if(/^(?:将|把)/u.test(prefix[0])&&!/^(?:的)?(?:标题|名称|内容|正文|文字)?\s*(?:修改为|改为|替换为|更新为)\s*\S/u.test(tail))return null;
+ let target;
+ if(match[0].startsWith('https://'))target=readTarget(match[0]);
+ else {const [,key,value]=/^(document_id|token)\s*[:=：]?\s*([a-zA-Z0-9_-]+)$/u.exec(match[0]);target={key,value};}
+ if(!target||!['document_id','token'].includes(target.key))return null;
+ return {preEdit:true,grants:[{root:target.key,values:{[target.key]:target.value}}]};
+}
 // Intentionally narrow, deterministic parsing. Ambiguous prose asks for a target,
 // never falls back to an LLM or turns a quoted/history/document link into consent.
 function parse(text){
  if(typeof text!=='string'||text.length>6000||/[\n\r`<>]/.test(text))return null;
- text=text.trim().replace(/^(?:请|麻烦|帮我|请帮我)\s*/u,'');
+ text=text.trim().replace(/^(?:请帮我|麻烦你|麻烦|帮我|请)\s*/u,'');
+ const edit=parseEdit(text);if(edit)return edit;
  const search=/^(?:搜索|检索|search)\s*(?:云文档\s*)?[「“"]([^」”"\n]{1,200})[」”"]\s*[。.!！]?$/iu.exec(text);
  if(search)return {query:search[1],grants:[]};
  if(/^(?:列出|查看|list)\s*(?:我可访问的)?(?:知识库|wiki spaces)\s*[。.!！]?$/iu.test(text))return {spaces:true,grants:[]};
@@ -56,7 +75,7 @@ export function readAuthority(guard){
  const calls=new WeakMap();
  const match=(root,selectors,metadata=false)=>{
   for(const g of [...intent.grants,...derived])if(g.root===root&&
-   Object.entries(selectors).every(([key,value])=>typeof value==='string'&&g.values[key]===value)&&
+   Object.entries(selectors).every(([key,value])=>typeof value==='string'&&(g.values[key]===value||(intent.preEdit&&root==='document_id'&&key==='block_id'&&/^[a-zA-Z0-9_-]{1,200}$/.test(value))))&&
    (metadata||Object.keys(g.values).every(key=>Object.hasOwn(selectors,key)))){
     // A repeated URL can have several independent source messages. Bind this
     // call to one still-live source; never swap it after the call has started.
@@ -65,7 +84,7 @@ export function readAuthority(guard){
   return null;
  };
  function authorize(api,p){
-  authority.check();let ok=false;const used=[];
+  authority.check();if(intent.preEdit&&!editReadApis.has(api))deny();let ok=false;const used=[];
   const select=(...args)=>{const g=match(...args);if(g)used.push(g);return Boolean(g);};
   // A folder/node in the mirror is not permission to discover further roots.
   if(collection&&['drive.v1.file.list','feishu_office_drive_search','wiki.v2.space.list','wiki.v2.space.get','wiki.v2.spaceNode.list'].includes(api))deny();
@@ -95,6 +114,7 @@ export function readAuthority(guard){
   authority.check();if(!collection)deny();return collection.page(offset);
  },resolveWiki(data,permit){
   authority.check();const call=calls.get(permit);if(call?.api!=='wiki.v2.space.getNode')deny();permit();
+  if(intent.preEdit&&data?.node?.obj_type!=='docx')return;
   const n=data?.node,key={docx:'document_id',sheet:'spreadsheet_token',bitable:'app_token',file:'doc_token'}[n?.obj_type];
   if(!key||!/^[a-zA-Z0-9_-]{1,200}$/.test(n.obj_token))return;
   for(const source of call.used){

@@ -83,3 +83,34 @@ test('collection Wiki mismatched response or incompatible selectors cannot mint 
  a.resolveWiki({node:{node_token:'wiki',obj_type:'docx',obj_token:'doc'}},p);
  assert.throws(()=>a.authorize('docx.v1.document.get',{path:{document_id:'doc'}}));
 });
+
+for(const prefix of ['','请','请帮我','帮我','麻烦','麻烦你'])test(`Issue37 polite prefix ${prefix} preserves the exact read target`,()=>{
+ const a=permit(`${prefix}读取 https://example.feishu.cn/docx/doc`);
+ assert.doesNotThrow(()=>a.authorize('docx.v1.document.get',{path:{document_id:'doc'}}));
+ assert.throws(()=>a.authorize('docx.v1.document.get',{path:{document_id:'other'}}));
+});
+for(const text of ['请将 https://example.feishu.cn/docx/doc 的标题改为新标题','请帮我修改 https://example.feishu.cn/docx/doc 的内容','编辑 document_id doc','把 document_id doc 的正文替换为新正文']){
+ test(`Issue37 explicit edit permits same-document preparation: ${text}`,()=>{
+  const a=permit(text);
+  for(const [api,path] of [['docx.v1.document.get',{document_id:'doc'}],['docx.v1.document.rawContent',{document_id:'doc'}],['docx.v1.documentBlock.list',{document_id:'doc'}],['docx.v1.documentBlock.get',{document_id:'doc',block_id:'b'}],['docx.v1.documentBlockChildren.get',{document_id:'doc',block_id:'b'}]]){
+   assert.doesNotThrow(()=>a.authorize(api,{path}));assert.throws(()=>a.authorize(api,{path:{...path,document_id:'other'}}));
+  }
+  assert.throws(()=>a.authorize('docx.v1.documentBlock.patch',{path:{document_id:'doc',block_id:'b'}}));
+  assert.throws(()=>a.authorize('feishu_office_drive_search',{query:'doc'}));
+  assert.throws(()=>permit('修改 document_id doc block_id b'));
+  assert.throws(()=>permit('修改 document_id doc 不要读取此文档'));
+ });
+}
+for(const text of ['不要修改 https://example.feishu.cn/docx/doc','如果可以就修改 https://example.feishu.cn/docx/doc','引用：修改 https://example.feishu.cn/docx/doc','请帮我总结：修改 https://example.feishu.cn/docx/doc','将 https://example.feishu.cn/docx/doc 分享给某人','修改 https://example.feishu.cn.evil.com/docx/doc','修改 https://example.feishu.cn/docx/doc?block_id=b','修改 https://example.feishu.cn/docx/doc#b','修改 https://example.feishu.cn/docx/doc/extra'])test(`Issue37 ambiguous/edit scope rejected: ${text}`,()=>assert.throws(()=>permit(text)));
+test('Issue37 replacement text cannot mint a second target and steer revokes preparation',()=>{
+ let text='请将 https://example.feishu.cn/docx/doc 的标题改为 https://example.feishu.cn/docx/secret';
+ const a=readAuthority(ownerReadGuard(()=>{},()=>({text}))),check=a.authorize('docx.v1.documentBlock.get',{path:{document_id:'doc',block_id:'b'}});
+ assert.throws(()=>a.authorize('docx.v1.document.get',{path:{document_id:'secret'}}));text='停止';assert.throws(check);
+});
+test('Issue37 Wiki edit grants only its officially resolved Docx, never other content types',()=>{
+ const a=permit('请编辑 https://example.feishu.cn/wiki/node'),p=a.authorize('wiki.v2.space.getNode',{params:{token:'node'}});
+ a.resolveWiki({node:{node_token:'node',obj_type:'bitable',obj_token:'base'}},p);assert.throws(()=>a.authorize('bitable.v1.app.get',{path:{app_token:'base'}}));
+ a.resolveWiki({node:{node_token:'node',obj_type:'docx',obj_token:'doc'}},p);
+ assert.doesNotThrow(()=>a.authorize('docx.v1.documentBlock.get',{path:{document_id:'doc',block_id:'b'}}));
+ assert.throws(()=>a.authorize('docx.v1.document.get',{path:{document_id:'node'}}));
+});
