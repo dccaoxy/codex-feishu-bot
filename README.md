@@ -646,3 +646,9 @@ Owner可以直接说：`读取新羽群里的所有飞书文档`，或 `读取 F
 编辑前读取只接受可完整识别的简单单目标命令；额外读取禁令、条件、显式子范围或混合多句替换内容均拒绝，不忽略后缀。若替换内容与约束无法可靠区分，需要先明确读取范围。
 
 这只授予准备读取，不批准写API；写入仍走既有执行、版本与生命周期约束。编辑目标仅取命令开头的单个明确根，替换文字中的其他URL不会获得许可；Wiki只接受官方解析得到的Docx。引用、否定、条件式、未知目标及无法可靠识别的语句不产生许可；带query/fragment或显式子范围的编辑目标不自动扩成整篇文档读取。原消息撤回/变化、steer、换Owner和回合失效仍会中止读取与交付。
+
+### Issue #37：已有 scope 与隔离探针
+
+[rawContent 官方接口](https://open.feishu.cn/document/server-docs/docs/docs/docx-v1/document/raw_content)的本地只读策略接受已有 `docx:document:readonly` 或 `docx:document`，任一满足即可；这只是该读取接口的授权匹配，不新增 OAuth 申请、不授予写 API，也不将 scope 名称按前缀泛化。缺少两者仍在出站前拒绝。
+
+Group/Knowledge 探针根据调用 ID 关联响应，再按 namespace/工具名检查预期；首次和恢复检查共用断言，新增攻击调用不会改变 skills 的预期位置。合成协议回归不替代匹配固定 Codex 版本的原生隔离验证。

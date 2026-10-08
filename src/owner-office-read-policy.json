@@ -10,7 +10,8 @@
     },
     "docx.v1.document.rawContent": {
       "scopes": [
-        "docx:document:readonly"
+        "docx:document:readonly",
+        "docx:document"
       ],
       "documentation": "https://open.feishu.cn/document/server-docs/docs/docs/docx-v1/document/raw_content"
     },

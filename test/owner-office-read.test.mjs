@@ -56,7 +56,7 @@ test('fixed policy matches fixed SDK, contains no write or permission endpoints'
  const client=new Client({appId:'fixture',appSecret:'fixture',logger:{info(){},error(){},warn(){},debug(){},trace(){}}});
  assert.deepEqual(Object.keys(OWNER_READ_APIS).sort(),Object.keys(payloads).sort());
  for(const [api,rule] of Object.entries(OWNER_READ_APIS)){
-  assert.ok(rule.scopes.every(s=>/:read(?:only)?$|:retrieve$/.test(s)));
+  assert.ok(rule.scopes.every(s=>/:read(?:only)?$|:retrieve$/.test(s)||(api==='docx.v1.document.rawContent'&&s==='docx:document')));
   if(OWNER_READ_SPECIAL.includes(api))continue;const def=officeDefinition(api);assert.ok(def.tokens.includes('user'));assert.ok(def.method==='GET'||api==='drive.v1.meta.batchQuery');assert.equal(typeof api.split('.').reduce((v,k)=>v[k],client),'function');
  }
 });
@@ -140,4 +140,25 @@ test('Drive HTTP success with per-resource failure is not reported as a successf
  const f=await fixture(t);f.outputs.set('drive.v1.meta.batchQuery',{metas:[],failed_list:[{token:'file',code:970003}]});
  const r=await f.reader.resources(['https://example.feishu.cn/file/file'],guard);assert.equal(r.results[0].status,'failed');assert.equal(r.results[0].reason,'resource_denied');
  const call=await f.office.execute('feishu_office_call',{api:'drive.v1.meta.batchQuery',payload:payloads['drive.v1.meta.batchQuery']},guard);assert.equal(call.partial,true);
+});
+
+for(const scope of ['docx:document:readonly','docx:document'])test(`rawContent accepts existing alternative grant ${scope} without authorization changes`,async t=>{
+ const f=await fixture(t),api='docx.v1.document.rawContent';
+ const record={...f.record,scopes:['offline_access',scope]};f.vault.write(f.key,record);
+ f.outputs.set(api,{content:'synthetic text'});
+ await f.office.execute('feishu_office_call',{api,payload:payloads[api]},trusted('读取 document_id doc'));
+ assert.equal(f.calls.length,1);assert.equal(f.calls[0].api,api);
+ assert.equal(f.calls[0].opts.lark[Reflect.ownKeys(f.calls[0].opts.lark)[0]],'fixture-uat');
+ assert.deepEqual(f.vault.read(f.key),record);
+ await assert.rejects(f.reader.session(trusted('读取 document_id doc')).call('docx.v1.document.create',{data:{title:'denied'}}));
+ assert.equal(f.calls.length,1);
+});
+for(const scopes of [[],['docx:document:write'],['docs:doc'],['wiki:wiki:readonly']])test(`rawContent rejects unrelated scopes ${scopes}`,async t=>{
+ const f=await fixture(t),api='docx.v1.document.rawContent';f.vault.write(f.key,{...f.record,scopes});
+ await assert.rejects(f.reader.session(guard).call(api,payloads[api]),e=>e.readCode==='scope_missing');assert.equal(f.calls.length,0);
+});
+test('rawContent equivalent grant is rechecked before transport',async t=>{
+ const f=await fixture(t),api='docx.v1.document.rawContent';f.vault.write(f.key,{...f.record,scopes:['docx:document']});
+ f.f.call=async fn=>{f.vault.write(f.key,{...f.record,scopes:[]});return fn();};
+ await assert.rejects(f.reader.session(guard).call(api,payloads[api]),e=>e.readCode==='scope_missing');assert.equal(f.calls.length,0);
 });

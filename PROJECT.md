@@ -1,3 +1,9 @@
+# 当前返工：Issue #37 scope 等价授权与隔离探针（2026-10-08）
+
+- **Task Source / Implementation**：用户最新两项P2。rawContent固定策略新增官方支持的已有docx:document替代scope，复用租约的任一匹配与持续校验；不修改OAuth申请、配置或写API。Group/Knowledge初始及恢复探针改为call_id关联、namespace/name分派，共用断言，拒绝缺失/重复/未知响应。
+- **Validation**：本轮读取与探针专项96/96通过；覆盖两种已有scope、无关scope零出站、租约中途撤销、写API拒绝、skills空列表和非空列表、顺序变化、Group/Knowledge隔离。本机无凭据临时副本doctor与无模型smoke退出0；Group/Knowledge原生探针均因Codex0.162.0-alpha.2与固定0.159.0不符退出1，未放宽锁定。本轮全量1446/1446通过，零失败/取消/跳过，check/diff通过；独立审查以PR准确head回执为准，旧head PASS不适用于新head。
+- **Remaining / 交接**：继续原分支及Draft PR #38；提交推送及Issue报告以远端回执为准。未真实读取飞书、调用模型、改scope/生产配置、Merge或部署。原生Group/Knowledge仍须匹配固定版本；合成断言测试不冒充真实探针。其他原有边界保持。
+
 # 当前返工：Issue #37 编辑前读取与礼貌前缀（2026-10-08）
 
 - **Task Source**：用户对PR #38的两项P2：明确编辑请求被只读命令语法拒绝；“请帮我读取”只剥离“请”后解析失败。继续原分支及Draft PR，不Merge、不部署；不将88af293的旧PASS套用到新head。
