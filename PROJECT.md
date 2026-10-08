@@ -1,3 +1,9 @@
+# PR #38 / Issue #37 部署交接（2026-10-08）
+
+- **Implementation**：用户明确批准后已合并并部署PR38。merge SHA `3bc2e9bac5221ad178a848fcb077a9957f87ea6e`；部署源码 `0d1867ca57ef98abe210d172214d2da491a1a726`。独立组合审核确认保留PR19/30/34能力，无需另做合成提交。
+- **Validation**：组合独立审核PASS、958/958专项及1513/1513全量通过，check/diff通过。固定0.159.0本地假provider原始fixture的Group32和Knowledge20项通过。额外gpt-6-astra合成标识的Group工具清单断言失败，未修改版本门槛或线上模型配置。生产check、doctor、无模型smoke通过，连接就绪；未调用真实模型或发送测试消息。GitHub未配置CI检查，不能把本地测试称为CI通过。
+- **Remaining**：真实用户403、Docx/Wiki/群集合读取与群交互/UI未验收。仅重启Bot，共享Codex与调度器未变；OAuth、权限和凭据配置未变。源码备份及详细部署/回退证据只保留本地；异常回退恢复源码，断电或强杀需人工恢复。新增诊断工具仍需Owner明确新建Thread注入。现有调度器无merge/deploy入口，本次由用户批准后本地执行，未开发自动部署功能。
+
 # 当前定向返工：Issue #37 post 集合与可信 bot-at 八格矩阵（2026-10-08）
 
 - **Task Source / 顺序**：用户只批准本轮矩阵先行集中修复。先在旧代码651daa661251e59308c25e49bbf5c1c37633a686仅添加入站矩阵测试并执行，再改生产代码。夹具走onMessage → inbox → message → run/turn-start → serverRequest → Reader → 合成SDK出站；不直接调用解析helper，也不手工建立run/context。没有真实模型或飞书请求。
