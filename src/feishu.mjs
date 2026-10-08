@@ -37,12 +37,26 @@ export function card(title, text, buttons = [], streaming = false) {
 }
 export class Feishu {
   effects = new AsyncLocalStorage();
+  readEffects = new AsyncLocalStorage();
+  observeRead(diagnostic,active,signal,work){return this.readEffects.run({diagnostic,active,signal},work);}
   withGuard(guard, work) { guard(); return (this.effects??=new AsyncLocalStorage()).run(guard,work); }
   constructor(config, log = console.log) {
     this.config = config; this.log = log; this.queue = Promise.resolve(); this.lastCall = 0;
-    lark.defaultHttpInstance.defaults.timeout = 30000;
+    // A per-client transport preserves actual HTTP evidence without logging
+    // headers or bodies, and cancels expired Owner reads at the network layer.
+    const httpInstance=lark.defaultHttpInstance.create({timeout:30000});
+    httpInstance.interceptors.request.use(request=>{
+      const read=this.readEffects.getStore();
+      if(read){read.active();request.signal=read.signal;request.maxContentLength=1024*1024;read.diagnostic.outbound=true;}
+      return request;
+    });
+    httpInstance.interceptors.response.use(response=>{
+      const read=this.readEffects.getStore();
+      if(read){read.diagnostic.httpStatus=response.status;const code=response.data?.code;if(Number.isSafeInteger(code))read.diagnostic.feishuCode=code;}
+      return response.config['$return_headers']?{data:response.data,headers:response.headers}:response.data;
+    });
     this.client = new lark.Client({ appId: config.feishu.appId, appSecret: config.feishu.appSecret,
-      appType: lark.AppType.SelfBuild, domain: lark.Domain.Feishu, logger: quietLogger });
+      appType: lark.AppType.SelfBuild, domain: lark.Domain.Feishu, httpInstance, logger: quietLogger });
   }
   async call(fn, retry = true, guard = () => {}, cleanup = false) {
     const inherited = cleanup ? null : this.effects?.getStore();

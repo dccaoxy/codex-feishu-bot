@@ -1,3 +1,4 @@
+import {OWNER_READ_SPECIAL} from './owner-office-read-policy.mjs';
 import { ownerAccessConfig } from './owner-access.mjs';
 import { gatewayConfig } from './owner-gateway.mjs';
 import { groupConfig } from './group-policy.mjs';
@@ -11,7 +12,7 @@ export function loadConfig(filename = path.join(ROOT, 'config.local.json'), requ
   const c = JSON.parse(fs.readFileSync(filename, 'utf8'));
   if(c.ownerOAuth!==undefined){
     const o=c.ownerOAuth;
-    if(!o||typeof o!=='object'||Array.isArray(o)||typeof o.enabled!=='boolean'||!Array.isArray(o.apis)||o.apis.length>219||new Set(o.apis).size!==o.apis.length||o.apis.some(a=>typeof a!=='string'||!/^[-a-zA-Z0-9.]{1,150}$/.test(a))||Object.keys(o).some(k=>!['enabled','apis'].includes(k)))throw Error('ownerOAuth仅接受enabled和明确的Office API名单；凭据不得放在配置中');
+    if(!o||typeof o!=='object'||Array.isArray(o)||typeof o.enabled!=='boolean'||!Array.isArray(o.apis)||o.apis.length>221||new Set(o.apis).size!==o.apis.length||o.apis.some(a=>typeof a!=='string'||(!OWNER_READ_SPECIAL.includes(a)&&!/^[-a-zA-Z0-9.]{1,150}$/.test(a)))||Object.keys(o).some(k=>!['enabled','apis'].includes(k)))throw Error('ownerOAuth仅接受enabled和明确的Office API名单；凭据不得放在配置中');
   }
   c.groups = groupConfig(c.groups);
   c.ownerAccess = ownerAccessConfig(c.ownerAccess);

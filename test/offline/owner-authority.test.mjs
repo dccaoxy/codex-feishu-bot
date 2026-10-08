@@ -1,3 +1,4 @@
+import {ownerReadGuard} from '../../src/owner-read-permit.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -70,7 +71,7 @@ test('user identity failure never calls tenant transport',async()=>{
   let calls=0;
   const office=new Office({call:async fn=>fn(),client:{docx:{v1:{document:{get:async()=>{calls++;return {};}}}}}},
     {enabled:()=>true,lease:async()=>{throw Error('OAuth scope denied');}});
-  await assert.rejects(office.execute('feishu_office_call',{api:'docx.v1.document.get',payload:{path:{document_id:'fixture'}}},()=>{}),/OAuth scope denied/);
+  await assert.rejects(office.execute('feishu_office_call',{api:'docx.v1.document.get',payload:{path:{document_id:'fixture'}}},ownerReadGuard(()=>{},()=>({text:'读取 document_id fixture'}))),/reauthorization_required/);
   assert.equal(calls,0);
 });
 
