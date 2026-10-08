@@ -1,3 +1,9 @@
+# 当前定向返工：Issue #37 可信 post 与文本 steer（2026-10-08）
+
+- **Task Source / Implementation**：仅本轮手动限定范围。officeReadGuard不再要求所有来源均为text；旧来源继续校验Owner、消息ID、群、状态与完整payload快照，仅最新消息提取读取意图。当前post支持文本/链接节点及语言包装，保留段落边界并拒绝无法可靠解释的结构；不从历史或模型数据扩权。
+- **Validation**：新增post读取和post后文本steer两个复现回归，并验证专用工具/Office Call、目标隔离、旧来源撤回、队列/响应期间Owner/撤回/payload变更及含糊结构拒绝。专项525/525通过；首轮6个回归断言未适配取消后不返回工具响应的既有行为，修正为无成功响应/无新增出站后通过。无凭据临时副本doctor与无模型smoke退出0；最终全量1490/1490（零失败/取消/跳过）及check/diff通过；随后仅交独立审核，不扩展范围。
+- **Remaining / 交接**：原分支与Draft PR #38；未真实飞书读取、模型调用、生产配置变更、Merge或部署。真实403验收及既有原生Group/Knowledge版本不匹配边界保持；提交推送与准确head审核证据见PR回执。
+
 # 当前返工：Issue #37 Wiki getNode 等价 scope（2026-10-08）
 
 - **Task Source / Implementation**：最新P2要求补齐已有wiki:wiki。已实时读取官方get_node.md权限表，固定getNode策略接受wiki:node:read、wiki:wiki:readonly、wiki:wiki任一；保留精确匹配及持续租约检查，不新增OAuth申请或写API。

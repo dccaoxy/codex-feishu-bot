@@ -14,6 +14,31 @@ import { formFields, parseField, authorizationUrl, fieldOptions, validateForm } 
 import { History, TOOLS } from './history.mjs';
 import { chunks, safeError } from './feishu.mjs';
 
+// Extract only the current trusted inbox input. Older sources remain identity,
+// payload and recall dependencies, never contributors to the current intent.
+function ownerReadIntentText(data) {
+  const content=data.content;
+  if(data.message.message_type==='text'&&typeof content?.text==='string')return content.text;
+  if(data.message.message_type!=='post'||!content||typeof content!=='object')throw Error('当前读取来源无效');
+  const post=content.content?content:(content.zh_cn||content.en_us||Object.values(content)[0]);
+  if(!post||!Array.isArray(post.content)||(post.title!==undefined&&typeof post.title!=='string'))throw Error('当前读取来源无效');
+  const lines=[];
+  if(post.title)lines.push(post.title);
+  for(const row of post.content){
+    if(!Array.isArray(row))throw Error('当前读取来源无效');
+    let line='';
+    for(const node of row){
+      if(node?.tag==='text'&&typeof node.text==='string')line+=node.text;
+      else if(node?.tag==='a'&&typeof node.href==='string')line+=node.href;
+      else throw Error('当前读取来源无效');
+    }
+    if(line.trim())lines.push(line);
+  }
+  // Keep paragraph boundaries: quoted/history/conditional multi-line content
+  // must not be flattened into a fresh command by the read-intent parser.
+  return lines.join('\n').trim();
+}
+
 export const HELP = `飞书 · 本地 Codex
 
 直接发消息：继续当前会话；执行中发消息：追加要求。
@@ -903,11 +928,12 @@ ${this.ownerGroups?OWNER_GROUP_INSTRUCTIONS:''}` };
         const row=this.store.db.prepare('SELECT payload,state FROM inbox WHERE chat=? AND id=?').get(run.chat,id);
         if(!row||!['pending','processing','done'].includes(row.state))throw Error('当前读取来源已失效');
         const d=JSON.parse(row.payload),m=d.message;
-        if(d.kind!=='message'||d.user!==owner||m?.message_id!==id||m.chat_id!==run.chat||m.message_type!=='text'||typeof d.content?.text!=='string')throw Error('当前读取来源无效');
-        return {id,payload:row.payload,text:d.content.text};
+        if(d.kind!=='message'||d.user!==owner||m?.message_id!==id||m.chat_id!==run.chat)throw Error('当前读取来源无效');
+        return {id,payload:row.payload};
       });
       // A steer replaces read intent; older inputs remain revocation dependencies only.
-      return {sources,text:sources.at(-1).text};
+      const current=JSON.parse(sources.at(-1).payload);
+      return {sources,text:ownerReadIntentText(current)};
     };
     const initial=source(),base=ownerReadGuard(guard,source);
     if(!parseCollectionRequest(initial.text)){

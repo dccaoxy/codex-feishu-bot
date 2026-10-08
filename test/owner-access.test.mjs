@@ -505,3 +505,42 @@ for(const text of [
  await toolCall(s.bot,tool,tool==='feishu_doc_read'?{documentId:'private'}:{api:'docx.v1.document.rawContent',payload:{path:{document_id:'private'}}});
  assert.equal(s.responses.at(-1)[1].success,false);assert.deepEqual(s.counts(),{calls:0,leases:0});
 });
+
+function setReadPost(s,content){
+ const d=JSON.parse(s.store.db.prepare('SELECT payload FROM inbox WHERE id=?').get('m1').payload);
+ d.message.message_type='post';d.content=content;d.message.content=JSON.stringify(content);
+ s.store.db.prepare('UPDATE inbox SET payload=? WHERE id=?').run(JSON.stringify(d),'m1');
+}
+for(const [tool,args,text] of [targetReads[0],targetReads[4],targetReads[5]])for(const locale of [false,true])test(`Issue37 trusted post read ${tool}/${args.api||''} locale=${locale}`,async t=>{
+ const s=targetFixture(t,text),post={title:'',content:[[{tag:'text',text}]]};setReadPost(s,locale?{zh_cn:post}:post);
+ await toolCall(s.bot,tool,args);assert.equal(s.responses.at(-1)[1].success,true);assert.ok(s.counts().calls>0);
+ const before=s.counts();await toolCall(s.bot,'feishu_doc_read',{documentId:'other'});assert.equal(s.responses.at(-1)[1].success,false);assert.deepEqual(s.counts(),before);
+});
+test('Issue37 post hyperlink uses its explicit target, not its display label',async t=>{
+ const s=targetFixture(t,'unused');setReadPost(s,{en_us:{title:'',content:[[{tag:'text',text:'读取 '},{tag:'a',text:'文档标题',href:'https://example.feishu.cn/docx/private'}]]}});
+ await toolCall(s.bot,'feishu_doc_read',{documentId:'private'});assert.equal(s.responses.at(-1)[1].success,true);
+});
+for(const priorType of ['post','image'])test(`Issue37 latest text steer replaces prior ${priorType} intent but retains recall dependency`,async t=>{
+ const s=targetFixture(t,'unused');setReadPost(s,{title:'历史资料',content:[[{tag:'text',text:'不要读取旧文档'}]]});
+ if(priorType==='image'){const d=JSON.parse(s.store.db.prepare('SELECT payload FROM inbox WHERE id=?').get('m1').payload);d.message.message_type='image';d.content={image_key:'fixture'};s.store.db.prepare('UPDATE inbox SET payload=? WHERE id=?').run(JSON.stringify(d),'m1');}
+ s.store.enqueue('m2','group',{kind:'message',user:'owner',content:{text:'读取 document_id private'},message:{message_id:'m2',chat_id:'group',chat_type:'group',message_type:'text'}});s.run.sourceIds.add('m2');
+ await toolCall(s.bot,'feishu_doc_read',{documentId:'private'});assert.equal(s.responses.at(-1)[1].success,true);assert.equal(s.counts().calls,2);
+ const before=s.responses.length;s.store.db.prepare("UPDATE inbox SET state='cancelled' WHERE id=?").run('m1');await toolCall(s.bot,'feishu_doc_read',{documentId:'private'});assert.ok(!s.responses.slice(before).some(([,r])=>r.success));assert.equal(s.counts().calls,2);
+});
+for(const content of [
+ {content:[[{tag:'text',text:'不要读取 document_id private'}]]},
+ {title:'引用',content:[[{tag:'text',text:'读取 document_id private'}]]},
+ {content:[[{tag:'text',text:'读取 document_id private'}],[{tag:'text',text:'不要继续'}]]},
+ {content:[[{tag:'text',text:'读取 document_id private'},{tag:'img',image_key:'fixture'}]]},
+ {content:'malformed'},
+])test(`Issue37 post ambiguity/malformed fails closed ${JSON.stringify(content)}`,async t=>{
+ const s=targetFixture(t,'unused');setReadPost(s,content);await toolCall(s.bot,'feishu_doc_read',{documentId:'private'});assert.equal(s.responses.at(-1)[1].success,false);assert.deepEqual(s.counts(),{calls:0,leases:0});
+});
+for(const stage of ['queue','response'])for(const change of ['recall','owner','payload'])test(`Issue37 post keeps ${change} guard during ${stage}`,async t=>{
+ const s=targetFixture(t,'unused',stage);setReadPost(s,{content:[[{tag:'text',text:'读取 document_id private'}]]});
+ const pending=toolCall(s.bot,'feishu_doc_read',{documentId:'private'});await s.waiting;
+ if(change==='recall')s.store.db.prepare("UPDATE inbox SET state='cancelled' WHERE id=?").run('m1');
+ if(change==='owner')s.bot.owner='other';
+ if(change==='payload')setReadPost(s,{content:[[{tag:'text',text:'读取 document_id other'}]]});
+ s.release();await pending;assert.ok(!s.responses.some(([,r])=>r.success));assert.equal(s.counts().calls,stage==='queue'?0:1);assert.ok(!JSON.stringify(s.responses).includes('PRIVATE_TARGET_SENTINEL'));
+});
