@@ -20,9 +20,13 @@ function parseEdit(text){
  const match=/^(https:\/\/[a-zA-Z0-9.-]+\/(?:docx|wiki)\/[a-zA-Z0-9_-]{1,200}\/?|(?:document_id|token)\s*[:=：]?\s*[a-zA-Z0-9_-]{1,200})(?=\s|的|$)/u.exec(rest);
  if(!match)return null;
  const tail=rest.slice(match[0].length).trim();
- if(/^(?:block_id|range|范围|不要|禁止|别)(?:\s|[:=：]|读取|读)/u.test(tail))return null;
- // 把/将 requires an actual edit action, not a reference, question or condition.
- if(/^(?:将|把)/u.test(prefix[0])&&!/^(?:的)?(?:标题|名称|内容|正文|文字)?\s*(?:修改为|改为|替换为|更新为)\s*\S/u.test(tail))return null;
+ // Do not turn an edit description into an unrestricted root grant. Ambiguous
+ // replacement prose may itself contain instructions; fail closed rather than
+ // discard a trailing restriction, conditional or explicit child selector.
+ if(/block_id|range|范围|不要|禁止|不得|不可|不能|勿|别|只|仅|如果|假如|除非|是否|引用|[?？]/iu.test(tail))return null;
+ const replacement=/^(?:的)?(?:标题|名称|内容|正文|文字)?\s*(?:修改为|改为|替换为|更新为)\s*[^,，;；。\n]+$/u.test(tail);
+ const subject=/^(?:的)?(?:标题|名称|内容|正文|文字)[。.!！]?$/u.test(tail);
+ if(/^(?:将|把)/u.test(prefix[0])?!replacement:!(replacement||subject||!tail))return null;
  let target;
  if(match[0].startsWith('https://'))target=readTarget(match[0]);
  else {const [,key,value]=/^(document_id|token)\s*[:=：]?\s*([a-zA-Z0-9_-]+)$/u.exec(match[0]);target={key,value};}

@@ -495,3 +495,13 @@ for(const stage of ['queue','response'])for(const change of ['steer','recall','o
  if(change==='recall')s.store.mark('m1','cancelled');if(change==='owner')s.bot.owner='other';s.release();await pending;
  assert.equal(s.counts().calls,stage==='queue'?0:1);assert.ok(!JSON.stringify(s.responses).includes('PRIVATE_TARGET_SENTINEL'));
 });
+
+for(const text of [
+ '修改 https://example.feishu.cn/docx/private 的标题，但不要读取正文',
+ '请将 https://example.feishu.cn/docx/private 的标题改为新标题，禁止读取正文',
+ '修改 https://example.feishu.cn/docx/private 的 block_id b',
+])for(const tool of ['feishu_doc_read','feishu_office_call'])test(`Issue37 restricted edit has zero outbound ${tool}: ${text}`,async t=>{
+ const s=targetFixture(t,text);
+ await toolCall(s.bot,tool,tool==='feishu_doc_read'?{documentId:'private'}:{api:'docx.v1.document.rawContent',payload:{path:{document_id:'private'}}});
+ assert.equal(s.responses.at(-1)[1].success,false);assert.deepEqual(s.counts(),{calls:0,leases:0});
+});

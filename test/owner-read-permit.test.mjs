@@ -114,3 +114,12 @@ test('Issue37 Wiki edit grants only its officially resolved Docx, never other co
  assert.doesNotThrow(()=>a.authorize('docx.v1.documentBlock.get',{path:{document_id:'doc',block_id:'b'}}));
  assert.throws(()=>a.authorize('docx.v1.document.get',{path:{document_id:'node'}}));
 });
+
+for(const text of [
+ '修改 https://example.feishu.cn/docx/doc 的标题，但不要读取正文',
+ '请将 https://example.feishu.cn/docx/doc 的标题改为新标题，禁止读取正文',
+ '修改 https://example.feishu.cn/docx/doc 的 block_id b',
+ '请将 https://example.feishu.cn/docx/doc 的标题改为新标题，只读取 block_id b',
+ '编辑 https://example.feishu.cn/docx/doc 的内容，如果批准后再读',
+ '编辑 https://example.feishu.cn/docx/doc 的内容，后续要求无法识别',
+])test(`Issue37 edit suffix cannot drop constraints: ${text}`,()=>assert.throws(()=>permit(text),/target_not_authorized/));
