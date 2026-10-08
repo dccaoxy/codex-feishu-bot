@@ -20,6 +20,13 @@ export const OFFICE_TOOLS=[
 function bounded(data){const text=JSON.stringify(data??null);return Buffer.byteLength(text)<=22000?{data,untrustedData:true}:{truncated:true,preview:text.slice(0,5000),note:'接口结果超过输出预算；预览不是完整结果。请缩小page_size/范围或按对象ID读取；写入不要重试。',untrustedData:true};}
 export class Office {
  constructor(feishu,ownerOAuth,{ownerReads=false}={}){this.feishu=feishu;this.ownerOAuth=ownerOAuth;this.ownerReads=ownerReads||Boolean(ownerOAuth);this.reader=new OwnerOfficeReader(feishu,ownerOAuth);}
+ needsReadGuard(name,a){
+  if(['feishu_office_collection','feishu_office_read_resources','feishu_office_drive_search','feishu_office_diagnose_document'].includes(name))return true;
+  if(name==='feishu_office_sheet_read')return Boolean(this.ownerOAuth);
+  if(name!=='feishu_office_call')return false;
+  const t=officeDefinition(a.api);
+  return Boolean((this.ownerOAuth||(this.ownerReads&&/^(docx|wiki)\./.test(t.name)))&&(OWNER_READ_APIS[t.name]||(t.method==='GET'&&/^(docx|wiki|drive|sheets|bitable)\./.test(t.name))));
+ }
  async execute(name,a,guard,authorize){
   if(typeof guard!=='function')throw Error('缺少Owner请求守卫');guard();a=structuredClone(a);
   if(name==='feishu_office_diagnose_document')return this.reader.diagnose(a.url,guard);
@@ -29,7 +36,7 @@ export class Office {
   if(name==='feishu_office_find'){
    if(typeof(a.query??'')!=='string'||(a.query||'').length>300)throw Error('查询过长');const q=(a.query||'').toLowerCase().split(/\s+/).filter(Boolean),offset=index(a.offset);
    const rows=OFFICE_CATALOG.filter(t=>q.every(w=>(t.name+' '+t.description).toLowerCase().includes(w)));
-   return {tools:rows.slice(offset,offset+20).map(({schema,...t})=>({...t,authorization:t.method==='GET'?'read':'current_owner_request_required',ownerReadScopes:OWNER_READ_APIS[t.name]?.scopes,callableIdentity:this.ownerOAuth&&(OWNER_READ_APIS[t.name]||(t.method==='GET'&&/^(docx|wiki|drive|sheets|bitable)\./.test(t.name)))?(this.ownerOAuth.enabled(t.name)&&OWNER_READ_APIS[t.name]?'owner_user_requires_local_binding':'owner_user_api_not_authorized'):this.ownerOAuth?.enabled(t.name)?'owner_user_requires_local_binding':t.tokens.includes('tenant')?'tenant_requires_granted_scope':'user_oauth_required'})),total:rows.length,nextOffset:offset+20<rows.length?offset+20:null};
+   return {tools:rows.slice(offset,offset+20).map(({schema,...t})=>({...t,authorization:t.method==='GET'?'read':'current_owner_request_required',ownerReadScopes:OWNER_READ_APIS[t.name]?.scopes,callableIdentity:this.needsReadGuard('feishu_office_call',{api:t.name})?(this.ownerOAuth?.enabled(t.name)&&OWNER_READ_APIS[t.name]?'owner_user_requires_local_binding':'owner_user_api_not_authorized'):this.ownerOAuth?.enabled(t.name)?'owner_user_requires_local_binding':t.tokens.includes('tenant')?'tenant_requires_granted_scope':'user_oauth_required'})),total:rows.length,nextOffset:offset+20<rows.length?offset+20:null};
   }
   if(name==='feishu_office_schema'){
    const t=officeDefinition(a.api),offset=index(a.offset),s=JSON.stringify(t.schema);return {api:t.name,schemaText:s.slice(offset,offset+5000),nextOffset:offset+5000<s.length?offset+5000:null,totalCharacters:s.length,tokens:t.tokens,ownerReadScopes:OWNER_READ_APIS[t.name]?.scopes,note:'拼接全部schemaText后才是完整JSON；权限仍由飞书校验。'};
@@ -52,7 +59,7 @@ export class Office {
   }
   if(name!=='feishu_office_call')throw Error('未知办公工具');
   const t=officeDefinition(a.api);
-  if((this.ownerOAuth||(this.ownerReads&&/^(docx|wiki)\./.test(t.name))) && (OWNER_READ_APIS[t.name] || (t.method==='GET' && /^(docx|wiki|drive|sheets|bitable)\./.test(t.name))))return boundedRead(await this.reader.session(guard).call(t.name,a.payload));
+  if(this.needsReadGuard(name,a))return boundedRead(await this.reader.session(guard).call(t.name,a.payload));
   const useUser=this.ownerOAuth?.enabled(t.name);
   if(useUser&&!t.tokens.includes('user'))throw Error('此API不支持用户身份');
   if(!useUser&&!t.tokens.includes('tenant'))throw Error('此API仅支持用户身份，请先在本机授权并明确配置此接口；不会自动切换身份');

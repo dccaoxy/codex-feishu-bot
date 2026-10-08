@@ -631,7 +631,7 @@ Owner可以直接说：`读取新羽群里的所有飞书文档`，或 `读取 F
 
 专用 `feishu_doc_read` 现在也接受标准Wiki链接，只在官方节点API实际返回Docx时读取。`feishu_office_call` 的Wiki解析结果可以在同一可信请求内继续用于Docx正文调用，下一条steer不能继承映射。OAuth未启用、scope不足、凭据不可用时不会改用应用身份。既有Sheet/Bitable能力保留，本期不增加Bitable或共享base/form支持。
 
-`feishu_office_diagnose_document` 对当前请求或本次群集合中的一个标准Docx/Wiki链接做只读A/B：A使用当前生产SDK blocks路径，B直接请求固定官方 `GET /open-apis/docx/v1/documents/{id}/blocks`，相同精确ID及分页参数；Wiki先解析node→obj。两臂均验证相同目标、API白名单、现有scope和Owner凭据，不提供模型可选身份、URL端点或token。它只返回诊断，不返回或记录正文。它不模拟旧部署；历史tenant403/user成功仅有合成回归，真实旧部署对照需后续明确授权。
+`feishu_office_diagnose_document` 对当前请求或本次群集合中的一个标准Docx/Wiki链接做只读A/B：A使用当前生产SDK blocks路径，B直接请求固定官方 `GET /open-apis/docx/v1/documents/{id}/blocks`，相同精确ID及分页参数；Wiki先解析node→obj。两臂均验证相同目标、API白名单、现有scope和Owner凭据，不提供模型可选身份、URL端点或token。它只返回诊断，不返回或记录正文。它不模拟旧部署；历史tenant403/user成功仅有合成回归，真实旧部署对照需后续明确授权。A/B仅比较blocks端点，不覆盖专用/批读工具的metadata前置调用；both_succeeded只代表本次两次块请求成功，不证明完整文档或全部生产读取步骤已完成。
 
 每次API调用最多等待15秒（含凭据、队列、网络），只读请求不自动重试；网络层可取消并限制1MiB响应。超时返回 `timeout`，不冒充403或本次成功。批读每次最多5资源，每资源一次有界块分页，返回 `page_pending`、`output_truncated`、`metadata_only`、`complete` 或 `incomplete`，并保留续页标记；完成当前页不代表其他资源或历史全部读完。
 

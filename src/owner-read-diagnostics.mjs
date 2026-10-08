@@ -34,6 +34,7 @@ export async function directDocx(api,payload,token,fetcher,signal,diagnostic){
 }
 export function compareReadDiagnostics(a,b){
  if(a.status==='success'&&b.status==='success')return 'both_succeeded';
+ if(a.status==='success'&&b.status!=='success')return ['timeout','reauthorization_required','scope_missing'].includes(b.reason)?({timeout:'timeout',reauthorization_required:'token_unavailable',scope_missing:'scope'}[b.reason]):'api_path_difference';
  if(b.status==='success'&&a.status!=='success'){
   if(a.reason==='target_not_authorized')return 'local_permit';
   return a.identity==='tenant'?'identity_routing':'api_path_difference';

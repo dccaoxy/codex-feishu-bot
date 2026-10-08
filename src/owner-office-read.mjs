@@ -68,7 +68,9 @@ export class OwnerOfficeReader{
    }
    if(directCall){fn=token=>directDocx(api,payload,token,this.fetcher,signal,diagnostic);}
    let lease;diagnostic.stage='scope_token';
-   const previous=checks.slice(),leaseGuard=()=>{guard();for(const c of previous)c();};
+   // Each lease owns only its current permit. The session checks historical
+   // leases flatly; recursively capturing them doubles validation work per API.
+   const leaseGuard=()=>{guard();permit();};
    try{lease=await wait(this.oauth.lease(api,leaseGuard,rule.scopes));}catch(e){check();throw e instanceof OwnerReadError?e:readError('reauthorization_required');}
    checks.push(lease.check);check();active();diagnostic.scope='granted';diagnostic.stage='queue';
    let data;

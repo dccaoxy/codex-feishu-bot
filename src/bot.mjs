@@ -781,7 +781,7 @@ ${this.ownerGroups?OWNER_GROUP_INSTRUCTIONS:''}` };
             const owner=run.officeOwner;
             const officeGuard=()=>{guard();if(!owner||owner!==this.owner||this.closed)throw Error('Owner办公请求已失效');};
             completionGuard=officeGuard;
-            result=await this.office.execute(p.tool,a,await this.officeReadGuard(run,officeGuard),async proposal=>{
+            result=await this.office.execute(p.tool,a,this.office.needsReadGuard?.(p.tool,a)?await this.officeReadGuard(run,officeGuard):officeGuard,async proposal=>{
               const permit=await this.requestOfficeApproval(run,m.id,proposal,officeGuard);
               completionGuard=()=>{officeGuard();permit.check();};return permit;
             });

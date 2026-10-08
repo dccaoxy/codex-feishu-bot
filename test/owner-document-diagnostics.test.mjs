@@ -92,3 +92,22 @@ test('actual SDK adapter evidence records HTTP status and user header, with no t
  const r=await new OwnerOfficeReader(transport,f.oauth).session(f.guard).call('docx.v1.documentBlock.list',{path:{document_id:'doc'}});
  assert.equal(requests,1);assert.equal(r.diagnostic.httpStatus,200);assert.equal(r.diagnostic.outbound,true);assert.equal(r.diagnostic.feishuCode,0);
 });
+
+test('a successful SDK read plus direct denial is a path difference, not an overall resource ACL diagnosis',async()=>{
+ const f=fixture();f.setFetchError({response:{status:403,data:{code:1770032}}});
+ const r=await f.reader.diagnose(url,f.guard);assert.equal(r.A.status,'success');assert.equal(r.classification,'api_path_difference');
+});
+test('SDK timeout aborts the actual transport, without retrying',async()=>{
+ const f=fixture(),transport=new Feishu({feishu:{appId:'fixture',appSecret:'fixture'}});let requests=0,aborted=0;
+ transport.client.httpInstance.defaults.adapter=config=>new Promise((resolve,reject)=>{requests++;config.signal.addEventListener('abort',()=>{aborted++;reject({code:'ERR_CANCELED'});},{once:true});});
+ const reader=new OwnerOfficeReader(transport,f.oauth,{timeoutMs:30});
+ await assert.rejects(reader.session(f.guard).call('docx.v1.documentBlock.list',{path:{document_id:'doc'}}),e=>e.readCode==='timeout'&&e.diagnostic.outbound&&e.diagnostic.httpStatus===null);
+ assert.equal(requests,1);assert.equal(aborted,1);
+});
+
+test('five Wiki resources use flat independent lease guards, not exponential source validation',async()=>{
+ const f=fixture();let checks=0;const guard=ownerReadGuard(()=>{},()=>{checks++;return {text:'读取 token wiki'};});
+ const r=await f.reader.resources(Array(5).fill('https://example.feishu.cn/wiki/wiki'),guard);
+ assert.equal(r.results.length,5);assert.ok(r.results.every(x=>x.status==='success'));assert.equal(f.counts().leases,15);
+ assert.ok(checks<10000,`source checks must stay bounded: ${checks}`);
+});

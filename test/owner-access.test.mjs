@@ -153,15 +153,15 @@ test('Documents explicit guard fences queued SDK without command or tool async c
 });
 const localTools=['feishu_thread_read','feishu_threads_search','owner_groups',...['status','message','search','context','changes','daily_digest','topics','topic_read','send'].map(n=>'owner_group_'+n),'aegpc_repository_approval',...['create','read','append','update_text','format_text','permissions'].map(n=>'feishu_doc_'+n),'feishu_send_file',...['find','schema','call','permissions','sheet_read','sheet_write'].map(n=>'feishu_office_'+n)];
 for(const tool of localTools)for(const turnId of ['old-turn','',undefined,42])test(`${tool} rejects invalid request turn ${String(turnId)}`,async t=>{
- const {bot,event}=setup(t);bot.onMessage(event);toolRun(bot);let calls=0;const call=async()=>{calls++;return {};};bot.history.read=call;bot.history.search=call;bot.ownerGroups={execute:call};bot.repositoryApproval.execute=call;bot.documents.execute=call;bot.office.execute=call;bot.requestOfficeApproval=async()=>({check(){},consume(){}});bot.sendFile=call;bot.rpc.respond=call;bot.rpc.reject=call;
+ const {bot,event}=setup(t);bot.onMessage(event);toolRun(bot);let calls=0;const call=async()=>{calls++;return {};};bot.history.read=call;bot.history.search=call;bot.ownerGroups={execute:call};bot.repositoryApproval.execute=call;bot.documents.execute=call;bot.office.execute=call;bot.office.needsReadGuard=()=>false;bot.requestOfficeApproval=async()=>({check(){},consume(){}});bot.sendFile=call;bot.rpc.respond=call;bot.rpc.reject=call;
  await bot.serverRequest({id:51,method:'item/tool/call',params:{threadId:'t',turnId,tool,arguments:{}}});assert.equal(calls,0);
 });
 for(const tool of localTools)test(`${tool} result discarded if turn switches during await`,async t=>{
- const {bot,event}=setup(t);bot.onMessage(event);const run=toolRun(bot);let opened,release;const opening=new Promise(r=>{opened=r;});const call=()=>{opened();return new Promise(r=>{release=r;});};bot.history.read=call;bot.history.search=call;bot.ownerGroups={execute:call};bot.repositoryApproval.execute=call;bot.documents.execute=call;bot.office.execute=call;bot.requestOfficeApproval=async()=>({check(){},consume(){}});bot.sendFile=call;const responses=[];bot.rpc.respond=(...a)=>responses.push(a);
+ const {bot,event}=setup(t);bot.onMessage(event);const run=toolRun(bot);let opened,release;const opening=new Promise(r=>{opened=r;});const call=()=>{opened();return new Promise(r=>{release=r;});};bot.history.read=call;bot.history.search=call;bot.ownerGroups={execute:call};bot.repositoryApproval.execute=call;bot.documents.execute=call;bot.office.execute=call;bot.office.needsReadGuard=()=>false;bot.requestOfficeApproval=async()=>({check(){},consume(){}});bot.sendFile=call;const responses=[];bot.rpc.respond=(...a)=>responses.push(a);
  const pending=toolCall(bot,tool);await opening;run.turn='next-turn';release({text:'synthetic'});await pending;assert.deepEqual(responses,[]);
 });
 for(const tool of localTools)test(`${tool} current turn executes and responds once`,async t=>{
- const {bot,event}=setup(t);bot.onMessage(event);toolRun(bot);let calls=0;const call=async()=>{calls++;return {value:'synthetic'};};bot.history.read=call;bot.history.search=call;bot.ownerGroups={execute:call};bot.repositoryApproval.execute=call;bot.documents.execute=call;bot.office.execute=call;bot.requestOfficeApproval=async()=>({check(){},consume(){}});bot.sendFile=call;const responses=[];bot.rpc.respond=(...a)=>responses.push(a);await toolCall(bot,tool);assert.equal(calls,1);assert.equal(responses.length,1);assert.equal(responses[0][1].success,true);
+ const {bot,event}=setup(t);bot.onMessage(event);toolRun(bot);let calls=0;const call=async()=>{calls++;return {value:'synthetic'};};bot.history.read=call;bot.history.search=call;bot.ownerGroups={execute:call};bot.repositoryApproval.execute=call;bot.documents.execute=call;bot.office.execute=call;bot.office.needsReadGuard=()=>false;bot.requestOfficeApproval=async()=>({check(){},consume(){}});bot.sendFile=call;const responses=[];bot.rpc.respond=(...a)=>responses.push(a);await toolCall(bot,tool);assert.equal(calls,1);assert.equal(responses.length,1);assert.equal(responses[0][1].success,true);
 });
 for(const stage of ['queue','response'])test(`office tools invalidate captured Owner identity at ${stage}`,async t=>{
  const {bot,event,config}=setup(t);bot.onMessage(event);const run=toolRun(bot);let validOwner=bot.owner,network=0;const responses=[];bot.rpc.respond=(...a)=>responses.push(a);
@@ -471,4 +471,14 @@ for(const [api,child] of [['bitable.v1.appTableView.get','view_id'],['bitable.v1
  const s=targetFixture(t,`读取 https://example.feishu.cn/base/base0 table_id tbl0 ${child} sub0, app_token base1 table_id tbl1 ${child} sub1`),ok=i===j&&j===k;
  await toolCall(s.bot,'feishu_office_call',{api,payload:{path:{app_token:`base${i}`,table_id:`tbl${j}`,[child]:`sub${k}`}}});
  assert.deepEqual(s.counts(),{calls:ok?1:0,leases:ok?1:0});assert.equal(s.responses[0][1].success,ok);
+});
+
+for(const oauthEnabled of [false,true])test(`Issue37 keeps trusted Owner post Office writes/find/schema independent of read grammar: OAuth=${oauthEnabled}`,async t=>{
+ const s=officeFixture(t);s.config.ownerOAuth={enabled:oauthEnabled,apis:[]};
+ const row=s.store.db.prepare('SELECT payload FROM inbox WHERE id=?').get('m1'),d=JSON.parse(row.payload);d.message.message_type='post';
+ s.store.db.prepare('UPDATE inbox SET payload=? WHERE id=?').run(JSON.stringify(d),'m1');
+ const results=[];s.bot.rpc.respond=(id,result)=>results.push(result);
+ await (await officePending(s)).promise;assert.equal(s.writes.length,1);assert.equal(results.at(-1).success,true);
+ await toolCall(s.bot,'feishu_office_find',{query:'docx'});assert.equal(results.at(-1).success,true);
+ await toolCall(s.bot,'feishu_office_schema',{api:'docx.v1.document.get'});assert.equal(results.at(-1).success,true);
 });
