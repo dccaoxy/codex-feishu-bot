@@ -23,4 +23,3 @@ export function ownerReadIntentText(data,botId) {
   // must not be flattened into a fresh command by the read-intent parser.
   return lines.join('\n').trim();
 }
-
