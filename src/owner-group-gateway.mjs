@@ -1,3 +1,4 @@
+import {ownerReadIntentText} from './owner-read-intent.mjs';
 import {assessSend} from './send-semantics.mjs';
 import {memberNames} from './member-names.mjs';
 import {SendContext} from './send-context.mjs';
@@ -53,7 +54,9 @@ export class OwnerGroupGateway {
   allowed(chat){return this.config.groups?.enabled&&this.config.groups.allowedChatIds.includes(chat)&&!this.groups.closed&&!this.groups.store.stopped(chat)&&Boolean(this.groups.store.db.prepare('SELECT 1 FROM history_sync WHERE chat=? UNION SELECT 1 FROM messages WHERE chat=? LIMIT 1').get(chat,chat));}
   context(data,thread,live){
     const m=data.message;
-    const c={type:m.chat_type,chat:m.chat_id,id:m.message_id,user:data.user,thread,text:m.message_type==='text'?String(data.content.text||'').trim():'',live};
+    // Read authority shares the host parser; unrelated send/write context stays unchanged.
+    let readText='';try{readText=ownerReadIntentText(data,this.groups.policy?.botId);}catch{}
+    const c={type:m.chat_type,chat:m.chat_id,id:m.message_id,user:data.user,thread,readText,text:m.message_type==='text'?String(data.content.text||'').trim():'',live};
     Object.freeze(c);this.contexts.add(c);
     return c;
   }

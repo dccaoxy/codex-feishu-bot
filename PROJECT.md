@@ -1,3 +1,24 @@
+# 当前定向返工：Issue #37 post 集合与可信 bot-at 八格矩阵（2026-10-08）
+
+- **Task Source / 顺序**：用户只批准本轮矩阵先行集中修复。先在旧代码651daa661251e59308c25e49bbf5c1c37633a686仅添加入站矩阵测试并执行，再改生产代码。夹具走onMessage → inbox → message → run/turn-start → serverRequest → Reader → 合成SDK出站；不直接调用解析helper，也不手工建立run/context。没有真实模型或飞书请求。
+- **矩阵定义**：无mention为Owner私聊，有mention为授权群Owner @；群内无mention另作拒绝检查。旧代码八格5通过/3失败；修复后八格全通过：
+
+| 消息 | 目标 | mention/入口 | 旧代码 | 修复后 |
+| --- | --- | --- | --- | --- |
+| text | 单链接 | 无/私聊 | PASS | PASS |
+| text | 单链接 | bot-at/群 | PASS | PASS |
+| text | 群集合 | 无/私聊 | PASS | PASS |
+| text | 群集合 | bot-at/群 | PASS | PASS |
+| post | 单链接 | 无/私聊 | PASS | PASS |
+| post | 单链接 | bot-at/群 | FAIL | PASS |
+| post | 群集合 | 无/私聊 | FAIL | PASS |
+| post | 群集合 | bot-at/群 | FAIL | PASS |
+
+- **Implementation**：提取共享ownerReadIntentText，集合上下文保存专用readText而不改变既有发送/写入text语义。读取守卫和集合使用同一可信解析结果；post at必须节点user_id和消息mentions都匹配配置bot ID才可忽略，无关/伪造at保持拒绝。
+- **拒绝矩阵**：非Owner、无mention群消息、非bot mention、at与可信mention不匹配均零出站；请求撤回、来源payload变更、Owner变化、镜像来源撤回也零出站。另验证queue/response等待期间撤回、mention元数据变化、Owner变化，结果失效（queue零出站；response最多已发生的一次，不再继续）。旧代码后四项集合拒绝测试因前置集合失败而未进入目标断言，修复后实际通过，不称为旧代码拒绝证据。
+- **Validation**：读取/集合/Owner组合766/766通过；新增等待期间测试的最终矩阵23/23通过。使用已安装官方Codex运行时0.162.0-alpha.2与无飞书凭据/无Shared配置临时副本，doctor与无模型smoke退出0。Group/Knowledge探针均因固定0.159.0不匹配退出1，未放宽锁定；没有真实模型/飞书业务验收。全量1513/1513（零失败/取消/跳过）及check/diff通过。独立Reviewer须针对准确head复验矩阵及拒绝场景，旧PASS不替代新head。
+- **Remaining / 交接**：仅本轮两项P2，不扩大scope或修改权限/审批/工具配置。未读真实凭据、未真实飞书/模型调用、未改生产、未Merge或部署；真实403业务验收不在本轮证据中。保持原Draft PR38，准确head提交/推送与独立审核见远端回执，不自动继续下一轮。
+
 # 当前定向返工：Issue #37 可信 post 与文本 steer（2026-10-08）
 
 - **Task Source / Implementation**：仅本轮手动限定范围。officeReadGuard不再要求所有来源均为text；旧来源继续校验Owner、消息ID、群、状态与完整payload快照，仅最新消息提取读取意图。当前post支持文本/链接节点及语言包装，保留段落边界并拒绝无法可靠解释的结构；不从历史或模型数据扩权。

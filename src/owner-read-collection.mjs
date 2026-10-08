@@ -152,7 +152,7 @@ function links(kind,raw){
 
 export async function createReadCollection(text,gateway,context,guard){
  const request=parseCollectionRequest(text);if(!request)return null;
- guard();if(!gateway||!context||context.text!==text)denied();gateway.authorize(context);
+ guard();if(!gateway||!context||context.readText!==text)denied();gateway.authorize(context);
  const directory=await gateway.directory(context);guard();gateway.authorize(context);
  const matches=groupMatches(request.groupLabel,directory);if(matches.length!==1)denied();
  const group=matches[0],store=gateway.groups.store,cache=gateway.cache.get(group.chat);
@@ -160,7 +160,7 @@ export async function createReadCollection(text,gateway,context,guard){
  const name=group.displayName,allowlistSnapshot=JSON.stringify(gateway.config.groups.allowedChatIds);
  const check=()=>{
   guard();gateway.authorize(context);
-  if(context.text!==text||JSON.stringify(gateway.config.groups.allowedChatIds)!==allowlistSnapshot||!gateway.allowed(group.chat)||gateway.cache.get(group.chat)?.name!==name)denied();
+  if(context.readText!==text||JSON.stringify(gateway.config.groups.allowedChatIds)!==allowlistSnapshot||!gateway.allowed(group.chat)||gateway.cache.get(group.chat)?.name!==name)denied();
   // A later fetched directory may reveal a newly ambiguous name/alias.
   const current=gateway.config.groups.allowedChatIds.filter(chat=>gateway.allowed(chat)).flatMap(chat=>{
    const c=gateway.cache.get(chat);return c?[{chat,displayName:c.name,reference:directory.find(g=>g.chat===chat)?.reference||''}]:[];

@@ -1,3 +1,4 @@
+import {ownerReadIntentText} from './owner-read-intent.mjs';
 import {ownerReadGuard} from './owner-read-permit.mjs';
 import {createReadCollection,parseCollectionRequest} from './owner-read-collection.mjs';
 import {OWNER_READ_GUARD} from './owner-office-read.mjs';
@@ -13,31 +14,6 @@ import { randomBytes, randomUUID, createHash } from 'node:crypto';
 import { formFields, parseField, authorizationUrl, fieldOptions, validateForm } from './elicitation.mjs';
 import { History, TOOLS } from './history.mjs';
 import { chunks, safeError } from './feishu.mjs';
-
-// Extract only the current trusted inbox input. Older sources remain identity,
-// payload and recall dependencies, never contributors to the current intent.
-function ownerReadIntentText(data) {
-  const content=data.content;
-  if(data.message.message_type==='text'&&typeof content?.text==='string')return content.text;
-  if(data.message.message_type!=='post'||!content||typeof content!=='object')throw Error('当前读取来源无效');
-  const post=content.content?content:(content.zh_cn||content.en_us||Object.values(content)[0]);
-  if(!post||!Array.isArray(post.content)||(post.title!==undefined&&typeof post.title!=='string'))throw Error('当前读取来源无效');
-  const lines=[];
-  if(post.title)lines.push(post.title);
-  for(const row of post.content){
-    if(!Array.isArray(row))throw Error('当前读取来源无效');
-    let line='';
-    for(const node of row){
-      if(node?.tag==='text'&&typeof node.text==='string')line+=node.text;
-      else if(node?.tag==='a'&&typeof node.href==='string')line+=node.href;
-      else throw Error('当前读取来源无效');
-    }
-    if(line.trim())lines.push(line);
-  }
-  // Keep paragraph boundaries: quoted/history/conditional multi-line content
-  // must not be flattened into a fresh command by the read-intent parser.
-  return lines.join('\n').trim();
-}
 
 export const HELP = `飞书 · 本地 Codex
 
@@ -933,7 +909,7 @@ ${this.ownerGroups?OWNER_GROUP_INSTRUCTIONS:''}` };
       });
       // A steer replaces read intent; older inputs remain revocation dependencies only.
       const current=JSON.parse(sources.at(-1).payload);
-      return {sources,text:ownerReadIntentText(current)};
+      return {sources,text:ownerReadIntentText(current,this.ownerAccess?.groups?.policy?.botId)};
     };
     const initial=source(),base=ownerReadGuard(guard,source);
     if(!parseCollectionRequest(initial.text)){
