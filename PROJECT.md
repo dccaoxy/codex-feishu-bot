@@ -1,3 +1,9 @@
+# 当前返工：Issue #37 Docx 全读取路径 scope（2026-10-08）
+
+- **Task Source / Implementation**：最新P1指出上轮只修rawContent遗漏元数据/blocks。已实时读取四个官方Markdown权限表，元数据、blocks列表、单块、子块均明确接受docx:document或docx:document:readonly任一；逐接口补齐固定策略与文档链接，不修改OAuth申请、生产配置或写权限。
+- **Validation**：本轮专项201/201通过，真实OwnerOAuth租约配合合成记录覆盖各接口两种scope与无关scope拒绝、专用文档工具、镜像Docx/Wiki集合、A/B两臂及缺scope零出站；集合保留跨群拒绝与撤销授权检查。无飞书凭据临时副本doctor与无模型smoke退出0；check/diff及全量1462/1462通过（零失败/取消/跳过）；独立审查以PR准确head回执为准。
+- **Remaining / 交接**：同一分支及Draft PR #38，未真实读取飞书、调用模型、新增scope、改生产配置、Merge或部署。真实403与候选部署验收仍未验证。原生Group/Knowledge版本不匹配边界保持，不将离线回归称为真实原生隔离通过。提交推送与独立审查以远端准确head回执为准。
+
 # 当前返工：Issue #37 scope 等价授权与隔离探针（2026-10-08）
 
 - **Task Source / Implementation**：用户最新两项P2。rawContent固定策略新增官方支持的已有docx:document替代scope，复用租约的任一匹配与持续校验；不修改OAuth申请、配置或写API。Group/Knowledge初始及恢复探针改为call_id关联、namespace/name分派，共用断言，拒绝缺失/重复/未知响应。

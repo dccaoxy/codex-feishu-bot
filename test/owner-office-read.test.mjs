@@ -56,7 +56,7 @@ test('fixed policy matches fixed SDK, contains no write or permission endpoints'
  const client=new Client({appId:'fixture',appSecret:'fixture',logger:{info(){},error(){},warn(){},debug(){},trace(){}}});
  assert.deepEqual(Object.keys(OWNER_READ_APIS).sort(),Object.keys(payloads).sort());
  for(const [api,rule] of Object.entries(OWNER_READ_APIS)){
-  assert.ok(rule.scopes.every(s=>/:read(?:only)?$|:retrieve$/.test(s)||(api==='docx.v1.document.rawContent'&&s==='docx:document')));
+  assert.ok(rule.scopes.every(s=>/:read(?:only)?$|:retrieve$/.test(s)||(['docx.v1.document.get','docx.v1.document.rawContent','docx.v1.documentBlock.list','docx.v1.documentBlock.get','docx.v1.documentBlockChildren.get'].includes(api)&&s==='docx:document')));
   if(OWNER_READ_SPECIAL.includes(api))continue;const def=officeDefinition(api);assert.ok(def.tokens.includes('user'));assert.ok(def.method==='GET'||api==='drive.v1.meta.batchQuery');assert.equal(typeof api.split('.').reduce((v,k)=>v[k],client),'function');
  }
 });
@@ -161,4 +161,21 @@ test('rawContent equivalent grant is rechecked before transport',async t=>{
  const f=await fixture(t),api='docx.v1.document.rawContent';f.vault.write(f.key,{...f.record,scopes:['docx:document']});
  f.f.call=async fn=>{f.vault.write(f.key,{...f.record,scopes:[]});return fn();};
  await assert.rejects(f.reader.session(guard).call(api,payloads[api]),e=>e.readCode==='scope_missing');assert.equal(f.calls.length,0);
+});
+
+const docxReads=['docx.v1.document.get','docx.v1.documentBlock.list','docx.v1.documentBlock.get','docx.v1.documentBlockChildren.get'];
+for(const api of docxReads)for(const scope of ['docx:document','docx:document:readonly',null])test(`${api} exact alternative scope ${scope}`,async t=>{
+ const f=await fixture(t),record={...f.record,scopes:scope?[scope]:['docs:doc']};f.vault.write(f.key,record);
+ const work=()=>f.reader.session(guard).call(api,payloads[api]);
+ if(scope){const r=await work();assert.equal(r.identity,'owner-user');assert.equal(f.calls.length,1);assert.equal(f.calls[0].opts.lark[Reflect.ownKeys(f.calls[0].opts.lark)[0]],'fixture-uat');}
+ else{await assert.rejects(work(),e=>e.readCode==='scope_missing');assert.equal(f.calls.length,0);}
+ assert.deepEqual(f.vault.read(f.key),record);
+});
+for(const scope of ['docx:document','docx:document:readonly'])test(`dedicated read and both diagnostic arms accept ${scope}`,async t=>{
+ const f=await fixture(t);f.vault.write(f.key,{...f.record,scopes:[scope]});f.outputs.set('docx.v1.document.get',{document:{revision_id:3}});
+ const docs=new Documents(f.f,()=> 'owner',f.reader);await docs.execute('feishu_doc_read',{documentId:'doc'},guard);
+ assert.deepEqual(f.calls.map(c=>c.api),['docx.v1.document.get','docx.v1.documentBlock.list']);
+ let direct=0;f.reader.fetcher=async(url,options)=>{direct++;assert.equal(url.pathname,'/open-apis/docx/v1/documents/doc/blocks');assert.equal(options.method,'GET');assert.equal(options.headers.Authorization,'Bearer fixture-uat');return new Response(JSON.stringify({code:0,data:{items:[],has_more:false}}));};
+ const r=await f.reader.diagnose('https://example.feishu.cn/docx/doc',guard);assert.equal(r.classification,'both_succeeded');assert.equal(r.A.scope,'granted');assert.equal(r.B.scope,'granted');assert.equal(direct,1);assert.equal(f.calls.length,3);
+ f.vault.write(f.key,{...f.record,scopes:[]});const denied=await f.reader.diagnose('https://example.feishu.cn/docx/doc',guard);assert.equal(denied.classification,'scope');assert.equal(denied.A.outbound,false);assert.equal(denied.B.outbound,false);assert.equal(direct,1);assert.equal(f.calls.length,3);
 });

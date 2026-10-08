@@ -652,3 +652,5 @@ Owner可以直接说：`读取新羽群里的所有飞书文档`，或 `读取 F
 [rawContent 官方接口](https://open.feishu.cn/document/server-docs/docs/docs/docx-v1/document/raw_content)的本地只读策略接受已有 `docx:document:readonly` 或 `docx:document`，任一满足即可；这只是该读取接口的授权匹配，不新增 OAuth 申请、不授予写 API，也不将 scope 名称按前缀泛化。缺少两者仍在出站前拒绝。
 
 Group/Knowledge 探针根据调用 ID 关联响应，再按 namespace/工具名检查预期；首次和恢复检查共用断言，新增攻击调用不会改变 skills 的预期位置。合成协议回归不替代匹配固定 Codex 版本的原生隔离验证。
+
+Docx 元数据、blocks 列表、单块及子块读取同样接受上述两种已有 scope（任一即可），与 rawContent 一致。接口权限依据：[元数据](https://open.feishu.cn/document/server-docs/docs/docs/docx-v1/document/get.md)、[blocks](https://open.feishu.cn/document/server-docs/docs/docs/docx-v1/document/list.md)、[单块](https://open.feishu.cn/document/server-docs/docs/docs/docx-v1/document-block/get.md)、[子块](https://open.feishu.cn/document/server-docs/docs/docs/docx-v1/document-block/get-2.md)。匹配只针对固定读取 API，不推导其他 scope 或新增写入能力。

@@ -258,3 +258,17 @@ test('Issue37 collection diagnosis retains boundary, exact Wiki object and sourc
  const denied=await f.call('feishu_office_diagnose_document',{url:link('docx','private')});assert.equal(denied.data.classification,'local_permit');assert.equal(direct,1);
  f.change('source-recall');await f.call('feishu_office_diagnose_document',{url:link('wiki','node')});assert.equal(direct,1);
 });
+
+for(const scope of ['docx:document','docx:document:readonly'])test(`mirrored Docx/Wiki collection with real OAuth lease and ${scope}`,async t=>{
+ const {OwnerOAuth,binding}=await import('../src/owner-oauth.mjs');
+ const f=fixture(t);let record={binding:binding(f.config,'owner'),generation:'fixture',allowedApis:Object.keys(OWNER_READ_APIS),scopes:[scope,'wiki:wiki:readonly'],accessToken:'fixture-user-token',expiresAt:Date.now()+3600000};
+ const oauth=new OwnerOAuth(f.config,()=>f.bot.owner,{vault:{unlock:async()=>null,read:()=>record,locked:async fn=>fn()}});
+ f.bot.office.reader.oauth=oauth;f.bot.office.ownerOAuth=oauth;
+ f.add('a','doc-source',link('docx','doc'));f.add('a','wiki-source',link('wiki','node'));f.add('b','other-source',link('docx','other'));
+ f.outputs.set('wiki.v2.space.getNode',{node:{obj_type:'docx',obj_token:'resolved'}});
+ const listed=await f.call('feishu_office_collection');assert.equal(listed.success,true);assert.equal(listed.data.total,2);
+ const r=await f.call('feishu_office_read_resources',{urls:listed.data.resources.map(x=>x.url)});
+ assert.equal(r.success,true);assert.ok(r.data.results.every(x=>x.status==='success'&&x.completion==='complete'&&x.identity==='owner-user'));assert.equal(f.calls.length,5);
+ assert.equal((await f.read('other')).success,false);assert.equal(f.calls.length,5);
+ record={...record,scopes:['wiki:wiki:readonly']};const denied=await f.call('feishu_office_read_resources',{urls:[link('docx','doc')]});assert.equal(denied.data.results[0].reason,'scope_missing');assert.equal(f.calls.length,5);
+});
