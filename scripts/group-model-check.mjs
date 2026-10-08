@@ -1,3 +1,4 @@
+import {assertProbeOutputs} from './group-probe-assertions.mjs';
 import {knowledgeThreadParams} from '../src/knowledge-worker.mjs';
 const knowledge=process.argv.includes('--knowledge');
 // Offline protocol probe: a local fake provider requests adversarial built-ins.
@@ -10,6 +11,11 @@ const root=fs.mkdtempSync(path.join(os.tmpdir(),'group-probe-'));fs.mkdirSync(pa
 fs.writeFileSync(path.join(root,'config.toml'),GROUP_STARTUP_CONFIG);
 const sentinel=path.join(root,'private.txt');fs.writeFileSync(sentinel,'PRIVATE_SENTINEL_MUST_NOT_REACH_MODEL');
 const calls=[
+ {name:'feishu_office_diagnose_document',args:{url:'https://example.feishu.cn/docx/private'}},
+ {name:'feishu_office_collection',args:{}},
+ {name:'feishu_office_read_resources',args:{urls:['https://example.feishu.cn/docx/private']}},
+ {name:'feishu_office_drive_search',args:{query:'private'}},
+ {name:'feishu_office_sheet_read',args:{spreadsheetToken:'private',range:'tab!A1:A2'}},
  {namespace:'skills',name:'list',args:{authority:{kind:'orchestrator'}}},
  {namespace:'skills',name:'list',args:{authority:{kind:'executor'}}},
  {namespace:'skills',name:'read',args:{package:root,resource:sentinel}},
@@ -42,9 +48,7 @@ try{
  const allowed=new Set([...(knowledge?[]:['group_search','group_context','group_changes','group_message']),'request_user_input','skills.list','skills.read']);
  assert.equal(names.includes('group_search'),!knowledge);assert.ok(names.every(n=>allowed.has(n)),`Unexpected tools: ${names.filter(n=>!allowed.has(n)).join(',')}`);
  const outputs=body.input.filter(x=>x.type==='function_call_output');assert.equal(outputs.length,calls.length);
- for(const x of outputs.slice(0,2)){if(x.output.startsWith('{'))assert.deepEqual(JSON.parse(x.output).skills,[]);else assert.match(x.output,/unsupported|not found|unknown/i);}
- assert.match(outputs[2].output,/error|invalid|not found|not available|unknown|failed|unsupported/i);
- for(const [i,x] of outputs.entries()){if(calls[i].name==='group_search'&&!knowledge)assert.match(x.output,/GROUP_ALLOWED_TOOL_OK/);else if(i>=3)assert.match(x.output,/unsupported|not found|unknown/i);}
+ assertProbeOutputs(calls,outputs,{knowledge});
  assert.ok(!JSON.stringify(payloads).includes('PRIVATE_SENTINEL_MUST_NOT_REACH_MODEL'));
  if(!knowledge){
  // Restart the process and resume the persisted thread, then repeat all attacks.
@@ -59,8 +63,7 @@ try{
  const resumedNames=[];function gather(t,prefix=''){if(t.type==='namespace')for(const x of t.tools||[])gather(x,t.name+'.');else resumedNames.push(prefix+(t.name||t.type));}for(const t of again.tools||[])gather(t);
  assert.ok(resumedNames.includes('group_search'));assert.ok(resumedNames.every(n=>allowed.has(n)),JSON.stringify(resumedNames));
  const resumedOutputs=again.input.filter(x=>x.type==='function_call_output').slice(-calls.length);
- assert.equal(resumedOutputs.length,calls.length);for(const x of resumedOutputs.slice(0,2)){if(x.output.startsWith('{'))assert.deepEqual(JSON.parse(x.output).skills,[]);else assert.match(x.output,/unsupported|not found|unknown/i);}
- assert.match(resumedOutputs[2].output,/error|invalid|not found|not available|unknown|failed|unsupported/i);for(const [i,x] of resumedOutputs.entries()){if(calls[i].name==='group_search')assert.match(x.output,/GROUP_ALLOWED_TOOL_OK/);else if(i>=3)assert.match(x.output,/unsupported|not found|unknown/i);}
+ assertProbeOutputs(calls,resumedOutputs,{knowledge});
  assert.ok(!JSON.stringify(payloads).includes('PRIVATE_SENTINEL_MUST_NOT_REACH_MODEL'));
  }
  console.log(JSON.stringify({knowledge, persistentResume:!knowledge,version:GROUP_CODEX_VERSION,tools:names,adversarialCalls:calls.length*(knowledge?1:2),result:'PASS: empty skill authorities; private file/shell attempts rejected'},null,2));

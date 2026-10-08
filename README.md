@@ -536,10 +536,127 @@ node scripts/owner-oauth.mjs refresh-check --config /绝对路径/config.local.j
 
 授权工具读取现有配置和只读SQLite中的Owner，以官方用户信息接口核对同应用 `open_id`，不按姓名猜测或更换Owner。凭据加密保存到 `storageDir/owner-oauth/credentials.enc`，目录0700/文件0600，AES-256-GCM密钥存macOS钥匙串；沿用Git忽略的data目录，禁止放在模型工作目录、共享盘或提交任何真实凭据。密钥不进入命令参数/环境，回调和Token错误不输出原文。macOS首次访问钥匙串可能要求本人批准；不能仅因Git忽略就视作加密。拥有同一macOS账号完整本机执行能力的Owner仍属于信任边界，不能防御该账号被入侵。
 
-授权保存**不自动修改生产配置或重启服务**。部署经过审核的实现后，在本地配置加入 `ownerOAuth: {"enabled": true, "apis": [...]}`，名单取本次本地授权策略中需要的接口；其余API仍使用tenant，用户身份失败不回退tenant。模型不能传身份/token/任意URL。仅 `feishu_office_call` 支持这一受控路由；既有专用文档/电子表格工具继续使用tenant。配置不包含凭据，默认缺省即关闭。Group/Knowledge不注册或获得这些能力。
+授权保存**不自动修改生产配置或重启服务**。部署经过审核的实现后，在本地配置加入 `ownerOAuth: {"enabled": true, "apis": [...]}`，名单取本次本地授权策略中需要的接口。Owner Docx/Wiki读取（包括专用文档工具）统一要求Owner用户身份；关闭OAuth或缺少API授权时拒绝，不回退tenant。其他既有API保持原有路由。模型不能传身份/token/任意URL，配置不包含凭据。Group/Knowledge不注册或获得这些能力。
 
 运行时在调用前按有效期自动刷新，串行并加跨进程锁；仅轮换凭据，不重放办公写操作。refresh token单次使用，先写入pending标记再交换并原子保存新值；网络结果不确定、进程崩溃、锁残留、scope缩减或撤销则停止用户身份调用并要求本机检查/重新授权，不猜测重试旧token。空闲期间不维持独立刷新服务，超过refresh有效期需再次授权；官方规定授权满365天也需重新授权。`refresh-check`仅在需要时刷新，不强制消耗仍有效的refresh token。
 
 请求许可绑定应用/Owner/状态目录、授权generation、接口名单和原请求。撤回/撤权/换Owner/重新授权后旧请求失效，检查覆盖钥匙串/刷新等待后、SDK队列出站前及结果返回。可信 Owner 当前明确请求的 Office 写入免重复卡片，同样适用于已正确路由的用户身份；不借用 tenant 创建记录，不扩大 OAuth scope 或自动更换身份。
 
 官方说明：[授权码](https://open.feishu.cn/document/authentication-management/access-token/obtain-oauth-code)、[v2 Token](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/authentication-management/access-token/get-user-access-token)、[刷新](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/authentication-management/access-token/refresh-user-access-token)。2026-09-30真实授权回调到达后，v3交换返回20049（PKCE失败）。遵循授权码页的兼容提示，明确采用v2 JSON交换及配套刷新；保留S256，不重放失败授权码，不自动尝试其他端点。
+
+
+## Owner Office 统一只读身份（Issue #29）
+
+此功能只用于已绑定 Owner 的私聊及既有授权 Owner 群执行通道，不向普通成员、Group Assistant 或 Knowledge Worker提供凭据或新增工具权限。未启用 `ownerOAuth` 时，既有 tenant 路由保持；启用后，五类资源读取统一要求固定只读白名单、本地 `ownerOAuth.apis`、加密 grant 的 `allowedApis` 和实际用户 scope 同时满足。缺任何一项直接拒绝，**不回退 tenant**。其他既有 Office 身份策略、写入审批、Trusted Document 内容编辑与群发送规则不扩大。
+
+- `feishu_doc_read`、`feishu_office_sheet_read` 和 `feishu_office_call` 的已列明读取 API 共用身份、scope和撤回守卫。`feishu_doc_read` 的 Owner 结果在 `data.document / data.blocks`，带 `identity=owner-user`、`hasMore / nextCursor`。
+- 宿主从当前 `run.sourceIds` 对应的可信 inbox 文本生成读取 permit，绑定当前 Owner、消息原文、来源集合及精确 API/资源参数。模型参数、旧会话、文档正文和引用消息不生成授权；请求进入 OAuth lease 前、等待后、HTTP 出站及交付前复核。steer 改变来源集合即使旧 permit 失效，新读取只使用最新输入，不能继续借用上一条读取目标。
+- 目标解析采用保守的完整命令解析，不按正文中出现过某个 ID 就放行。可用例子：`请读取 https://example.feishu.cn/docx/文档ID`、`读取 document_id 文档ID`、`读取 https://example.feishu.cn/sheets/表格ID 范围 tab!A1:C20`、`搜索「明确关键词」`、`列出知识库`；多个目标用逗号或空格分隔。子资源需明确 `table_id / view_id / record_id / block_id / sheet_id / form_id`，不让模型猜测。未可靠解析的自然语言、引用/代码块、历史指代及混杂解释均要求补充明确目标，不猜测授权，也不使用固定确认码来放行。
+- 多目标按“根资源 → 它自己的范围/子资源”逐项分组；每次出现新URL或根ID开始新授权项。例：`读取 spreadsheet_token sheetA range tabA!A1:A1, spreadsheet_token sheetB range tabB!B2:B2` 仅授权这两组，不能交叉组合。Bitable必须把 `app_token / table_id / view_id（或record_id/form_id）` 写在同一组；同一根的多项读取要重复根ID。游离子资源、错误类型、同组重复字段或无法可靠分组均拒绝并要求澄清。读取必须匹配一项完整组合；不得省略约束扩大到整个文档/表。固定根元数据接口仍可核对同一根的元数据，但不因此获得更宽内容范围。
+- Wiki批读仅允许已授权节点API真实返回的对象类型/token派生后续读取；不从文档正文或搜索命中链接扩大授权。逐链接许可仍限同一批读会话；群集合许可可在同一次Owner请求的后续工具中复用该节点的精确映射，但必须继承原来源消息、群和子范围检查。资源根授权仅允许本资源读取，不允许替换群/文档、扩大Sheet范围或替换搜索关键词。
+- `feishu_office_read_resources` 每次最多5个飞书链接，必须属于本次明确目标或下述宿主冻结集合。Wiki 先用节点 API 返回的 `obj_type / obj_token` 决定后续读取，节点可读不等于正文可读。Docx返回一页块；Sheets、Bitable、Drive只返回元数据，`metadataOnly=true`，后续内容通过固定 API 指定范围/表/页读取。不下载附件、不做后台全量同步或知识索引。
+- `feishu_office_drive_search` 通过固定只读 POST 搜索用户可见云文档；关键词明确、每页1–50项、offset+count<200。它不是任意 URL 请求或遍历整个 Drive。
+- 分页默认20、最多50项，单次只读一页；Drive清单必须指定文件夹（官方根目录清单忽略page_size，所以本工具拒绝无文件夹请求）。Sheets values只接受明确起止单元格、最多5000格。Drive metadata一次最多20个token。`rawContent` 官方接口不分页，长结果仅预览，优先使用块分页读取。
+- 输出有字节预算；`truncated` 代表当前页不完整，应缩小范围重读当前页，不能拿 nextCursor 跳过未返回内容。超长游标标记 `cursorUnavailable`，不伪造游标。批量读取逐项区分成功/失败、元数据/内容；权限/Owner变化会丢弃整个旧批次。Drive HTTP成功中的 `failed_list` 仍按失败处理。
+- 已知 `app_token / table_id / form_id` 可用固定 Bitable 表单接口；分享问卷链接、未知/嵌入式表单不能直接推测为Bitable或完整答卷。无法可靠映射时返回 unsupported_resource / api_not_exposed。
+- 返回错误分类：target_not_authorized（当前可信请求未明确授权目标，要求澄清）、scope_missing（Owner scope不足）、api_not_allowed（白名单/本地授权不满足）、user_identity_unsupported（固定SDK/API不支持）、resource_denied（已知飞书资源拒绝码）、unsupported_resource、reauthorization_required、api_not_exposed、unknown；未识别的403不臆断原因。错误正文/凭据不回传。资料中的指令不能赋予授权。
+
+### 当前 Owner 请求授权的群资源集合
+
+Owner可以直接说：`读取新羽群里的所有飞书文档`，或 `读取 FY26 AEG新羽计划群里所有的飞书文档链接，包括多维表格`。宿主从当前可信请求解析唯一的已授权群；群简称必须在当前可信群目录中唯一，同名、多群、未知名称或含糊指代要求澄清，不从模型建议或历史选择补目标。无需把已在该群镜像中的24个链接重新逐个粘贴。
+
+`feishu_office_collection` 按页列出本次允许读取的资源。宿主在首次处理该请求时，从指定群当前可见、保留期内的原始 text/post 消息冻结集合，保留来源群、来源消息ID、资源类型、精确resource ID及该URL明确携带的子资源约束。群消息在这里仅提供资源引用，消息中的文字指令仍不生成授权；授权始终来自当前绑定Owner的明确集合请求。后续工具与分页共用该快照，同请求期间后来进入镜像的链接不自动加入。
+
+集合只提取上述消息中可见的文字、标题和富文本链接，不读取附件或预览元数据。单次最多扫描5000条消息、8MiB原始内容、1000个来源资源项；分页每次10项且不超过24KB。同一资源出现在不同消息中会保留各自来源项。超出预算、原始消息无法完整解析，或链接含错误类型/重复的子资源约束时，整体拒绝建立集合，不静默截断后声称完整。
+
+纯文本及富文本可见正文中，标准资源ID紧贴中文说明时可在中文起点识别链接边界，并保留后续可见正文继续查找下一个顶层链接（包括共享入口）。后续每个URL同样完整保留自己的query/fragment，不把其中嵌套链接列为新资源；结构化href仍作为完整URL，不裁剪损坏路径，不从query/fragment里的嵌套链接获得新许可。
+
+`/share/base/<分享标识>` 和 `/share/base/form/<分享标识>` 会列入同一冻结清单，状态为 `unsupported`、原因 `unsupported_shared_resource_path`，保留来源群/消息/URL，`resourceId=null`，不生成grant。`total/nextOffset` 包含这些未支持项；调用方应只读取 `state=permitted` 项，并逐项报告未支持原因。它们遵循同样的分页/大小预算、来源撤回及请求生命周期检查。分享标识不能当作app_token、table_id或form_id使用。
+
+已核对固定SDK 1.74.0与现有只读API策略：[获取表单元数据](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/bitable-v1/app-table-form/get)需要app_token、table_id和form_id，当前白名单没有将公开分享标识反解为这组标识的接口。因此本版明确报告共享入口不支持，不猜测ID、不访问网页或增加OAuth/API权限；并不声称所有飞书产品都不存在转换能力。
+
+多语言富文本必须逐个校验所有语言分支及其行、节点和可见字段；任一分支损坏，整批拒绝，不保留其他合法分支或更早消息形成的部分集合。顶层 `content` 与语言分支混用也整体拒绝；单一顶层结构和多个合法语言分支分别支持。
+
+允许的类型为Docx、Wiki、Sheet、Bitable和Drive文件/文件夹引用。集合不能引入其他群、模型猜测、Web搜索、文档正文二级链接或文件夹遍历发现的新资源。集合中有Drive文件夹链接也只允许该文件夹元数据，不授予其子文件清单、全库搜索或Wiki空间枚举权限。Wiki的真实节点API映射是原资源的规范对象解析，不是沿正文链接继续发现。
+
+每次OAuth凭据获取、排队、出站、响应及结果交付仍执行Owner、API白名单、scope和生命周期检查。原Owner请求撤回/steer改变来源、Owner变更或群撤权使旧集合失效；原始消息撤回、移除、内容变化或超过保留期使对应来源许可失效。已经开始的调用不能改用另一个重复链接来源来绕过撤回；未使用该来源的其他资源可继续按各自有效来源读取。user失败不回退tenant，不增加Office写权限。
+
+集合许可不放松单资源和多资源的完整授权组合。Base URL里的table/view、Sheet URL里的sheet/range、Docx块约束分别属于自己的根，不能跨资源拼接，也不能省略已有子范围来读取更广正文。URL没有表/范围时仅允许原有根元数据和有界目录接口；**不表示整张多维表或Sheet单元格已经读取**，具体内容仍需明确子范围，不能由模型猜测。逐项报告正文、元数据、权限失败和待明确范围，不把“列出所有链接”宣称为“读完所有正文”。本地镜像也不保证包含建群以来全部消息。
+
+### 固定 API 与只读 scope 核实
+
+2026-10-01核实官方 Markdown 文档及固定 SDK `@larksuiteoapi/node-sdk@1.74.0` /原219项目录（lark-mcp0.5.1）。下表各 SDK API均声明支持 `user_access_token`；两个专用适配使用SDK `request` 的固定路径和请求级 `withUserAccessToken`，模型不能选择身份/URL/请求选项。列出的scope是**只读可选项（满足其中一个）**，不是必须全部申请。没有把支持tenant推断成支持user，也未把官方读写scope加入新策略。
+
+| 固定 API / 专用工具 | 已核实只读 scope（任一） | 官方文档 |
+| --- | --- | --- |
+| `docx.v1.document.get` | `docx:document:readonly` | [接口说明](https://open.feishu.cn/document/server-docs/docs/docs/docx-v1/document/get) |
+| `docx.v1.document.rawContent` | `docx:document:readonly` | [接口说明](https://open.feishu.cn/document/server-docs/docs/docs/docx-v1/document/raw_content) |
+| `docx.v1.documentBlock.list` | `docx:document:readonly` | [接口说明](https://open.feishu.cn/document/server-docs/docs/docs/docx-v1/document/list) |
+| `docx.v1.documentBlock.get` | `docx:document:readonly` | [接口说明](https://open.feishu.cn/document/server-docs/docs/docs/docx-v1/document-block/get) |
+| `wiki.v2.space.get` | `wiki:space:read` / `wiki:wiki:readonly` | [接口说明](https://open.feishu.cn/document/server-docs/docs/wiki-v2/space/get) |
+| `wiki.v2.space.list` | `wiki:space:retrieve` / `wiki:wiki:readonly` | [接口说明](https://open.feishu.cn/document/server-docs/docs/wiki-v2/space/list) |
+| `wiki.v2.space.getNode` | `wiki:node:read` / `wiki:wiki:readonly` | [接口说明](https://open.feishu.cn/document/server-docs/docs/wiki-v2/space-node/get_node) |
+| `wiki.v2.spaceNode.list` | `wiki:node:retrieve` / `wiki:wiki:readonly` | [接口说明](https://open.feishu.cn/document/server-docs/docs/wiki-v2/space-node/list) |
+| `drive.v1.file.list` | `space:document:retrieve` / `drive:drive:readonly` | [接口说明](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/drive-v1/file/list) |
+| `drive.v1.meta.batchQuery` | `drive:drive.metadata:readonly` | [接口说明](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/drive-v1/meta/batch_query) |
+| `sheets.v3.spreadsheet.get` | `sheets:spreadsheet:readonly` | [接口说明](https://open.feishu.cn/document/server-docs/docs/sheets-v3/spreadsheet/get) |
+| `sheets.v3.spreadsheetSheet.get` | `sheets:spreadsheet:read` / `sheets:spreadsheet:readonly` | [接口说明](https://open.feishu.cn/document/server-docs/docs/sheets-v3/spreadsheet-sheet/get) |
+| `sheets.v3.spreadsheetSheet.query` | `sheets:spreadsheet:read` / `sheets:spreadsheet:readonly` | [接口说明](https://open.feishu.cn/document/server-docs/docs/sheets-v3/spreadsheet-sheet/query) |
+| `bitable.v1.app.get` | `base:app:read` / `bitable:app:readonly` | [接口说明](https://open.feishu.cn/document/server-docs/docs/bitable-v1/app/get) |
+| `bitable.v1.appTable.list` | `base:table:read` / `bitable:app:readonly` | [接口说明](https://open.feishu.cn/document/server-docs/docs/bitable-v1/app-table/list) |
+| `bitable.v1.appTableField.list` | `base:field:read` / `bitable:app:readonly` | [接口说明](https://open.feishu.cn/document/server-docs/docs/bitable-v1/app-table-field/list) |
+| `bitable.v1.appTableView.list` | `base:view:read` / `bitable:app:readonly` | [接口说明](https://open.feishu.cn/document/server-docs/docs/bitable-v1/app-table-view/list) |
+| `bitable.v1.appTableView.get` | `base:view:read` / `bitable:app:readonly` | [接口说明](https://open.feishu.cn/document/server-docs/docs/bitable-v1/app-table-view/get) |
+| `bitable.v1.appTableRecord.list` | `bitable:app:readonly` | [接口说明](https://open.feishu.cn/document/server-docs/docs/bitable-v1/app-table-record/list) |
+| `bitable.v1.appTableRecord.get` | `bitable:app:readonly` | [接口说明](https://open.feishu.cn/document/server-docs/docs/bitable-v1/app-table-record/get) |
+| `bitable.v1.appTableForm.get` | `base:form:read` / `bitable:app:readonly` | [接口说明](https://open.feishu.cn/document/server-docs/docs/bitable-v1/form/get) |
+| `bitable.v1.appTableFormField.list` | `base:form:read` / `bitable:app:readonly` | [接口说明](https://open.feishu.cn/document/server-docs/docs/bitable-v1/form/list) |
+| `feishu_office_sheet_read` | `sheets:spreadsheet:readonly` | [接口说明](https://open.feishu.cn/document/server-docs/docs/sheets-v3/data-operation/reading-a-single-range) |
+| `feishu_office_drive_search` | `search:docs:read` / `drive:drive:readonly` | [接口说明](https://open.feishu.cn/document/server-docs/docs/drive-v1/search/document-search) |
+| `docx.v1.documentBlockChildren.get` | `docx:document:readonly` | [接口说明](https://open.feishu.cn/document/server-docs/docs/docs/docx-v1/document-block/get-2) |
+
+完整白名单及证据地址位于 `src/owner-office-read-policy.json`，不是可由模型修改的配置。Drive元数据、云文档搜索虽用POST，官方定义为只读；仅这两个固定路径按读取处理，不把其他POST判成只读。
+
+### 后续 Human 授权与候选验收
+
+`owner-office-read.policy.example.json` 是本轮全部25个只读入口的示例，合计11个scope（含offline_access），**不是生产配置**。它选择Docx只读、四个Wiki细粒度读取、Drive文件夹清单/元数据/搜索三个scope，以及Sheets/Bitable各自只读scope。Sheets元数据和values文档未列 `sheets:spreadsheet:read`，所以全场景示例采用 `sheets:spreadsheet:readonly`；Bitable记录list/get未列更细粒度scope，所以全场景示例采用 `bitable:app:readonly`，不额外请求base元数据scope。仅需要部分API时可按上表进一步缩小范围。
+
+部署/授权仍须单独Human批准。需要新增scope时，由操作者在飞书后台开通对应**用户身份**只读权限并按平台要求发布，再请当前Owner通过已有localhost流程重新授权；不能仅修改config而复用没有scope的旧token。已有已授权能力如需保留，应在本地审核后合并旧policy与新增**只读**项，避免直接用示例覆盖原策略。不要自动追加写scope、打印token或复制生产数据库到开发目录。
+
+后续真实验收只读检查以前403的Docx、Wiki实际资源、明确范围Sheet、Bitable表/记录和可用Drive元数据；逐项核对身份/内容/部分失败，未知客户端资源不作成功结论。本轮开发不执行重新授权、真实Office请求、部署或Merge。刷新沿用已有串行/跨进程锁、失效标志与generation；重新授权、撤回、换Owner、撤权以及钥匙串等待期间授权文件变化都会使旧请求停止。
+
+### Issue #37：Docx/Wiki 用户身份读取与只读诊断
+
+本候选整合 PR #30 的只读路由和群镜像集合，保留 main 的 #33 原生 Thread 权限转发及办公写入行为。群集合仍由宿主从当前Owner请求与可信镜像建立，不需要逐条重新授权或粘贴链接；原请求、群范围、来源消息、撤回、steer、换Owner和回合结束检查保留。集合清单保留原始链接及群/消息来源，正文结果返回解析后的资源ID与来源；不追踪正文二级链接。
+
+专用 `feishu_doc_read` 现在也接受标准Wiki链接，只在官方节点API实际返回Docx时读取。`feishu_office_call` 的Wiki解析结果可以在同一可信请求内继续用于Docx正文调用，下一条steer不能继承映射。OAuth未启用、scope不足、凭据不可用时不会改用应用身份。既有Sheet/Bitable能力保留，本期不增加Bitable或共享base/form支持。
+
+`feishu_office_diagnose_document` 对当前请求或本次群集合中的一个标准Docx/Wiki链接做只读A/B：A使用当前生产SDK blocks路径，B直接请求固定官方 `GET /open-apis/docx/v1/documents/{id}/blocks`，相同精确ID及分页参数；Wiki先解析node→obj。两臂均验证相同目标、API白名单、现有scope和Owner凭据，不提供模型可选身份、URL端点或token。它只返回诊断，不返回或记录正文。它不模拟旧部署；历史tenant403/user成功仅有合成回归，真实旧部署对照需后续明确授权。A/B仅比较blocks端点，不覆盖专用/批读工具的metadata前置调用；both_succeeded只代表本次两次块请求成功，不证明完整文档或全部生产读取步骤已完成。
+
+每次API调用最多等待15秒（含凭据、队列、网络），只读请求不自动重试；网络层可取消并限制1MiB响应。超时返回 `timeout`，不冒充403或本次成功。批读每次最多5资源，每资源一次有界块分页，返回 `page_pending`、`output_truncated`、`metadata_only`、`complete` 或 `incomplete`，并保留续页标记；完成当前页不代表其他资源或历史全部读完。
+
+诊断字段为API、身份类别、scope判定、阶段、是否开始HTTP请求、实际HTTP状态及数字错误码。SDK底层HTTP观测与直连响应提供状态；未取得状态时为null，不推测200/403。已知错误码可分类为资源拒绝，未知403仍为unknown；缺scope、API能力、本地目标校验、凭据不可用与超时分别报告。不会根据“浏览器能打开”承诺OpenAPI成功，也不会自动扩大OAuth权限或建议无证据的飞书侧操作。官方接口依据：[Docx blocks](https://open.feishu.cn/document/server-docs/docs/docs/docx-v1/document/list)、[Wiki节点解析](https://open.feishu.cn/document/server-docs/docs/wiki-v2/space-node/get_node)。
+
+本轮没有真实飞书文档读取、配置/scopes变更、服务重启、部署或合并。已安装Codex与Group/Knowledge固定版本不符时原生隔离探针会拒绝运行；离线身份隔离回归不能代替该探针或候选部署后的真实验收。交付PR按当前任务指令保持Draft。
+
+### Issue #37 审核返工：明确编辑请求的准备读取
+
+当前可信Owner的单行请求如“请将 https://example.feishu.cn/docx/doc 的标题改为新标题”或“请帮我修改 https://example.feishu.cn/docx/doc 的内容”，可读取同一目标的元数据、正文、块及子块，以取得编辑前内容和revision；专用文档工具与Office Call一致。也支持以“编辑/更新/重命名/追加”开头并紧跟明确Docx/Wiki根链接或document_id/token的请求。“请帮我”按完整前缀优先匹配。
+
+编辑前读取只接受可完整识别的简单单目标命令；额外读取禁令、条件、显式子范围或混合多句替换内容均拒绝，不忽略后缀。若替换内容与约束无法可靠区分，需要先明确读取范围。
+
+这只授予准备读取，不批准写API；写入仍走既有执行、版本与生命周期约束。编辑目标仅取命令开头的单个明确根，替换文字中的其他URL不会获得许可；Wiki只接受官方解析得到的Docx。引用、否定、条件式、未知目标及无法可靠识别的语句不产生许可；带query/fragment或显式子范围的编辑目标不自动扩成整篇文档读取。原消息撤回/变化、steer、换Owner和回合失效仍会中止读取与交付。
+
+### Issue #37：已有 scope 与隔离探针
+
+[rawContent 官方接口](https://open.feishu.cn/document/server-docs/docs/docs/docx-v1/document/raw_content)的本地只读策略接受已有 `docx:document:readonly` 或 `docx:document`，任一满足即可；这只是该读取接口的授权匹配，不新增 OAuth 申请、不授予写 API，也不将 scope 名称按前缀泛化。缺少两者仍在出站前拒绝。
+
+Group/Knowledge 探针根据调用 ID 关联响应，再按 namespace/工具名检查预期；首次和恢复检查共用断言，新增攻击调用不会改变 skills 的预期位置。合成协议回归不替代匹配固定 Codex 版本的原生隔离验证。
+
+Docx 元数据、blocks 列表、单块及子块读取同样接受上述两种已有 scope（任一即可），与 rawContent 一致。接口权限依据：[元数据](https://open.feishu.cn/document/server-docs/docs/docs/docx-v1/document/get.md)、[blocks](https://open.feishu.cn/document/server-docs/docs/docs/docx-v1/document/list.md)、[单块](https://open.feishu.cn/document/server-docs/docs/docs/docx-v1/document-block/get.md)、[子块](https://open.feishu.cn/document/server-docs/docs/docs/docx-v1/document-block/get-2.md)。匹配只针对固定读取 API，不推导其他 scope 或新增写入能力。
+
+Wiki getNode 读取依据[官方权限表](https://open.feishu.cn/document/server-docs/docs/wiki-v2/space-node/get_node.md)，接受已有 `wiki:node:read`、`wiki:wiki:readonly` 或 `wiki:wiki` 任一授权。此等价匹配仅用于固定节点读取 API，不新增 OAuth 申请或 Wiki 写 API；解析出的 Docx 仍独立检查其读取 scope。
+
+Owner 读取意图可从当前可信 post 的文本或链接节点提取（含直接结构及语言包装）；链接使用其 href，段落边界保留，多段含糊命令或不支持节点保持拒绝。后续明确文本 steer 取代旧意图，历史非 text 消息只作为身份、来源快照和撤回依赖，不再因类型误拒绝新请求。
+
+Owner post 中的机器人 at 节点，仅在节点 user_id 与可信消息 mentions 都匹配当前配置 bot ID 时作为寻址标记忽略；无关或无法验证的 at 不会被剥离。集合读取使用与读取守卫相同的可信意图提取结果，旧发送/写入上下文不变。群内仍要求可信 Owner @ 入站，未 @ 的群消息不因此获得读取权限。

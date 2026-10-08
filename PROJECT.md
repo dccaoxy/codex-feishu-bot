@@ -1,3 +1,68 @@
+# 当前定向返工：Issue #37 post 集合与可信 bot-at 八格矩阵（2026-10-08）
+
+- **Task Source / 顺序**：用户只批准本轮矩阵先行集中修复。先在旧代码651daa661251e59308c25e49bbf5c1c37633a686仅添加入站矩阵测试并执行，再改生产代码。夹具走onMessage → inbox → message → run/turn-start → serverRequest → Reader → 合成SDK出站；不直接调用解析helper，也不手工建立run/context。没有真实模型或飞书请求。
+- **矩阵定义**：无mention为Owner私聊，有mention为授权群Owner @；群内无mention另作拒绝检查。旧代码八格5通过/3失败；修复后八格全通过：
+
+| 消息 | 目标 | mention/入口 | 旧代码 | 修复后 |
+| --- | --- | --- | --- | --- |
+| text | 单链接 | 无/私聊 | PASS | PASS |
+| text | 单链接 | bot-at/群 | PASS | PASS |
+| text | 群集合 | 无/私聊 | PASS | PASS |
+| text | 群集合 | bot-at/群 | PASS | PASS |
+| post | 单链接 | 无/私聊 | PASS | PASS |
+| post | 单链接 | bot-at/群 | FAIL | PASS |
+| post | 群集合 | 无/私聊 | FAIL | PASS |
+| post | 群集合 | bot-at/群 | FAIL | PASS |
+
+- **Implementation**：提取共享ownerReadIntentText，集合上下文保存专用readText而不改变既有发送/写入text语义。读取守卫和集合使用同一可信解析结果；post at必须节点user_id和消息mentions都匹配配置bot ID才可忽略，无关/伪造at保持拒绝。
+- **拒绝矩阵**：非Owner、无mention群消息、非bot mention、at与可信mention不匹配均零出站；请求撤回、来源payload变更、Owner变化、镜像来源撤回也零出站。另验证queue/response等待期间撤回、mention元数据变化、Owner变化，结果失效（queue零出站；response最多已发生的一次，不再继续）。旧代码后四项集合拒绝测试因前置集合失败而未进入目标断言，修复后实际通过，不称为旧代码拒绝证据。
+- **Validation**：读取/集合/Owner组合766/766通过；新增等待期间测试的最终矩阵23/23通过。使用已安装官方Codex运行时0.162.0-alpha.2与无飞书凭据/无Shared配置临时副本，doctor与无模型smoke退出0。Group/Knowledge探针均因固定0.159.0不匹配退出1，未放宽锁定；没有真实模型/飞书业务验收。全量1513/1513（零失败/取消/跳过）及check/diff通过。独立Reviewer须针对准确head复验矩阵及拒绝场景，旧PASS不替代新head。
+- **Remaining / 交接**：仅本轮两项P2，不扩大scope或修改权限/审批/工具配置。未读真实凭据、未真实飞书/模型调用、未改生产、未Merge或部署；真实403业务验收不在本轮证据中。保持原Draft PR38，准确head提交/推送与独立审核见远端回执，不自动继续下一轮。
+
+# 当前定向返工：Issue #37 可信 post 与文本 steer（2026-10-08）
+
+- **Task Source / Implementation**：仅本轮手动限定范围。officeReadGuard不再要求所有来源均为text；旧来源继续校验Owner、消息ID、群、状态与完整payload快照，仅最新消息提取读取意图。当前post支持文本/链接节点及语言包装，保留段落边界并拒绝无法可靠解释的结构；不从历史或模型数据扩权。
+- **Validation**：新增post读取和post后文本steer两个复现回归，并验证专用工具/Office Call、目标隔离、旧来源撤回、队列/响应期间Owner/撤回/payload变更及含糊结构拒绝。专项525/525通过；首轮6个回归断言未适配取消后不返回工具响应的既有行为，修正为无成功响应/无新增出站后通过。无凭据临时副本doctor与无模型smoke退出0；最终全量1490/1490（零失败/取消/跳过）及check/diff通过；随后仅交独立审核，不扩展范围。
+- **Remaining / 交接**：原分支与Draft PR #38；未真实飞书读取、模型调用、生产配置变更、Merge或部署。真实403验收及既有原生Group/Knowledge版本不匹配边界保持；提交推送与准确head审核证据见PR回执。
+
+# 当前返工：Issue #37 Wiki getNode 等价 scope（2026-10-08）
+
+- **Task Source / Implementation**：最新P2要求补齐已有wiki:wiki。已实时读取官方get_node.md权限表，固定getNode策略接受wiki:node:read、wiki:wiki:readonly、wiki:wiki任一；保留精确匹配及持续租约检查，不新增OAuth申请或写API。
+- **Validation**：新增真实OwnerOAuth类配合合成记录，覆盖三种Wiki scope的专用工具/Office Call、两种Docx scope与三种Wiki scope组合的群镜像集合、授权撤销零出站及写API拒绝。专项209/209通过；无飞书凭据临时副本doctor及无模型smoke退出0；全量1470/1470（零失败/取消/跳过）、check/diff通过；独立审核以PR准确head回执为准。
+- **Remaining / 交接**：沿用原分支及Draft PR #38，不Merge、不部署、不读真实飞书、不调用模型、不改真实scope或生产配置。真实403与候选验收未验证；原生Group/Knowledge固定版本不匹配边界保持。提交推送与审核结论见准确head远端回执。
+
+# 当前返工：Issue #37 Docx 全读取路径 scope（2026-10-08）
+
+- **Task Source / Implementation**：最新P1指出上轮只修rawContent遗漏元数据/blocks。已实时读取四个官方Markdown权限表，元数据、blocks列表、单块、子块均明确接受docx:document或docx:document:readonly任一；逐接口补齐固定策略与文档链接，不修改OAuth申请、生产配置或写权限。
+- **Validation**：本轮专项201/201通过，真实OwnerOAuth租约配合合成记录覆盖各接口两种scope与无关scope拒绝、专用文档工具、镜像Docx/Wiki集合、A/B两臂及缺scope零出站；集合保留跨群拒绝与撤销授权检查。无飞书凭据临时副本doctor与无模型smoke退出0；check/diff及全量1462/1462通过（零失败/取消/跳过）；独立审查以PR准确head回执为准。
+- **Remaining / 交接**：同一分支及Draft PR #38，未真实读取飞书、调用模型、新增scope、改生产配置、Merge或部署。真实403与候选部署验收仍未验证。原生Group/Knowledge版本不匹配边界保持，不将离线回归称为真实原生隔离通过。提交推送与独立审查以远端准确head回执为准。
+
+# 当前返工：Issue #37 scope 等价授权与隔离探针（2026-10-08）
+
+- **Task Source / Implementation**：用户最新两项P2。rawContent固定策略新增官方支持的已有docx:document替代scope，复用租约的任一匹配与持续校验；不修改OAuth申请、配置或写API。Group/Knowledge初始及恢复探针改为call_id关联、namespace/name分派，共用断言，拒绝缺失/重复/未知响应。
+- **Validation**：本轮读取与探针专项96/96通过；覆盖两种已有scope、无关scope零出站、租约中途撤销、写API拒绝、skills空列表和非空列表、顺序变化、Group/Knowledge隔离。本机无凭据临时副本doctor与无模型smoke退出0；Group/Knowledge原生探针均因Codex0.162.0-alpha.2与固定0.159.0不符退出1，未放宽锁定。本轮全量1446/1446通过，零失败/取消/跳过，check/diff通过；独立审查以PR准确head回执为准，旧head PASS不适用于新head。
+- **Remaining / 交接**：继续原分支及Draft PR #38；提交推送及Issue报告以远端回执为准。未真实读取飞书、调用模型、改scope/生产配置、Merge或部署。原生Group/Knowledge仍须匹配固定版本；合成断言测试不冒充真实探针。其他原有边界保持。
+
+# 当前返工：Issue #37 编辑前读取与礼貌前缀（2026-10-08）
+
+- **Task Source**：用户对PR #38的两项P2：明确编辑请求被只读命令语法拒绝；“请帮我读取”只剥离“请”后解析失败。继续原分支及Draft PR，不Merge、不部署；不将88af293的旧PASS套用到新head。
+- **Implementation**：完整礼貌前缀优先匹配。宿主从当前可信单行编辑命令开头提取一个明确Docx/Wiki根目标，允许同目标元数据/正文/块/子块准备读取及revision获取；Wiki只派生官方返回的Docx。同一目标内块读取不扩大到其他文档；替换内容里的链接不成为授权，固定准备读取名单不含写API。未知、否定、条件、引用及带query/fragment或明确子范围而无法可靠解析的编辑请求保持拒绝，不靠模型猜测。现有来源快照、Owner、steer、撤回、turn及OAuth检查保留；不改变Office写入流程。
+- **作者Validation**：check/diff通过；permit+Owner集成557/557，全量 **1422/1422**，零失败/取消/跳过。最终permit专项补充断言通过，覆盖同文档块读取、其他目标0出站、替换URL不扩权、Wiki解析、准备许可拒绝写API及排队/响应期间撤回、steer、换Owner。仅本地合成飞书/OAuth接口。
+- **本轮独立复审返工**：独立Reviewer对cca9d2b给出NEEDS CHANGES（专项557/557、check/diff通过）：编辑后缀中的读取禁令或“的 block_id b”被忽略。现完整匹配简单编辑语法；额外约束、未知后缀和无法区分的多句替换内容拒绝，不再默认扩大为整篇许可。新增6个解析反例与两读取入口各3个零OAuth/零出站断言，全量1434/1434通过（零失败/取消/跳过），之后收紧多句替换匹配的最终专项569/569通过。旧head审查不代表新head通过；新head复审证据见PR准确SHA回执。
+- **环境验证**：无飞书凭据/无Shared地址的临时副本doctor和无模型smoke退出0（Codex0.162.0-alpha.2，握手、登录状态与7模型元数据可用）。Group/Knowledge原生探针各退出1：固定要求0.159.0，与安装版本不符；未更改锁定版本，不把离线回归当作原生隔离通过。
+- **交接与Remaining**：本轮不读取真实飞书、改scopes、改生产配置、发送消息、部署或Merge；真实403及候选验收仍未验证。实现与文档在本分支保存；提交推送后更新Draft PR #38和Issue报告，新head独立复审证据以PR的准确SHA回执为准。其他上一轮边界保持。
+
+# 当前交接：Issue #37 Docx/Wiki Owner 用户读取（2026-10-08）
+
+- **Task Source**：Issue #37 与用户技术答复：在指定开发分支整合未合并PR #30，保留main已完成的#33权限转发；创建/更新Draft PR并保持Draft，不Merge、不部署。基线main为 f407453a5efb3653e88e7ce592fc5ad3e059c63b，整合PR #30 head 553ae4b4f2595b6eb03737a47ca9ca9191003f94；历史审核以当时head为准。
+- **Implementation**：复用PR #30可信群镜像冻结集合、只读API/scopes与Owner身份路由，解决Bot/Office/测试/状态文档冲突。保留#33原生Thread权限、历史访问与Office写入行为。Docx/Wiki即使OAuth关闭也不回退tenant；专用文档工具支持Wiki→Docx，同一可信请求内的Office Call也保留官方解析映射，steer后失效。源URL、群/消息与精确对象ID可追踪；不授予跨群/正文二级链接权限。
+- **诊断及可靠性**：新增只读诊断工具，以相同ID及参数对比当前SDK blocks路径A与固定官方GET直连B，均受同一Owner目标/API/scope/lifecycle约束。只返回脱敏API、身份、scope、阶段、HTTP状态、数字错误码及出站证据，不输出正文或token；未知403保持unknown。每API含队列/凭据最多15秒、网络可取消、响应1MiB上限，不自动重试。批读最多5项/每项一页，区分分页待续、输出截断、元数据、完成和未完成；不把超时当403。
+- **作者Validation（提交前）**：语法检查与diff检查通过；新增诊断专项22/22通过，Owner+诊断专项509/509通过，此前读取/集合/Owner离线专项186/186通过。整合首轮全量1358/1359，旧无来源OAuth测试已改为可信请求且验证无tenant回退；下一轮1380/1381暴露非本期Drive路由被过度收紧，已恢复该既有行为并通过专项。随后全量1386/1386通过；独立审核返工后最终全量 **1391/1391** 通过，零失败/取消/跳过，Office专项18/18通过。
+- **独立审核返工**：fresh checkout审核2396cc23a3988f619eae4fb4f931014576bd75d3给出NEEDS CHANGES，独立check/diff及153专项通过但发现两项未覆盖问题：租约守卫递归捕获历史守卫使批读校验指数增长；读取专用text来源守卫误拦既有post写入/find/schema。现将每个租约仅绑定本次permit，由session扁平检查历史租约；宿主仅在实际Reader入口创建读取守卫，写入与目录入口保留原有Office guard。新增5-Wiki/15调用复杂度、post写入/目录、实际SDK取消与A成功/B拒绝分类回归。修复后诊断+集合集成119/119通过，24-Docx合成集合测试约3.1秒（旧审核约114秒；非真实网络性能承诺）。代码返工提交为9121f5543e262e4beec62af64098eaafb670e089；独立复审及最后文档收口head的结论以PR #38对应准确head回执为准，不能沿用旧审核。
+- **真实本机协议**：无飞书凭据、无Shared地址的临时源码/配置副本，已安装Codex 0.162.0-alpha.2的doctor与无模型ephemeral smoke均退出0；握手、登录状态和7模型元数据可用，不读取真实飞书文档、不调用真实模型。Group/Knowledge原生探针均因仓库固定0.159.0与安装版本不匹配退出1，未更改版本锁；离线隔离回归不能替代原生探针。
+- **Remaining / Risks**：实际生产403根因及候选部署后已知成功Docx、历史403 Docx、Wiki和群集合均未真实验收；未扩OAuth scopes、改生产配置、写飞书、发消息或部署。A是本候选当前SDK路径，不冒充历史部署结果；tenant403/user成功仅为合成分类回归。新工具需Owner明确创建新会话才注入，遵循#33不自动换Thread。多维表/共享入口不新增支持。独立审核首轮发现问题已返工；PR #38已创建并保持Draft，审核与远端CI分别记录，不将本地通过称为远端CI通过。
+- **交接断点**：实现与文档已在本分支提交推送，Draft PR：https://github.com/dccaoxy/codex-feishu-bot/pull/38 。最后文档收口的提交号见Git，独立复审准确head及Issue报告见PR/Issue回执。下一步为Human安排匹配版本的原生隔离验证及候选部署后的真实飞书验收；本任务不进行这些生产动作，不以本地测试或代码审核代替真实验收。
+
 # 当前返工：Issue #33 新建 Thread 思考强度默认值（2026-10-05）
 
 - **Task Source**：新版 Owner Relay 需求及本轮 P2，继续原 Draft PR #34。仅修复新建会话忽略 `codex.effort` 的回归。
@@ -97,7 +162,110 @@
 - 下一步：实现并验证上述执行层后，继续收敛 Thread/Work/Gateway 等剩余本地 Gate，运行全量/Group/Knowledge 隔离回归，由独立 Reviewer 审核，再按 Issue 的六步安全目标做候选部署验收。当前实现不能作为 Issue #33 完成版本部署或关闭 Issue。
 - Delivery：代码/文档已修改、限定离线测试已通过；真实 Codex/飞书/文件审批未验证；独立 Reviewer PASS 未取得。未提交、未推送、未建 PR、未部署、未 Merge、未改 HEAD。网络与远程回写由调度器负责，本节作为本地 Implementation / Validation / Remaining 交接记录，不冒充已发布的 Issue Closing Report。
 
-# 历史候选：PR #28 审核版本部署与 Owner OAuth 只读验收（2026-09-30）
+# 当前候选：PR #30 dee803a8 已部署，等待Human飞书私聊验收（2026-10-02）
+
+- Task Source：Human授权部署独立PASS的 `dee803a8def1a9755f777b3ac4ea09ba4b740035`，服务正常后提供真实验收步骤，暂不Merge。[独立审核](https://github.com/dccaoxy/codex-feishu-bot/pull/30#issuecomment-5953211552)的head已在部署前再次核对。
+- Deployment：北京时间21:33完成。89个受管文件与审核head逐项匹配；当前配置、OAuth scopes/API白名单、Owner/授权群、Office/Trusted Document、Knowledge、Shared Runtime均保持不变，Group/Knowledge继续使用既有固定0.159.0。仅短暂重启机器人，Shared进程未变。
+- Backup：本机Git忽略目录data/pr30-dee803a-backup-*保存旧源码、真实配置、LaunchAgent、加密OAuth文件和两库一致性备份。未导出密钥或token。配置/加密凭据/服务配置前后一致；停机验证两库逐表摘要一致，启动后仅history_sync/sqlite_sequence运行状态变化，业务表未变。
+- Validation：安装后的check、全量1287/1287（0失败/取消/跳过）、doctor共享连接检查、ephemeral smoke、Group30/Knowledge19模拟provider隔离探针均通过。最新启动日志Codex与飞书长连接正常，机器人及Shared均running，无新增error或EMFILE。部署记录data/pr30-dee803a-deployment.json。准备暂存目录时曾遇到重复复制test目录的本地错误，已修正准备步骤；发生在停机之前，未触碰候选服务，不涉及部署回滚。
+- Human验收：请在机器人私聊发送“读取 FY26 AEG新羽计划群里所有的飞书文档链接，包括多维表格”。检查无需逐个重贴链接、逐项区分正文/元数据/403/unsupported、共享入口不再静默遗漏；不追踪正文二级链接、不写资源、不跨群。实际数量以本次冻结镜像为准，不强行使用历史24作为固定值。
+- Remaining：本轮没有代发真实验收请求或Office读取。新版本真实集合效果等待Human反馈；共享入口仍不支持、Docx403/Sheet缺样本和长期refresh限制保留。本节为部署证据文档，不改变已部署源码。未Merge。
+
+# 历史返工：PR #30 中文边界后续链接完整性（2026-10-02）
+
+- Task Source：[c4f86b8独立NEEDS CHANGES](https://github.com/dccaoxy/codex-feishu-bot/pull/30#issuecomment-5952933530)。同一分支，先退回Draft，不部署、不Merge。
+- Root cause / Implementation：上一轮仅截取中文边界前的根URL，丢弃其后无空格文本。现在在顶层文本扫描时拆出已验证根，保留剩余正文并继续扫描下一完整URL；每个后续URL仍拥有完整query/fragment，结构化href不参与拆分。共享入口同样保留后续文本，仅列入unsupported清单，不成为grant。
+- Validation：新增12项（解析10、Bot集成2），旧实现新增解析反例9失败/1通过；修复后集合/permit/Bot专项250/250通过。覆盖text/post连续标准链接、后续共享入口、三段连续链接、后续query/fragment嵌套拒绝、href原子性；Bot验证同一来源的两个标准资源均可读且撤回后无新增OAuth/SDK调用，共享目标尝试0lease/access/SDK。check及diff检查通过；全量组合 **1287/1287**，0失败/取消/跳过。
+- Environment：无飞书凭据、无Shared地址的隔离开发副本，固定Codex0.159.0 doctor/ephemeral smoke通过；Group30/Knowledge19次模拟provider隔离探针通过。未使用真实OAuth、未修改任何飞书资源或生产配置。README已同步。
+- Remaining：同一PR推送新head后Draft→Ready请求独立审核。线上候选继续240967c，本轮未部署、未Merge；共享入口不支持、Docx403、Sheet缺样本与长期refresh观察限制不变，不能宣称真实集合验收通过。
+
+# 历史返工：PR #30 链接中文边界与共享入口显式报告（2026-10-02）
+
+- Task Source：Human 同意同一PR返工，修复真实验收发现的紧贴中文正文Docx漏识别，核查共享入口；不部署、不扩大权限、不Merge。分支仍为 `codex/issue-29-owner-read`，返工前退回Draft。
+- Implementation：仅可见文本的标准资源根ID后允许中文边界；不裁剪结构化href、编码路径、query/fragment，不发现嵌套目标。共享base/form链接加入冻结分页清单，标记unsupported及明确原因，不加入grant，resourceId为null，保留来源群/消息/URL；同样执行预算和来源/Owner生命周期检查。原有tuple、隔离和用户身份不回退tenant边界保留。
+- API核查：固定SDK 1.74.0的表单读取需要app_token/table_id/form_id，现有只读API策略没有分享标识反解接口。因此3个真实共享入口仍未验证可读，不能将分享标识冒充资源ID；不增加API、scope、网页抓取或真实调用。README已记录官方接口参考及清单状态语义。
+- Validation：check及diff检查通过；最终全量组合 **1275/1275**，0失败/取消/跳过。本轮新增20项回归覆盖中文正文、富文本href、编码/伪造路径、query/fragment嵌套、共享入口分页/去重/跨群/类型过滤以及撤回撤权和Owner变更；模拟Bot链路证明共享标识0OAuth lease/0SDK调用，标准资源仍可读且撤回后失效。最初新增7项在旧实现3失败/4通过；修复后专项201项通过。补充Owner变更测试需兼容宿主不再响应工具的安全路径，已修正测试断言，无业务实现改动。
+- 环境：无飞书凭据、无共享服务地址的临时开发副本，固定Codex 0.159.0 doctor握手/登录/8模型及ephemeral smoke通过；Group30/Knowledge19次模拟provider隔离探针通过。未连接/重启生产服务，未执行真实Office验收。
+- Remaining：运行候选继续为240967c，OAuth scopes/API、配置和业务数据未改。中文链接实际可读性、共享入口、已知Docx403/Sheet缺样本和长期refresh限制仍须如实保留；新代码提交后重新Ready请求独立审核，不能以自动化通过代替真实集合验收。未部署、未Merge。
+
+# 当前候选：PR #30 `240967c` 已部署，集合完整性真实验收未通过（2026-10-02）
+
+- Task Source：Human 授权部署独立 PASS 的 `240967caa10049a1240cd698d8ccf8332f48e4b0`，保持现有权限和数据，仅验收指定授权群当前可信本地镜像的 Office 资源集合，不 Merge。后续 Human 单独批准只为 Group/Knowledge 固定已验证的 Codex `0.159.0`。
+- 部署前环境差异：应用内置 CLI 已从此前 `0.159.0` 变为 `0.159.0-alpha.12.1`，首次部署尝试在停服务之前被版本门禁拒绝，没有生产变更。经明确授权后，以独立官方固定包配置 `codex.isolatedBinary`；GroupModel 和 KnowledgeWorker 使用该路径，Owner 原 `codex.binary`、Shared Runtime 路径/连接/进程均未改。没有放宽版本门禁或修改审核源码。
+- Deployment：北京时间 20:25 完成候选安装；89 个受管文件逐项匹配审核提交。配置语义差异仅 `codex.isolatedBinary`，Owner、授权群、Owner Gateway、Knowledge、Office 写权限、Trusted Document、OAuth 14 scopes/32 API 白名单不变。没有重新 OAuth、扩大权限、修改业务文档或执行 Merge。
+- Backup / Data：本机 Git 忽略目录 `data/pr30-240967c-backup-20261002-202355` 保存旧源码、真实配置、LaunchAgent、加密 OAuth 文件以及 state/groups 两库的一致性备份；未导出 Keychain 密钥。停机验证期间两库逐表计数/摘要一致；启动后仅 history_sync / sqlite_sequence 运行状态发生变化，业务消息表未改变。回滚方案只恢复本轮源码/配置，不覆盖业务数据库或刷新后的凭据。
+- Validation：安装后的 check、**1255/1255** 全量组合回归（0失败/取消/跳过）、doctor 共享握手/登录/7模型检查、无模型 ephemeral smoke、Group **30** 次及 Knowledge **19** 次隔离探针全部通过。机器人重新启动，Codex/飞书长连接均恢复，Shared App Server 保持原进程；验收后复查服务 running、新增错误及 EMFILE 均为0。没有把模拟 provider 隔离检查表述为真实群成员测试。
+- 真实集合读取：北京时间 20:27，通过实际部署的 Bot.officeReadGuard → OwnerOfficeReader → OwnerOAuth/SDK 链路冻结指定群镜像。本机操作员适配器仅在内存保存当前 Human 请求，生产 SQLite 以只读方式打开，没有伪造或保存飞书入站消息，也没有发送群消息。严格解析集合包含 **23 次来源出现、20 个去重资源**（Docx 12、Wiki 8）；全部20项自动得到集合许可并逐项尝试，**0 target_not_authorized**，不需要 Human 逐个重贴链接。
+- 逐项结果汇总：直接 Docx 12项中，2项读到首批20块正文（has_more=true），10项元数据成功但正文 HTTP403 / API1770032（resource_denied）；Wiki 8项的节点全部可读，其中2项关联Docx读到首批20块，5项关联Docx元数据成功但正文同样403，1项关联Bitable元数据及1个表目录成功。该Bitable来源未指定table，未将目录返回的table扩为记录读取授权。没有直接Sheet或Drive路径样本，未补选其他资源；元数据成功或首批正文不代表全文读取成功。
+- **完整性阻断**：独立只读交叉核对本群321条text/post，JSON解析错误0。标准Office URL前缀可辨认 **24次出现、21个去重候选**，与严格集合的差额为1条紧贴中文正文的Docx链接，被当前解析器遗漏；该候选未生成permit、未调用API，其有效性/可访问性未验证。标准路径有3次重复来源。另外，富文本字段中的9处 `/share/base` 出现去重后为 **3个共享入口**（base 1个、form 2个，各自1条来源），当前未解析成精确Office资源ID，分类为 `unsupported_shared_resource_path`，未建立许可或访问。按本次口径共24个可辨认候选URL（21标准路径+3共享入口），其中20已尝试、1漏识别、3不支持；早前“24”的原始口径未留存，不追认其含义。不能把20项已识别集合的成功授权等同于“全部群Office链接覆盖”。本轮不修改已审核代码、不绕过许可补读，不扩大到新API或scope。
+- 身份与权限证据：**48次 Office 请求均使用实际核验属于绑定 Owner 的 user_access_token**；0 tenant回退、0意外出站、0资源写入，不读取其他群正文/资源或文档正文二级链接。授权群目录仅取名称用于唯一匹配。正常读取自然触发1次refresh并验证Owner，scopes/API前后一致；未人为制造到期，未输出/评论/提交token或secret。一次自然刷新成功不等于长期refresh稳定性已证明。
+- Evidence / Human Gate：本机 `data/pr30-collection-deployment.json`、`pr30-collection-acceptance.json`、`pr30-collection-completeness-audit.json` 保留脱敏统计；私有来源清单和 `pr30-collection-report.html` 可逐项核对，资源URL/消息ID不进入GitHub。**部署与已识别集合的读取许可链路通过，但本轮“全部Office资源”完整性验收未通过**。直接Docx403、Sheet缺样本和长期自然刷新限制继续保留。下一步先处理解析漏收及不支持的共享入口边界，再独立审核/安排候选验收；未自动返工、未Merge，PR状态未变。本节仅为部署证据文档，运行源码仍是`240967c`。
+
+# 历史返工：PR #30 多语言富文本完整性（2026-10-02）
+
+- Task Source：[957bfc8 的独立 NEEDS CHANGES](https://github.com/dccaoxy/codex-feishu-bot/pull/30#issuecomment-5950597851)。同一 `codex/issue-29-owner-read` 分支与PR，返工前已退回Draft；不部署、不Merge、不扩大真实验收、不修改业务数据。
+- 根因：locale分支先按结构有效性filter，损坏分支在完整性检查前被丢弃；顶层content路径还会忽略并存的locale。此前1228项通过不覆盖此反例，不能证明所有原始分支都已验证。
+- Implementation：先枚举全部locale候选，再逐分支检查对象、content数组、行、节点及可见字段类型；任何损坏使整个群资源集合建立失败。顶层content与locale并存一律拒绝，多个合法locale全部提取，单顶层结构继续支持。不改资源授权、OAuth/API/scopes、tuple及生命周期边界。
+- Validation：check / diff检查通过；集合/permit/Bot专项 **218/218**，全量组合 **1255/1255**，0失败/跳过。本轮新增27项（单元18、集成9）；旧实现单元新案4通过/14失败、集成新案4通过/5失败，修复后全部通过。覆盖合法与损坏locale混合、分支/行/节点/可见字段错误、顶层与locale混合，以及多合法locale/单顶层正向。真实Bot测试使用模拟OAuth/SDK，确认错误时不返回部分集合，连其他合法消息目标也拒绝，0 OAuth lease / 0 token access / 0 SDK出站。
+- 环境与复核：无飞书凭据、无共享服务地址的开发配置下重跑真实Codex `0.159.0` doctor（握手、登录、8模型）及ephemeral只读smoke，均通过，未连接候选Shared App Server。此次仅解析校验变更，Group30次/Knowledge19次协议证据沿用957bfc8轮次，未重复运行；新增集成及生产diff经同任务补充复核，仍待新head独立审核。远端暂无CI结果。
+- Remaining：本轮修复随新提交推送同一PR，再Ready请求独立复审，不声明独立PASS。候选与生产数据不变，历史真实资源403/缺样本、自然刷新观察限制保留。
+
+# 历史返工：PR #30 Collection-scoped Read Permit（2026-10-02）
+
+- Task Source：Human报告真实候选产品阻断：已找到授权群24个Office链接，但逐链接permit要求Owner重新粘贴。按本轮明确要求在同一PR/分支增加受控群集合许可，返工前已退回Draft；不Merge，不部署、不扩大真实验收、不修改业务数据。
+- Implementation：当前Owner明确指定唯一授权群及全部/所有Office资源，宿主冻结本地可信消息镜像的资源集合，逐来源保存群/消息/类型/精确ID及子资源完整组合。增加集合分页工具，既有文档/Office读取统一使用该集合；不从模型参数、旧消息中的命令、文档正文二级链接、搜索或其他群扩权。
+- 生命周期：同一次Owner请求跨工具/分页共享冻结快照；后入库链接不会加入。源消息撤回/移除/变化/过保留期使关联许可失效；群撤权、Owner变化、当前请求/steer变化使旧集合失效。Wiki实际节点映射继承来源和子范围，集合不允许Drive子文件枚举或Wiki空间遍历。完整grant tuple、user OAuth/API/scopes、无tenant回退及原写权限边界不降低。
+- Validation：check及diff检查通过；全量组合 **1228/1228**，0失败/跳过。本轮新增161项：集合模块82项、真实Bot→Gateway/Office/Reader集成72项、permit专项新增7项。覆盖24个镜像资源无需手工粘贴、Owner私聊/群来源、分页、跨群/模型猜测/正文二级链接/后入库链接拒绝、Sheet/Bitable完整tuple矩阵、Wiki映射继承与来源失效，以及lease/队列/access/响应/交付五个等待边界的撤回、撤权、Owner变化、steer和回合结束。另修正中文标点相邻链接遗漏；富文本href按完整URL原子解析，query/fragment中的嵌套URL不能产生额外许可，Bot级反例确认嵌套目标0 OAuth lease/0 SDK出站。OAuth/SDK均为模拟，不访问真实Office资源。
+- 协议与隔离：无飞书凭据的开发配置下，真实Codex `0.159.0` doctor完成握手/登录/8模型检查，ephemeral只读smoke及动态工具注册通过；Group **30** 次、Knowledge **19** 次本地模拟provider对抗调用全部通过，包含新增集合工具的隔离拒绝。本轮未连接候选Shared App Server、未重启服务、未发送真实消息或修改业务数据。补充代码复核未发现阻断项，但不替代新head独立审核。
+- 限制：仅从可信text/post可见字段提取资源，超扫描/输出预算或无法可靠解析时保守拒绝。根链接缺Sheet范围/Bitable子表时仍仅允许原有元数据/有界目录，不宣称读完表格正文；每个来源项与原tuple分别检查，重复链接不替换已开始调用的来源。README已说明这些边界。
+- Delivery / Remaining：同一PR/分支提交推送本轮实现和文档，重新Ready请求独立审核，以GitHub最新head/状态为准。当前运行候选仍是已部署的 `4d159c2`，本轮变更未部署、未Merge。原有直接Docx403/Sheet缺样本等真实验收限制仍保留，不因自动化通过而消除；没有新的真实群/Office验收，也没有远端CI结果或独立PASS声明。
+
+# 历史部署：PR #30 Owner 用户只读路由已启用，真实验收部分完成（2026-10-02）
+
+- Task Source：Human 授权部署独立 PASS 的 `4d159c2d7f61a1bc3e4e548ef94164216bc13c99`，扩展已审核只读策略并进行真实只读验收；不 Merge，不新增 user 写权限。
+- Deployment：候选已安装上述精确审核代码。部署前备份源码、真实配置、服务配置和两份 SQLite；停机检查前后各业务表计数/摘要一致。真实配置和服务配置未改，Shared App Server 保持原进程；机器人重启后确认 Codex 与飞书长连接恢复，启动日志无新错误或 EMFILE。
+- Validation：候选 check、全量 **1067/1067**（0失败/跳过）、真实 Codex doctor/smoke 通过；Group **28** 次与 Knowledge **18** 次模拟 provider 隔离探针通过。未发真实群消息、未进行 Office 写操作。远端 CI 未验证。
+- Exception：首次安装后的测试为1066通过/1失败，原因是本地部署文件清单遗漏测试依赖的 `config.example.json`；自动回滚旧源码并验证连接正常。补齐同一审核版本中的示例文件后，第二次部署及全部验证通过；未修改审核业务代码或真实配置。
+- OAuth / Enable：Human 已在本机 Chrome 完成个人授权，实际绑定 Owner 精确一致。公司无法批准的 `space:document:retrieve` 及 `drive.v1.file.list` 已从本次策略排除，不申请更大替代权限。保留原13 APIs/6 scopes，新增19个已审核固定只读 APIs/8个读取 scopes，共32 APIs/14 scopes；没有新增 user 写权限。新凭据已加密保存在本地忽略目录，密钥在 macOS Keychain；未打印/提交 token。启用前再次备份配置和两份 SQLite，运行配置仅扩展 `ownerOAuth.apis`，其余字段与备份一致；只重启机器人，未改 Shared App Server/服务配置。
+- 使用边界：不能遍历文件夹清单；可按当前Owner可信请求中的明确链接/ID读取其有访问权的具体Docx/Wiki/Sheet/Bitable，仍须相应scope和资源访问权。群里出现链接不会自动授予权限或读取授权；本版需Owner在当前请求中明确给出目标。Sheet单元格需明确range，多维表格记录需明确table及分页范围；元数据成功不等于正文读取成功。
+- 真实只读验收：通过部署版本的 Bot 当前来源守卫、OwnerOfficeReader、OwnerOAuth 和固定 SDK 发起真实飞书读取；本地操作员在 Human 授权选样范围内指定群内既有链接，使用仅内存的来源适配器，未向生产 inbox 写入模拟消息。这不是飞书入站消息端到端验收。Wiki 节点及关联 Docx 正文成功返回20块（has_more=true，仅首个有界页）；Bitable 节点/元数据及指定表成功返回15条记录（total=15，has_more=false）；Drive 单文档元数据成功1项、失败0项，不涉及文件夹遍历。
+- 真实失败：选择并核对历史工具回执中此前 tenant HTTP403/API1770032 的3份 Docx，当前 Owner user 路由均能读取文档元数据，但正文块读取仍返回 HTTP403/API1770032，归类 `resource_denied`。不把元数据成功当正文成功，也不假定这些链接目前对 Owner 可读；需 Human 提供一份当前浏览器可读正文的 Docx 进一步区分资源/接口限制。未切换 tenant 重试。
+- 身份/失败边界：共13次真实 Office API 请求逐次核对 Authorization 为当前 Owner 用户凭据，13/13一致，无其他身份请求；每轮真实 user_info 均与绑定 Owner 一致。合成 user 凭据获取失败及非 Owner 来源探针均在出站前拒绝，0网络请求，无tenant回退。凭据密文快照在验收前后未变，未人为制造到期/refresh rotation。Group/Knowledge隔离沿用同一源码1067项回归与28/18项协议探针，未进行真实普通成员冒充或群发测试。
+- 启用后健康复核：check通过；只读解析配置后执行与doctor/smoke对应的真实协议检查，握手/登录/7模型、ephemeral只读任务及27个动态工具注册通过；不触发模型任务。机器人PID38762、Shared PID743正常，飞书长连接ready；86个部署文件哈希匹配审核源码，plist不变，增量日志无error/EMFILE。本次未重复全量和隔离探针，复用启用前同源码通过证据。
+- 脱敏证据：本地 Git 忽略的 `data/pr30-deployment.json`、`pr30-owner-enable.json`、`pr30-owner-read-acceptance.json` 与两个 additional 验收结果；配置/数据库备份及加密凭据均只在本地。未记录资源正文、Owner标识或任何 access/refresh token 到提交/评论。
+- Remaining / Human Gate：个人OAuth授权与候选启用完成，Wiki/Bitable/Drive元数据真实只读通过；“此前tenant403且Owner可读”的直接Docx成功场景尚未通过，Sheet尚无明确样本及工作表/小范围，已向Human索取。**完整真实验收尚未满足，不标记全部PASS**。现有路由继续保守拒绝无权资源，等待补样本；未进行真实Office写操作、业务文档修改或群发送，未Merge。自然refresh rotation保留后续到期观察。
+
+# 历史返工：PR #30 R2 多资源授权组合（2026-10-01）
+
+- Task Source：[3ea2172 的高风险 NEEDS CHANGES](https://github.com/dccaoxy/codex-feishu-bot/pull/30#issuecomment-5923482731)。同一分支与PR，先退回Draft，不部署、不Merge、不改变线上配置/权限/服务/数据。
+- 根因：R1的平面目标集合只证明各个ID/范围出现过，丢失了资源与子资源的配对关系；上轮1017项未覆盖跨组拼接，不能证明多目标安全。
+- Implementation：按每个根资源保存完整grant tuple，新URL/根ID开启新组，范围和子资源仅属于当前组。授权须匹配同一完整组合，禁止跨组借用；相同根的多组仍分别匹配，不能交叉拼接table/view/record/form或Sheet范围。游离子资源、错误类型、同组重复字段、缺少table父级均保守拒绝。不可省略已有子资源约束扩大正文/记录范围；固定根元数据读取只允许同根元数据，不扩大内容权限。Wiki派生记录仍仅来自当前有效批读的真实节点响应。
+- Validation：check / diff检查通过；专项 **590/590**，完整组合 **1067/1067**，0失败/跳过。本轮新增50项，包括真实Bot→Office/Reader路径的typed/URL两张表四组合矩阵、Docx document/block、Sheets spreadsheet/sheet、Bitable app/table/view或record或form的完整组合矩阵；只放行原始组合，交叉组合均0 OAuth lease/0模拟SDK或HTTP出站。另覆盖相同根的多组、Wiki父节点、省略约束、错误分组与字段顺序。既有身份、scope、生命周期、写入审批回归继续通过。
+- 环境：本轮重跑隔离真实Codex0.159.0 doctor/smoke与Group28次/Knowledge18次模拟provider隔离探针，均通过。无真实Office读取/写入/群发送；开发配置无飞书凭据，未触碰候选Shared App Server和运行服务。
+- Delivery / Remaining：README已补充分组语法、完整组合与元数据边界；推送同一PR新head，更新PR及Issue #29报告后重新Ready请求独立复审。没有远端CI结果，不声称独立PASS。含糊自然语言/历史指代仍要求澄清；真实资源、重新授权及部署/Merge继续保留Human Gate。
+
+# 历史返工：PR #30 R1 绑定可信 Owner 读取目标（2026-10-01）
+
+- Task Source：[e9f04d4 的高风险 NEEDS CHANGES](https://github.com/dccaoxy/codex-feishu-bot/pull/30#issuecomment-5923191153)。沿用 `codex/issue-29-owner-read`，先将同一 PR 退回 Draft；不部署、不 Merge、不改变线上配置、权限、业务数据或服务。
+- 根因：原实现只验证 Owner/生命周期/API/scope，目标完全来自模型参数。原873项通过不能证明读取目标已获当前Owner授权；旧文档中“本次明确目标”的描述缺少宿主强制实现。
+- Implementation：新增宿主只读 permit，依据当前 `run.sourceIds` 的可信 inbox 原文/身份/会话生成，只用最新输入确定读取意图，全部来源仍为失效依赖。精确校验资源ID/类型、Sheet范围、搜索关键词与子资源；在OAuth lease前及排队、凭据等待、SDK出站、响应和交付前检查同一绑定。来源改变、steer、撤回/撤权/Owner变化后旧permit失效。专用Docx、Sheet、资源批读、搜索及通用Office五类读取共用此边界；无可信permit的底层Owner读取也拒绝。
+- 资料隔离：不从模型参数/旧会话/引用/代码块/文档正文/搜索结果生成授权；唯一派生例外为同一有效批读会话中，已授权Wiki节点API实际返回的类型/token。不能将此例外用于猜测其他文档或表格。批量metadata精确绑定每个token与资源类型，不按前缀/子串放行。
+- 保守范围：完整解析当前明确读取命令；歧义或混杂解释要求澄清，不引入LLM授权核对或新的确认卡片。README列出链接、typed ID、子资源、范围和关键词示例。历史指代、“刚才那个”、未明确的表ID/块ID等不会自动借用历史资料；这是本轮明确保留的可用性限制，不声称能解析任意自然语言。
+- Validation：check / diff检查通过；最终全量组合 **1017/1017**，0失败/跳过（较上轮新增144项）。新增真实宿主调用路径回归覆盖五类通用/专用读取、群/私聊、空目标、模型猜测、否定/引用/代码块、目标前缀/查询串/类型/子资源/范围/关键词替换、steer与原文修改/来源移除等待竞态、返回文档中的链接不扩权。未授权目标的模拟传输为0次OAuth lease、0次SDK/HTTP出站；明确请求正常返回。既有scope、刷新、撤回撤权、预算和写入审批回归继续通过；传输使用模拟响应，不冒充真实飞书验收。
+- 环境验证：无飞书凭据的隔离开发配置，真实Codex `0.159.0` doctor握手/登录/8模型及ephemeral smoke通过；Group28次、Knowledge18次本地模拟provider隔离探针通过。未连接/重启候选Shared App Server、未发送真实消息、未读取真实Office资源、未改授权scope或进行OAuth重新绑定。
+- Delivery / Remaining：更新同一PR说明和Issue #29返工报告，推送新head后重新Ready请求独立复审，以GitHub实际状态为准。本地通过不等于独立PASS；真实资源效果、部署、重新授权及自然refresh rotation仍待后续Human Gate。无远端CI结果，不自动Merge。
+
+# 历史开发：Issue #29 统一 Owner 只读身份路由（2026-10-01）
+
+- Task Source：[Issue #29](https://github.com/dccaoxy/codex-feishu-bot/issues/29) 与 Human 当前指令；从最新 main `4f280a9` 建立独立 `codex/issue-29-owner-read`。本轮只开发/回归/PR，不部署、不 Merge，不修改真实配置、授权范围、业务数据或运行服务。
+- 官方能力核实：固定 SDK `1.74.0`，核对 Docx/Wiki/Drive/Sheets/Bitable 的23个SDK只读接口与2个固定只读适配接口，共25项。逐接口用户身份、只读scope替代项和官方来源保存在 `src/owner-office-read-policy.json` / README；`owner-office-read.policy.example.json` 为只读授权示例，包含 offline_access，不会自动应用或增加scope。Drive根目录分页限制、搜索边界及表单实际API边界明确保留。
+- Implementation：Owner启用OAuth时，专用文档读取、单元格读取和通用Office五类读取使用同一固定策略、scope与身份检查；新增明确链接批量读取和关键词搜索。Wiki先解析真实对象类型；元数据成功不冒充正文成功，每项失败单独报告。缺少API授权、scope、SDK支持或用户身份均停止，不回退tenant。未启用OAuth的既有tenant路径及既有写入/Trusted Document审批边界保持不变，无新增写权限。
+- 生命周期与预算：守卫覆盖排队、钥匙串解锁、刷新、SDK出站、响应及交付；修复解锁等待期间授权代际变化的竞态。分页单页默认20/最多50，最多5个资源，单元格最多5000格，元数据批量最多20；返回保留续页标记和截断说明，不递归抓取、不后台索引、不下载附件。Group/Knowledge/普通成员不会获得Owner身份工具；工具数据均标记不可信。
+- Validation：语法check、最终全量组合 **873/873**、Office/OAuth聚焦 **128/128**、Owner宿主边界 **312/312** 通过，0失败/跳过；全量包含新只读84项与宿主36项。覆盖固定SDK真实HTTP序列化（模拟传输）、user凭据选用且无tenant请求、分页/预算、批量部分失败、Wiki类型、错误脱敏、缺scope、撤回/撤权/Owner变化/重新授权等待竞态，以及旧办公写入审批不变。没有把模拟接口结果当作真实飞书验收。
+- 本机协议验证：隔离开发配置无飞书凭据、无Shared App Server连接；真实安装的 Codex `0.159.0` doctor握手/登录/8模型检查及无模型ephemeral smoke通过。Group **28** 次、Knowledge **18** 次本地模拟provider隔离探针通过；未发起真实飞书读取、写入或群消息，未触碰当前候选或长期观察服务。
+- Remaining / Delivery：提交、推送后创建Draft，再转Ready请求独立审核，GitHub实际head/状态为准。新增只读scope/API需后续Human授权、重新OAuth绑定及单独部署后才能做真实资源验收；本轮没有扩大现有grant，也未验证真实五类资源读取或自然refresh rotation。无远端CI结果，不声称独立审核PASS。下一步等待独立审核，保留Human部署/Merge门禁。
+
+# 当前候选：PR #28 审核版本部署与 Owner OAuth 只读验收（2026-09-30）
 
 - Human 明确授权部署及真实只读验收；独立 PASS 对应 `36749d260384151c90a58b8178e025621aed1bab`。精确审核源码已部署；本节仅记录结果，线上不随此文档提交变更。未 Merge。
 - 基线复核：运行目录全部既有受管文件与 PR #24 部署记录一致、配置字节一致。新版本保留已上线 PR #19 自建文档能力；没有部署 PR #27 或扩大 Trusted Document。变更前无 active/queued 群或私聊请求，无运行中的 Knowledge job。

@@ -153,15 +153,15 @@ test('Documents explicit guard fences queued SDK without command or tool async c
 });
 const localTools=['feishu_thread_read','feishu_threads_search','owner_groups',...['status','message','search','context','changes','daily_digest','topics','topic_read','send'].map(n=>'owner_group_'+n),'aegpc_repository_approval',...['create','read','append','update_text','format_text','permissions'].map(n=>'feishu_doc_'+n),'feishu_send_file',...['find','schema','call','permissions','sheet_read','sheet_write'].map(n=>'feishu_office_'+n)];
 for(const tool of localTools)for(const turnId of ['old-turn','',undefined,42])test(`${tool} rejects invalid request turn ${String(turnId)}`,async t=>{
- const {bot,event}=setup(t);bot.onMessage(event);toolRun(bot);let calls=0;const call=async()=>{calls++;return {};};bot.history.read=call;bot.history.search=call;bot.ownerGroups={execute:call};bot.repositoryApproval.execute=call;bot.documents.execute=call;bot.office.execute=call;bot.requestOfficeApproval=async()=>({check(){},consume(){}});bot.sendFile=call;bot.rpc.respond=call;bot.rpc.reject=call;
+ const {bot,event}=setup(t);bot.onMessage(event);toolRun(bot);let calls=0;const call=async()=>{calls++;return {};};bot.history.read=call;bot.history.search=call;bot.ownerGroups={execute:call};bot.repositoryApproval.execute=call;bot.documents.execute=call;bot.office.execute=call;bot.office.needsReadGuard=()=>false;bot.requestOfficeApproval=async()=>({check(){},consume(){}});bot.sendFile=call;bot.rpc.respond=call;bot.rpc.reject=call;
  await bot.serverRequest({id:51,method:'item/tool/call',params:{threadId:'t',turnId,tool,arguments:{}}});assert.equal(calls,0);
 });
 for(const tool of localTools)test(`${tool} result discarded if turn switches during await`,async t=>{
- const {bot,event}=setup(t);bot.onMessage(event);const run=toolRun(bot);let opened,release;const opening=new Promise(r=>{opened=r;});const call=()=>{opened();return new Promise(r=>{release=r;});};bot.history.read=call;bot.history.search=call;bot.ownerGroups={execute:call};bot.repositoryApproval.execute=call;bot.documents.execute=call;bot.office.execute=call;bot.requestOfficeApproval=async()=>({check(){},consume(){}});bot.sendFile=call;const responses=[];bot.rpc.respond=(...a)=>responses.push(a);
+ const {bot,event}=setup(t);bot.onMessage(event);const run=toolRun(bot);let opened,release;const opening=new Promise(r=>{opened=r;});const call=()=>{opened();return new Promise(r=>{release=r;});};bot.history.read=call;bot.history.search=call;bot.ownerGroups={execute:call};bot.repositoryApproval.execute=call;bot.documents.execute=call;bot.office.execute=call;bot.office.needsReadGuard=()=>false;bot.requestOfficeApproval=async()=>({check(){},consume(){}});bot.sendFile=call;const responses=[];bot.rpc.respond=(...a)=>responses.push(a);
  const pending=toolCall(bot,tool);await opening;run.turn='next-turn';release({text:'synthetic'});await pending;assert.deepEqual(responses,[]);
 });
 for(const tool of localTools)test(`${tool} current turn executes and responds once`,async t=>{
- const {bot,event}=setup(t);bot.onMessage(event);toolRun(bot);let calls=0;const call=async()=>{calls++;return {value:'synthetic'};};bot.history.read=call;bot.history.search=call;bot.ownerGroups={execute:call};bot.repositoryApproval.execute=call;bot.documents.execute=call;bot.office.execute=call;bot.requestOfficeApproval=async()=>({check(){},consume(){}});bot.sendFile=call;const responses=[];bot.rpc.respond=(...a)=>responses.push(a);await toolCall(bot,tool);assert.equal(calls,1);assert.equal(responses.length,1);assert.equal(responses[0][1].success,true);
+ const {bot,event}=setup(t);bot.onMessage(event);toolRun(bot);let calls=0;const call=async()=>{calls++;return {value:'synthetic'};};bot.history.read=call;bot.history.search=call;bot.ownerGroups={execute:call};bot.repositoryApproval.execute=call;bot.documents.execute=call;bot.office.execute=call;bot.office.needsReadGuard=()=>false;bot.requestOfficeApproval=async()=>({check(){},consume(){}});bot.sendFile=call;const responses=[];bot.rpc.respond=(...a)=>responses.push(a);await toolCall(bot,tool);assert.equal(calls,1);assert.equal(responses.length,1);assert.equal(responses[0][1].success,true);
 });
 for(const stage of ['queue','response'])test(`office tools invalidate captured Owner identity at ${stage}`,async t=>{
  const {bot,event,config}=setup(t);bot.onMessage(event);const run=toolRun(bot);let validOwner=bot.owner,network=0;const responses=[];bot.rpc.respond=(...a)=>responses.push(a);
@@ -370,4 +370,177 @@ test('uncertain native permission response consumes card before transport',async
  const request=permissionRequest({network:{enabled:true}});await s.bot.serverRequest(request);
  const token=[...s.bot.prompts.keys()][0];await assert.rejects(s.bot.action(s.run.chat,{token,decision:'accept'},'owner'),/transport unknown/);
  await s.bot.serverRequest(request);assert.equal(calls,1);assert.equal(s.bot.prompts.size,0);
+});
+import {OwnerOfficeReader} from '../src/owner-office-read.mjs';
+const readRequests=[
+ ['feishu_office_read_resources',{urls:['https://example.feishu.cn/base/base']}],
+ ['feishu_office_drive_search',{query:'fixture'}],
+ ['feishu_office_sheet_read',{spreadsheetToken:'sheet',range:'tab!A1:A1'}],
+ ['feishu_doc_read',{documentId:'doc'}],
+];
+for(const [tool,args] of readRequests)for(const reason of ['recall','revoke','leave','owner'])for(const stage of ['queue','response'])test(`${tool} Owner pipeline fences ${reason} at ${stage}`,async t=>{
+ const {bot,config,event,groups}=setup(t);event.message.content=JSON.stringify({text:tool==='feishu_office_drive_search'?'搜索「fixture」':'读取 document_id doc, spreadsheet_token sheet, range tab!A1:A1, app_token base'});bot.onMessage(event);toolRun(bot);config.ownerOAuth={enabled:true,apis:[]};
+ let entered,release;const waiting=new Promise(r=>entered=r),responses=[];let calls=0;
+ const pause=async()=>{entered();await new Promise(r=>release=r);};
+ const sdk=async()=>{calls++;if(stage==='response')await pause();return {document:{revision_id:1},private:'PRIVATE_READ_SENTINEL'};};
+ const f={client:{request:sdk,bitable:{v1:{app:{get:sdk}}},docx:{v1:{document:{get:sdk},documentBlock:{list:sdk}}}},call:async(fn,_r,g)=>{if(stage==='queue')await pause();g();return fn();}};
+ const provider={enabled:()=>true,lease:async(_a,g)=>({check:g,access:async()=> 'fixture-user'})};
+ const reader=new OwnerOfficeReader(f,provider);bot.office.reader=reader;bot.office.ownerOAuth=provider;bot.documents=new Documents(f,()=>bot.owner,reader);
+ bot.rpc.respond=(...a)=>responses.push(a);bot.rpc.request=async()=>{};
+ const pending=toolCall(bot,tool,args);await waiting;
+ if(reason==='recall')await bot.cancelOwnerGroup('group','m1');if(reason==='revoke')config.ownerAccess.enabled=false;if(reason==='leave')groups.closed=true;if(reason==='owner')bot.owner='other';
+ release();await pending;assert.equal(calls,stage==='queue'?0:1);assert.ok(!JSON.stringify(responses).includes('PRIVATE_READ_SENTINEL'));
+});
+for(const [tool,args] of readRequests)test(`ordinary member cannot borrow Owner route ${tool}`,async t=>{
+ const {bot,event,store}=setup(t);event.sender.sender_id.open_id='member';bot.onMessage(event);assert.equal(store.pending().length,0);assert.equal(bot.runs.size,0);let entered=0;bot.office.execute=async()=>{entered++;};bot.documents.execute=async()=>{entered++;};bot.rpc.respond=()=>{};
+ await toolCall(bot,tool,args);assert.equal(entered,0);
+});
+
+// R1: use the real inbox -> Bot.serverRequest -> Office/Document -> Reader path.
+const targetReads=[
+ ['feishu_doc_read',{documentId:'private'},'读取 https://example.feishu.cn/docx/private'],
+ ['feishu_office_read_resources',{urls:['https://example.feishu.cn/base/private']},'读取 https://example.feishu.cn/base/private'],
+ ['feishu_office_drive_search',{query:'payroll'},'搜索「payroll」'],
+ ['feishu_office_sheet_read',{spreadsheetToken:'private',range:'tab!A1:A1'},'读取 https://example.feishu.cn/sheets/private 范围 tab!A1:A1'],
+ ['feishu_office_call',{api:'docx.v1.document.rawContent',payload:{path:{document_id:'private'}}},'读取 document_id private'],
+ ['feishu_office_call',{api:'wiki.v2.space.getNode',payload:{params:{token:'private'}}},'读取 https://example.feishu.cn/wiki/private'],
+ ['feishu_office_call',{api:'drive.v1.file.list',payload:{params:{folder_token:'private'}}},'读取 https://example.feishu.cn/drive/folder/private'],
+ ['feishu_office_call',{api:'bitable.v1.appTableRecord.list',payload:{path:{app_token:'private',table_id:'tbl'}}},'读取 https://example.feishu.cn/base/private table_id tbl'],
+];
+function targetFixture(t,text,stage){
+ const s=setup(t);s.event.message.content=JSON.stringify({text});s.bot.onMessage(s.event);s.run=toolRun(s.bot);s.config.ownerOAuth={enabled:true,apis:[]};
+ let calls=0,leases=0,entered,release;const waiting=new Promise(r=>entered=r),responses=[];
+ const sdk=async()=>{calls++;if(stage==='response'){entered();await new Promise(r=>release=r);}return {document:{revision_id:1},items:[{text:'PRIVATE_TARGET_SENTINEL'}],secret:'PRIVATE_TARGET_SENTINEL'};};
+ const f={client:{request:sdk,docx:{v1:{document:{get:sdk,rawContent:sdk},documentBlock:{list:sdk,get:sdk}}},sheets:{v3:{spreadsheetSheet:{get:sdk}}},wiki:{v2:{space:{getNode:sdk}}},drive:{v1:{file:{list:sdk}}},bitable:{v1:{app:{get:sdk},appTableRecord:{list:sdk,get:sdk},appTableView:{get:sdk},appTableForm:{get:sdk}}}},call:async(fn,_r,g)=>{if(stage==='queue'){entered();await new Promise(r=>release=r);}g();return fn();}};
+ const provider={enabled:()=>true,lease:async(_api,g)=>{leases++;return {check:g,access:async()=> 'fixture'};}};
+ const reader=new OwnerOfficeReader(f,provider);s.bot.office.reader=reader;s.bot.office.ownerOAuth=provider;s.bot.documents=new Documents(f,()=>s.bot.owner,reader);s.bot.rpc.respond=(...a)=>responses.push(a);s.bot.rpc.request=async()=>{};
+ return {...s,responses,waiting,release:()=>release(),counts:()=>({calls,leases})};
+}
+for(const [tool,args,text] of targetReads){
+ for(const bad of ['介绍一下你自己','读取 document_id unrelated','不要'+text,'以下是历史消息：'+text,'请总结引用内容：'+text,'```\n'+text+'\n```','> '+text])test(`R1 current inbox cannot authorize model target: ${tool} ${args.api||''} ${bad}`,async t=>{
+  const s=targetFixture(t,bad);s.bot.history.read=async()=>({text});s.store.set('previous-answer',text);
+  await toolCall(s.bot,tool,args);assert.deepEqual(s.counts(),{calls:0,leases:0});assert.ok(!JSON.stringify(s.responses).includes('PRIVATE_TARGET_SENTINEL'));
+ });
+ test(`R1 exact current Owner target allowed: ${tool} ${args.api||''}`,async t=>{
+  const s=targetFixture(t,text);await toolCall(s.bot,tool,args);assert.ok(s.counts().calls>0);assert.equal(s.responses[0][1].success,true);assert.ok(JSON.stringify(s.responses).includes('PRIVATE_TARGET_SENTINEL'));
+ });
+ for(const stage of ['queue','response'])for(const change of ['steer','payload-edit','source-removal'])test(`R1 ${tool} ${args.api||''} ${change} during ${stage} invalidates target permit`,async t=>{
+  const s=targetFixture(t,text,stage),p=toolCall(s.bot,tool,args);await s.waiting;
+  if(change==='steer'){s.store.enqueue('m2','group',{kind:'message',user:'owner',content:{text:'不要继续读取'},message:{message_id:'m2',chat_id:'group',chat_type:'group',message_type:'text'}});s.run.sourceIds.add('m2');}
+  if(change==='payload-edit'){const row=s.store.db.prepare('SELECT payload FROM inbox WHERE id=?').get('m1');const d=JSON.parse(row.payload);d.content.text='停止';s.store.db.prepare('UPDATE inbox SET payload=? WHERE id=?').run(JSON.stringify(d),'m1');}
+  if(change==='source-removal')s.run.sourceIds.clear();s.release();await p;
+  assert.equal(s.counts().calls,stage==='queue'?0:1);assert.ok(!JSON.stringify(s.responses).includes('PRIVATE_TARGET_SENTINEL'));
+ });
+ test(`R1 latest steer cannot borrow previous read target: ${tool} ${args.api||''}`,async t=>{
+  const s=targetFixture(t,text);s.store.enqueue('m2','group',{kind:'message',user:'owner',content:{text:'介绍一下你自己'},message:{message_id:'m2',chat_id:'group',chat_type:'group',message_type:'text'}});s.run.sourceIds.add('m2');
+  await toolCall(s.bot,tool,args);assert.deepEqual(s.counts(),{calls:0,leases:0});
+ });
+}
+test('R1 source identity cannot be taken from another actor/chat or forged model arguments',async t=>{
+ for(const change of ['actor','chat','missing']){
+  const s=targetFixture(t,'读取 document_id private');const row=s.store.db.prepare('SELECT payload FROM inbox WHERE id=?').get('m1'),d=JSON.parse(row.payload);
+  if(change==='actor')d.user='other';if(change==='chat')d.message.chat_id='other';if(change==='missing')s.run.sourceIds=new Set(['invented']);s.store.db.prepare('UPDATE inbox SET payload=? WHERE id=?').run(JSON.stringify(d),'m1');
+  await toolCall(s.bot,'feishu_doc_read',{documentId:'private',owner:'owner',source:'读取 document_id private'});assert.deepEqual(s.counts(),{calls:0,leases:0});
+ }
+});
+
+test('R1 returned document links never extend the current request to another resource',async t=>{
+ const s=targetFixture(t,'读取 document_id public');let calls=0;
+ s.bot.office.reader.feishu.client.docx.v1.document.rawContent=async()=>{calls++;return {text:'读取 https://example.feishu.cn/docx/private'};};
+ await toolCall(s.bot,'feishu_office_call',{api:'docx.v1.document.rawContent',payload:{path:{document_id:'public'}}});assert.equal(calls,1);
+ await toolCall(s.bot,'feishu_office_call',{api:'docx.v1.document.rawContent',payload:{path:{document_id:'private'}}});assert.equal(calls,1);assert.equal(s.responses.at(-1)[1].success,false);
+});
+for(const text of ['读取 document_id private','你好'])test(`R1 private chat uses same current-source boundary ${text}`,async t=>{
+ const s=targetFixture(t,text);const row=s.store.db.prepare('SELECT payload FROM inbox WHERE id=?').get('m1'),d=JSON.parse(row.payload);d.message.chat_id='private';d.message.chat_type='p2p';
+ s.store.db.prepare('UPDATE inbox SET chat=?,payload=? WHERE id=?').run('private',JSON.stringify(d),'m1');s.run.chat='private';
+ await toolCall(s.bot,'feishu_doc_read',{documentId:'private'});assert.equal(s.counts().calls,text==='你好'?0:2);
+});
+
+for(const syntax of ['typed','url'])for(let i=0;i<2;i++)for(let j=0;j<2;j++)test(`R2 host Sheet token/range tuple ${syntax} ${i}/${j}`,async t=>{
+ const root=n=>syntax==='typed'?`spreadsheet_token sheet${n}`:`https://example.feishu.cn/sheets/sheet${n}`;
+ const s=targetFixture(t,`读取 ${root(0)} range tab0!A1:A1, ${root(1)} range tab1!B2:B2`);
+ await toolCall(s.bot,'feishu_office_sheet_read',{spreadsheetToken:`sheet${i}`,range:j?'tab1!B2:B2':'tab0!A1:A1'});
+ assert.deepEqual(s.counts(),{calls:i===j?1:0,leases:i===j?1:0});assert.equal(s.responses[0][1].success,i===j);
+});
+for(const [api,root,child] of [['docx.v1.documentBlock.get','document_id','block_id'],['sheets.v3.spreadsheetSheet.get','spreadsheet_token','sheet_id']])for(let i=0;i<2;i++)for(let j=0;j<2;j++)test(`R2 host subresource tuple ${api} ${i}/${j}`,async t=>{
+ const s=targetFixture(t,`读取 ${root} root0 ${child} child0, ${root} root1 ${child} child1`);
+ await toolCall(s.bot,'feishu_office_call',{api,payload:{path:{[root]:`root${i}`,[child]:`child${j}`}}});
+ assert.deepEqual(s.counts(),{calls:i===j?1:0,leases:i===j?1:0});assert.equal(s.responses[0][1].success,i===j);
+});
+for(const [api,child] of [['bitable.v1.appTableView.get','view_id'],['bitable.v1.appTableRecord.get','record_id'],['bitable.v1.appTableForm.get','form_id']])for(let i=0;i<2;i++)for(let j=0;j<2;j++)for(let k=0;k<2;k++)test(`R2 host Bitable triple ${child} ${i}/${j}/${k}`,async t=>{
+ const s=targetFixture(t,`读取 https://example.feishu.cn/base/base0 table_id tbl0 ${child} sub0, app_token base1 table_id tbl1 ${child} sub1`),ok=i===j&&j===k;
+ await toolCall(s.bot,'feishu_office_call',{api,payload:{path:{app_token:`base${i}`,table_id:`tbl${j}`,[child]:`sub${k}`}}});
+ assert.deepEqual(s.counts(),{calls:ok?1:0,leases:ok?1:0});assert.equal(s.responses[0][1].success,ok);
+});
+
+for(const oauthEnabled of [false,true])test(`Issue37 keeps trusted Owner post Office writes/find/schema independent of read grammar: OAuth=${oauthEnabled}`,async t=>{
+ const s=officeFixture(t);s.config.ownerOAuth={enabled:oauthEnabled,apis:[]};
+ const row=s.store.db.prepare('SELECT payload FROM inbox WHERE id=?').get('m1'),d=JSON.parse(row.payload);d.message.message_type='post';
+ s.store.db.prepare('UPDATE inbox SET payload=? WHERE id=?').run(JSON.stringify(d),'m1');
+ const results=[];s.bot.rpc.respond=(id,result)=>results.push(result);
+ await (await officePending(s)).promise;assert.equal(s.writes.length,1);assert.equal(results.at(-1).success,true);
+ await toolCall(s.bot,'feishu_office_find',{query:'docx'});assert.equal(results.at(-1).success,true);
+ await toolCall(s.bot,'feishu_office_schema',{api:'docx.v1.document.get'});assert.equal(results.at(-1).success,true);
+});
+
+for(const text of ['请帮我读取 https://example.feishu.cn/docx/private','请将 https://example.feishu.cn/docx/private 的标题改为新标题'])for(const tool of ['feishu_doc_read','feishu_office_call'])test(`Issue37 current Owner preparation ${tool}: ${text}`,async t=>{
+ const s=targetFixture(t,text);await toolCall(s.bot,tool,tool==='feishu_doc_read'?{documentId:'private'}:{api:'docx.v1.documentBlock.list',payload:{path:{document_id:'private'}}});
+ assert.equal(s.responses.at(-1)[1].success,true);assert.equal(s.counts().calls,tool==='feishu_doc_read'?2:1);
+ const before=s.counts();await toolCall(s.bot,'feishu_office_call',{api:'docx.v1.documentBlock.list',payload:{path:{document_id:'other'}}});assert.equal(s.responses.at(-1)[1].success,false);assert.deepEqual(s.counts(),before);
+});
+for(const stage of ['queue','response'])for(const change of ['steer','recall','owner'])test(`Issue37 edit preparation invalidated by ${change} during ${stage}`,async t=>{
+ const s=targetFixture(t,'请将 https://example.feishu.cn/docx/private 的标题改为新标题',stage);
+ const pending=toolCall(s.bot,'feishu_office_call',{api:'docx.v1.documentBlock.get',payload:{path:{document_id:'private',block_id:'block'}}});await s.waiting;
+ if(change==='steer'){s.store.enqueue('m2','group',{kind:'message',user:'owner',content:{text:'停止'},message:{message_id:'m2',chat_id:'group',chat_type:'group',message_type:'text'}});s.run.sourceIds.add('m2');}
+ if(change==='recall')s.store.mark('m1','cancelled');if(change==='owner')s.bot.owner='other';s.release();await pending;
+ assert.equal(s.counts().calls,stage==='queue'?0:1);assert.ok(!JSON.stringify(s.responses).includes('PRIVATE_TARGET_SENTINEL'));
+});
+
+for(const text of [
+ '修改 https://example.feishu.cn/docx/private 的标题，但不要读取正文',
+ '请将 https://example.feishu.cn/docx/private 的标题改为新标题，禁止读取正文',
+ '修改 https://example.feishu.cn/docx/private 的 block_id b',
+])for(const tool of ['feishu_doc_read','feishu_office_call'])test(`Issue37 restricted edit has zero outbound ${tool}: ${text}`,async t=>{
+ const s=targetFixture(t,text);
+ await toolCall(s.bot,tool,tool==='feishu_doc_read'?{documentId:'private'}:{api:'docx.v1.document.rawContent',payload:{path:{document_id:'private'}}});
+ assert.equal(s.responses.at(-1)[1].success,false);assert.deepEqual(s.counts(),{calls:0,leases:0});
+});
+
+function setReadPost(s,content){
+ const d=JSON.parse(s.store.db.prepare('SELECT payload FROM inbox WHERE id=?').get('m1').payload);
+ d.message.message_type='post';d.content=content;d.message.content=JSON.stringify(content);
+ s.store.db.prepare('UPDATE inbox SET payload=? WHERE id=?').run(JSON.stringify(d),'m1');
+}
+for(const [tool,args,text] of [targetReads[0],targetReads[4],targetReads[5]])for(const locale of [false,true])test(`Issue37 trusted post read ${tool}/${args.api||''} locale=${locale}`,async t=>{
+ const s=targetFixture(t,text),post={title:'',content:[[{tag:'text',text}]]};setReadPost(s,locale?{zh_cn:post}:post);
+ await toolCall(s.bot,tool,args);assert.equal(s.responses.at(-1)[1].success,true);assert.ok(s.counts().calls>0);
+ const before=s.counts();await toolCall(s.bot,'feishu_doc_read',{documentId:'other'});assert.equal(s.responses.at(-1)[1].success,false);assert.deepEqual(s.counts(),before);
+});
+test('Issue37 post hyperlink uses its explicit target, not its display label',async t=>{
+ const s=targetFixture(t,'unused');setReadPost(s,{en_us:{title:'',content:[[{tag:'text',text:'读取 '},{tag:'a',text:'文档标题',href:'https://example.feishu.cn/docx/private'}]]}});
+ await toolCall(s.bot,'feishu_doc_read',{documentId:'private'});assert.equal(s.responses.at(-1)[1].success,true);
+});
+for(const priorType of ['post','image'])test(`Issue37 latest text steer replaces prior ${priorType} intent but retains recall dependency`,async t=>{
+ const s=targetFixture(t,'unused');setReadPost(s,{title:'历史资料',content:[[{tag:'text',text:'不要读取旧文档'}]]});
+ if(priorType==='image'){const d=JSON.parse(s.store.db.prepare('SELECT payload FROM inbox WHERE id=?').get('m1').payload);d.message.message_type='image';d.content={image_key:'fixture'};s.store.db.prepare('UPDATE inbox SET payload=? WHERE id=?').run(JSON.stringify(d),'m1');}
+ s.store.enqueue('m2','group',{kind:'message',user:'owner',content:{text:'读取 document_id private'},message:{message_id:'m2',chat_id:'group',chat_type:'group',message_type:'text'}});s.run.sourceIds.add('m2');
+ await toolCall(s.bot,'feishu_doc_read',{documentId:'private'});assert.equal(s.responses.at(-1)[1].success,true);assert.equal(s.counts().calls,2);
+ const before=s.responses.length;s.store.db.prepare("UPDATE inbox SET state='cancelled' WHERE id=?").run('m1');await toolCall(s.bot,'feishu_doc_read',{documentId:'private'});assert.ok(!s.responses.slice(before).some(([,r])=>r.success));assert.equal(s.counts().calls,2);
+});
+for(const content of [
+ {content:[[{tag:'text',text:'不要读取 document_id private'}]]},
+ {title:'引用',content:[[{tag:'text',text:'读取 document_id private'}]]},
+ {content:[[{tag:'text',text:'读取 document_id private'}],[{tag:'text',text:'不要继续'}]]},
+ {content:[[{tag:'text',text:'读取 document_id private'},{tag:'img',image_key:'fixture'}]]},
+ {content:'malformed'},
+])test(`Issue37 post ambiguity/malformed fails closed ${JSON.stringify(content)}`,async t=>{
+ const s=targetFixture(t,'unused');setReadPost(s,content);await toolCall(s.bot,'feishu_doc_read',{documentId:'private'});assert.equal(s.responses.at(-1)[1].success,false);assert.deepEqual(s.counts(),{calls:0,leases:0});
+});
+for(const stage of ['queue','response'])for(const change of ['recall','owner','payload'])test(`Issue37 post keeps ${change} guard during ${stage}`,async t=>{
+ const s=targetFixture(t,'unused',stage);setReadPost(s,{content:[[{tag:'text',text:'读取 document_id private'}]]});
+ const pending=toolCall(s.bot,'feishu_doc_read',{documentId:'private'});await s.waiting;
+ if(change==='recall')s.store.db.prepare("UPDATE inbox SET state='cancelled' WHERE id=?").run('m1');
+ if(change==='owner')s.bot.owner='other';
+ if(change==='payload')setReadPost(s,{content:[[{tag:'text',text:'读取 document_id other'}]]});
+ s.release();await pending;assert.ok(!s.responses.some(([,r])=>r.success));assert.equal(s.counts().calls,stage==='queue'?0:1);assert.ok(!JSON.stringify(s.responses).includes('PRIVATE_TARGET_SENTINEL'));
 });

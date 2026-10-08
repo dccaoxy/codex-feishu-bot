@@ -1,0 +1,187 @@
+{
+  "sdkVersion": "1.74.0",
+  "verifiedDate": "2026-10-01",
+  "apis": {
+    "docx.v1.document.get": {
+      "scopes": [
+        "docx:document:readonly",
+        "docx:document"
+      ],
+      "documentation": "https://open.feishu.cn/document/server-docs/docs/docs/docx-v1/document/get.md"
+    },
+    "docx.v1.document.rawContent": {
+      "scopes": [
+        "docx:document:readonly",
+        "docx:document"
+      ],
+      "documentation": "https://open.feishu.cn/document/server-docs/docs/docs/docx-v1/document/raw_content"
+    },
+    "docx.v1.documentBlock.list": {
+      "scopes": [
+        "docx:document:readonly",
+        "docx:document"
+      ],
+      "documentation": "https://open.feishu.cn/document/server-docs/docs/docs/docx-v1/document/list.md",
+      "page": true
+    },
+    "docx.v1.documentBlock.get": {
+      "scopes": [
+        "docx:document:readonly",
+        "docx:document"
+      ],
+      "documentation": "https://open.feishu.cn/document/server-docs/docs/docs/docx-v1/document-block/get.md"
+    },
+    "wiki.v2.space.get": {
+      "scopes": [
+        "wiki:space:read",
+        "wiki:wiki:readonly"
+      ],
+      "documentation": "https://open.feishu.cn/document/server-docs/docs/wiki-v2/space/get"
+    },
+    "wiki.v2.space.list": {
+      "scopes": [
+        "wiki:space:retrieve",
+        "wiki:wiki:readonly"
+      ],
+      "documentation": "https://open.feishu.cn/document/server-docs/docs/wiki-v2/space/list",
+      "page": true
+    },
+    "wiki.v2.space.getNode": {
+      "scopes": [
+        "wiki:node:read",
+        "wiki:wiki:readonly",
+        "wiki:wiki"
+      ],
+      "documentation": "https://open.feishu.cn/document/server-docs/docs/wiki-v2/space-node/get_node.md"
+    },
+    "wiki.v2.spaceNode.list": {
+      "scopes": [
+        "wiki:node:retrieve",
+        "wiki:wiki:readonly"
+      ],
+      "documentation": "https://open.feishu.cn/document/server-docs/docs/wiki-v2/space-node/list",
+      "page": true
+    },
+    "drive.v1.file.list": {
+      "scopes": [
+        "space:document:retrieve",
+        "drive:drive:readonly"
+      ],
+      "documentation": "https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/drive-v1/file/list",
+      "page": true
+    },
+    "drive.v1.meta.batchQuery": {
+      "scopes": [
+        "drive:drive.metadata:readonly"
+      ],
+      "documentation": "https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/drive-v1/meta/batch_query"
+    },
+    "sheets.v3.spreadsheet.get": {
+      "scopes": [
+        "sheets:spreadsheet:readonly"
+      ],
+      "documentation": "https://open.feishu.cn/document/server-docs/docs/sheets-v3/spreadsheet/get"
+    },
+    "sheets.v3.spreadsheetSheet.get": {
+      "scopes": [
+        "sheets:spreadsheet:read",
+        "sheets:spreadsheet:readonly"
+      ],
+      "documentation": "https://open.feishu.cn/document/server-docs/docs/sheets-v3/spreadsheet-sheet/get"
+    },
+    "sheets.v3.spreadsheetSheet.query": {
+      "scopes": [
+        "sheets:spreadsheet:read",
+        "sheets:spreadsheet:readonly"
+      ],
+      "documentation": "https://open.feishu.cn/document/server-docs/docs/sheets-v3/spreadsheet-sheet/query"
+    },
+    "bitable.v1.app.get": {
+      "scopes": [
+        "base:app:read",
+        "bitable:app:readonly"
+      ],
+      "documentation": "https://open.feishu.cn/document/server-docs/docs/bitable-v1/app/get"
+    },
+    "bitable.v1.appTable.list": {
+      "scopes": [
+        "base:table:read",
+        "bitable:app:readonly"
+      ],
+      "documentation": "https://open.feishu.cn/document/server-docs/docs/bitable-v1/app-table/list",
+      "page": true
+    },
+    "bitable.v1.appTableField.list": {
+      "scopes": [
+        "base:field:read",
+        "bitable:app:readonly"
+      ],
+      "documentation": "https://open.feishu.cn/document/server-docs/docs/bitable-v1/app-table-field/list",
+      "page": true
+    },
+    "bitable.v1.appTableView.list": {
+      "scopes": [
+        "base:view:read",
+        "bitable:app:readonly"
+      ],
+      "documentation": "https://open.feishu.cn/document/server-docs/docs/bitable-v1/app-table-view/list",
+      "page": true
+    },
+    "bitable.v1.appTableView.get": {
+      "scopes": [
+        "base:view:read",
+        "bitable:app:readonly"
+      ],
+      "documentation": "https://open.feishu.cn/document/server-docs/docs/bitable-v1/app-table-view/get"
+    },
+    "bitable.v1.appTableRecord.list": {
+      "scopes": [
+        "bitable:app:readonly"
+      ],
+      "documentation": "https://open.feishu.cn/document/server-docs/docs/bitable-v1/app-table-record/list",
+      "page": true
+    },
+    "bitable.v1.appTableRecord.get": {
+      "scopes": [
+        "bitable:app:readonly"
+      ],
+      "documentation": "https://open.feishu.cn/document/server-docs/docs/bitable-v1/app-table-record/get"
+    },
+    "bitable.v1.appTableForm.get": {
+      "scopes": [
+        "base:form:read",
+        "bitable:app:readonly"
+      ],
+      "documentation": "https://open.feishu.cn/document/server-docs/docs/bitable-v1/form/get"
+    },
+    "bitable.v1.appTableFormField.list": {
+      "scopes": [
+        "base:form:read",
+        "bitable:app:readonly"
+      ],
+      "documentation": "https://open.feishu.cn/document/server-docs/docs/bitable-v1/form/list",
+      "page": true
+    },
+    "feishu_office_sheet_read": {
+      "scopes": [
+        "sheets:spreadsheet:readonly"
+      ],
+      "documentation": "https://open.feishu.cn/document/server-docs/docs/sheets-v3/data-operation/reading-a-single-range"
+    },
+    "feishu_office_drive_search": {
+      "scopes": [
+        "search:docs:read",
+        "drive:drive:readonly"
+      ],
+      "documentation": "https://open.feishu.cn/document/server-docs/docs/drive-v1/search/document-search"
+    },
+    "docx.v1.documentBlockChildren.get": {
+      "scopes": [
+        "docx:document:readonly",
+        "docx:document"
+      ],
+      "documentation": "https://open.feishu.cn/document/server-docs/docs/docs/docx-v1/document-block/get-2.md",
+      "page": true
+    }
+  }
+}
