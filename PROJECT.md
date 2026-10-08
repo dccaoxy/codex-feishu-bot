@@ -1,3 +1,9 @@
+# 当前返工：Issue #37 Wiki getNode 等价 scope（2026-10-08）
+
+- **Task Source / Implementation**：最新P2要求补齐已有wiki:wiki。已实时读取官方get_node.md权限表，固定getNode策略接受wiki:node:read、wiki:wiki:readonly、wiki:wiki任一；保留精确匹配及持续租约检查，不新增OAuth申请或写API。
+- **Validation**：新增真实OwnerOAuth类配合合成记录，覆盖三种Wiki scope的专用工具/Office Call、两种Docx scope与三种Wiki scope组合的群镜像集合、授权撤销零出站及写API拒绝。专项209/209通过；无飞书凭据临时副本doctor及无模型smoke退出0；全量1470/1470（零失败/取消/跳过）、check/diff通过；独立审核以PR准确head回执为准。
+- **Remaining / 交接**：沿用原分支及Draft PR #38，不Merge、不部署、不读真实飞书、不调用模型、不改真实scope或生产配置。真实403与候选验收未验证；原生Group/Knowledge固定版本不匹配边界保持。提交推送与审核结论见准确head远端回执。
+
 # 当前返工：Issue #37 Docx 全读取路径 scope（2026-10-08）
 
 - **Task Source / Implementation**：最新P1指出上轮只修rawContent遗漏元数据/blocks。已实时读取四个官方Markdown权限表，元数据、blocks列表、单块、子块均明确接受docx:document或docx:document:readonly任一；逐接口补齐固定策略与文档链接，不修改OAuth申请、生产配置或写权限。

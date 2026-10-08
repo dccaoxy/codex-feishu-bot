@@ -49,9 +49,10 @@
     "wiki.v2.space.getNode": {
       "scopes": [
         "wiki:node:read",
-        "wiki:wiki:readonly"
+        "wiki:wiki:readonly",
+        "wiki:wiki"
       ],
-      "documentation": "https://open.feishu.cn/document/server-docs/docs/wiki-v2/space-node/get_node"
+      "documentation": "https://open.feishu.cn/document/server-docs/docs/wiki-v2/space-node/get_node.md"
     },
     "wiki.v2.spaceNode.list": {
       "scopes": [

@@ -259,9 +259,9 @@ test('Issue37 collection diagnosis retains boundary, exact Wiki object and sourc
  f.change('source-recall');await f.call('feishu_office_diagnose_document',{url:link('wiki','node')});assert.equal(direct,1);
 });
 
-for(const scope of ['docx:document','docx:document:readonly'])test(`mirrored Docx/Wiki collection with real OAuth lease and ${scope}`,async t=>{
+for(const scope of ['docx:document','docx:document:readonly'])for(const wikiScope of ['wiki:node:read','wiki:wiki:readonly','wiki:wiki'])test(`mirrored Docx/Wiki collection with real OAuth lease and ${scope}/${wikiScope}`,async t=>{
  const {OwnerOAuth,binding}=await import('../src/owner-oauth.mjs');
- const f=fixture(t);let record={binding:binding(f.config,'owner'),generation:'fixture',allowedApis:Object.keys(OWNER_READ_APIS),scopes:[scope,'wiki:wiki:readonly'],accessToken:'fixture-user-token',expiresAt:Date.now()+3600000};
+ const f=fixture(t);let record={binding:binding(f.config,'owner'),generation:'fixture',allowedApis:Object.keys(OWNER_READ_APIS),scopes:[scope,wikiScope],accessToken:'fixture-user-token',expiresAt:Date.now()+3600000};
  const oauth=new OwnerOAuth(f.config,()=>f.bot.owner,{vault:{unlock:async()=>null,read:()=>record,locked:async fn=>fn()}});
  f.bot.office.reader.oauth=oauth;f.bot.office.ownerOAuth=oauth;
  f.add('a','doc-source',link('docx','doc'));f.add('a','wiki-source',link('wiki','node'));f.add('b','other-source',link('docx','other'));

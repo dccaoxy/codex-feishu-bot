@@ -56,7 +56,7 @@ test('fixed policy matches fixed SDK, contains no write or permission endpoints'
  const client=new Client({appId:'fixture',appSecret:'fixture',logger:{info(){},error(){},warn(){},debug(){},trace(){}}});
  assert.deepEqual(Object.keys(OWNER_READ_APIS).sort(),Object.keys(payloads).sort());
  for(const [api,rule] of Object.entries(OWNER_READ_APIS)){
-  assert.ok(rule.scopes.every(s=>/:read(?:only)?$|:retrieve$/.test(s)||(['docx.v1.document.get','docx.v1.document.rawContent','docx.v1.documentBlock.list','docx.v1.documentBlock.get','docx.v1.documentBlockChildren.get'].includes(api)&&s==='docx:document')));
+  assert.ok(rule.scopes.every(s=>/:read(?:only)?$|:retrieve$/.test(s)||(['docx.v1.document.get','docx.v1.document.rawContent','docx.v1.documentBlock.list','docx.v1.documentBlock.get','docx.v1.documentBlockChildren.get'].includes(api)&&s==='docx:document')||(api==='wiki.v2.space.getNode'&&s==='wiki:wiki')));
   if(OWNER_READ_SPECIAL.includes(api))continue;const def=officeDefinition(api);assert.ok(def.tokens.includes('user'));assert.ok(def.method==='GET'||api==='drive.v1.meta.batchQuery');assert.equal(typeof api.split('.').reduce((v,k)=>v[k],client),'function');
  }
 });
@@ -178,4 +178,22 @@ for(const scope of ['docx:document','docx:document:readonly'])test(`dedicated re
  let direct=0;f.reader.fetcher=async(url,options)=>{direct++;assert.equal(url.pathname,'/open-apis/docx/v1/documents/doc/blocks');assert.equal(options.method,'GET');assert.equal(options.headers.Authorization,'Bearer fixture-uat');return new Response(JSON.stringify({code:0,data:{items:[],has_more:false}}));};
  const r=await f.reader.diagnose('https://example.feishu.cn/docx/doc',guard);assert.equal(r.classification,'both_succeeded');assert.equal(r.A.scope,'granted');assert.equal(r.B.scope,'granted');assert.equal(direct,1);assert.equal(f.calls.length,3);
  f.vault.write(f.key,{...f.record,scopes:[]});const denied=await f.reader.diagnose('https://example.feishu.cn/docx/doc',guard);assert.equal(denied.classification,'scope');assert.equal(denied.A.outbound,false);assert.equal(denied.B.outbound,false);assert.equal(direct,1);assert.equal(f.calls.length,3);
+});
+
+for(const scope of ['wiki:node:read','wiki:wiki:readonly','wiki:wiki'])test(`Wiki dedicated and Office read accept existing ${scope} without changing grants`,async t=>{
+ const f=await fixture(t),record={...f.record,scopes:[scope,'docx:document']};f.vault.write(f.key,record);
+ f.outputs.set('wiki.v2.space.getNode',{node:{obj_type:'docx',obj_token:'resolved'}});f.outputs.set('docx.v1.document.get',{document:{revision_id:3}});
+ const docs=new Documents(f.f,()=> 'owner',f.reader),g=()=>trusted('读取 https://example.feishu.cn/wiki/node');
+ const r=await docs.execute('feishu_doc_read',{documentId:'https://example.feishu.cn/wiki/node'},g());assert.equal(r.documentId,'resolved');assert.equal(r.identity,'owner-user');
+ const officeGuard=g();await f.office.execute('feishu_office_call',{api:'wiki.v2.space.getNode',payload:{params:{token:'node'}}},officeGuard);
+ await f.office.execute('feishu_office_call',{api:'docx.v1.documentBlock.list',payload:{path:{document_id:'resolved'}}},officeGuard);
+ assert.equal(f.calls.length,5);assert.ok(f.calls.every(c=>c.opts.lark[Reflect.ownKeys(c.opts.lark)[0]]==='fixture-uat'));assert.deepEqual(f.vault.read(f.key),record);
+ await assert.rejects(f.reader.session(g()).call('wiki.v2.spaceNode.create',{path:{space_id:'123'},data:{obj_type:'docx'}}));assert.equal(f.calls.length,5);
+ f.vault.write(f.key,{...record,scopes:['docx:document']});
+ await assert.rejects(docs.execute('feishu_doc_read',{documentId:'https://example.feishu.cn/wiki/node'},g()),e=>e.readCode==='scope_missing');assert.equal(f.calls.length,5);
+});
+test('Wiki equivalent grant is rechecked before transport',async t=>{
+ const f=await fixture(t);f.vault.write(f.key,{...f.record,scopes:['wiki:wiki']});
+ f.f.call=async fn=>{f.vault.write(f.key,{...f.record,scopes:['wiki:wiki:write']});return fn();};
+ await assert.rejects(f.reader.session(trusted('读取 token node')).call('wiki.v2.space.getNode',{params:{token:'node'}}),e=>e.readCode==='scope_missing');assert.equal(f.calls.length,0);
 });
